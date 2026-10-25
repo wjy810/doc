@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>场景与环境：地形、植被与雾</title>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; color: #222; }
+  #stage { width: 640px; height: 360px; border: 1px solid #ddd; }
+</style>
+</head>
+<body>
+<div id="stage" role="img" aria-label="由噪声生成的起伏地形：低处是水面和沙地，中间是草地和树林，高处是岩石与积雪，远处被雾气笼罩。"></div>
+<p id="info"></p>
+<script type="module">
+import * as THREE from 'three';
+
+// 可设种子的随机数与值噪声（与《创意编程与二维图形》第 06 章相同）
+function mulberry32(seed) {
+  return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+function makeNoise(rand) {
+  const perm = Array.from({ length: 256 }, (_, i) => i);
+  for (let i = 255; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [perm[i], perm[j]] = [perm[j], perm[i]]; }
+  const values = Array.from({ length: 256 }, () => rand());
+  const at = (x, y) => values[perm[(perm[x & 255] + y) & 255]];
+  const s = t => t * t * (3 - 2 * t);
+  return (x, y) => {
+    const xi = Math.floor(x), yi = Math.floor(y), u = s(x - xi), v = s(y - yi);
+    const a = at(xi, yi), b = at(xi + 1, yi), c = at(xi, yi + 1), d = at(xi + 1, yi + 1);
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  };
+}
+const rand = mulberry32(11);
+const noise = makeNoise(rand);
+// 分形噪声：大尺度决定山的走势，小尺度增加细节
+const height = (x, z) => {
+  let h = 0, amp = 1, freq = 0.08, sum = 0;
+  for (let o = 0; o < 4; o++) { h += noise(x * freq + 50, z * freq + 50) * amp; sum += amp; amp *= 0.5; freq *= 2; }
+  return Math.pow(h / sum, 1.6) * 9 - 1;
+};
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(640, 360);
+document.getElementById('stage').appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const sky = new THREE.Color('#cfe0f2');
+scene.background = sky;
+scene.fog = new THREE.Fog(sky, 25, 70);        // 雾：远处逐渐融入天空，增加空间深度
+scene.add(new THREE.HemisphereLight('#ffffff', '#6b7a5a', 1.6));
+const sun = new THREE.DirectionalLight('#fff3dd', 2.2);
+sun.position.set(-20, 30, 10);
+scene.add(sun);
+
+// 地形：把平面网格的每个顶点抬高到噪声决定的高度，并按高度着色
+const SIZE = 80, SEG = 160;
+const geo = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
+geo.rotateX(-Math.PI / 2);
+const pos = geo.attributes.position, colors = [];
+const palette = [[-0.4, '#3f7cc6'], [0.1, '#e3d3a3'], [2.5, '#79a85a'], [4.5, '#4f7a3e'], [6, '#8a8178'], [99, '#f4f4f4']];
+for (let i = 0; i < pos.count; i++) {
+  const h = height(pos.getX(i), pos.getZ(i));
+  pos.setY(i, Math.max(h, -0.4));               // 低于水面的部分压平为水面
+  const c = new THREE.Color(palette.find(([limit]) => h < limit)[1]);
+  colors.push(c.r, c.g, c.b);
+}
+geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+geo.computeVertexNormals();
+scene.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true })));
+
+// 植被：用实例化网格一次绘制数百棵树，只在草地高度范围内种植
+const trees = [];
+while (trees.length < 400) {
+  const x = (rand() - 0.5) * SIZE * 0.9, z = (rand() - 0.5) * SIZE * 0.9, h = height(x, z);
+  if (h > 1.2 && h < 4.2) trees.push([x, h, z, 0.7 + rand() * 0.6]);
+}
+const crown = new THREE.InstancedMesh(new THREE.ConeGeometry(0.6, 1.8, 7), new THREE.MeshStandardMaterial({ color: '#2f5d34', flatShading: true }), trees.length);
+const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.12, 0.15, 0.6, 5), new THREE.MeshStandardMaterial({ color: '#6b4f36' }), trees.length);
+const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
+trees.forEach(([x, h, z, k], i) => {
+  s.set(k, k, k);
+  crown.setMatrixAt(i, m.compose(p.set(x, h + 1.3 * k, z), q, s));
+  trunk.setMatrixAt(i, m.compose(p.set(x, h + 0.3 * k, z), q, s));
+});
+scene.add(crown, trunk);
+
+const camera = new THREE.PerspectiveCamera(50, 640 / 360, 0.1, 200);
+camera.position.set(0, 16, 34);
+camera.lookAt(0, 2, 0);
+renderer.render(scene, camera);
+document.getElementById('info').textContent =
+  `地形 ${geo.index.count / 3} 个三角形；${trees.length} 棵树只用了 2 次绘制调用（实例化）；本帧绘制调用 ${renderer.info.render.calls} 次。`;
+</script>
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三维坐标与父子变换</title>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; color: #222; }
+  #stage { width: 640px; height: 360px; border: 1px solid #ddd; }
+</style>
+</head>
+<body>
+<div id="stage" role="img" aria-label="三维坐标与父子关系：转盘带着支臂旋转，支臂末端的球带着小卫星旋转。红、绿、蓝箭头分别是每个物体自己的 x、y、z 轴。"></div>
+<p>红色箭头是 x 轴，绿色是 y 轴（向上），蓝色是 z 轴（朝向观看者）。子物体跟随父物体一起移动和旋转。</p>
+<script type="module">
+import * as THREE from 'three';
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(stage.clientWidth, stage.clientHeight);
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#ffffff');
+const camera = new THREE.PerspectiveCamera(45, stage.clientWidth / stage.clientHeight, 0.1, 100);
+camera.position.set(4.2, 3.4, 5.6);
+camera.lookAt(1.2, 0.4, 0);
+scene.add(new THREE.HemisphereLight('#ffffff', '#888888', 2.5));
+scene.add(new THREE.GridHelper(10, 10, '#bbbbbb', '#e5e5e5'));
+scene.add(new THREE.AxesHelper(2.5));                // 世界坐标轴
+
+const mat = color => new THREE.MeshStandardMaterial({ color, roughness: 0.6 });
+
+// 父物体：转盘（位于世界原点）
+const turntable = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.2, 48), mat('#cfd6e4'));
+scene.add(turntable);
+
+// 子物体：支臂，挂在转盘上，位置是相对于转盘的
+const arm = new THREE.Group();
+arm.position.set(0, 0.1, 0);
+turntable.add(arm);
+const bar = new THREE.Mesh(new THREE.BoxGeometry(3, 0.12, 0.12), mat('#8a94a6'));
+bar.position.x = 1.5;
+arm.add(bar);
+
+// 孙物体：支臂末端的球，以及绕球旋转的小卫星
+const planet = new THREE.Mesh(new THREE.SphereGeometry(0.45, 32, 16), mat('#2f6fdb'));
+planet.position.set(3, 0.5, 0);
+arm.add(planet);
+planet.add(new THREE.AxesHelper(1.2));               // 球自己的坐标轴
+const moonPivot = new THREE.Group();
+planet.add(moonPivot);
+const moon = new THREE.Mesh(new THREE.SphereGeometry(0.15, 24, 12), mat('#e4572e'));
+moon.position.x = 0.9;
+moonPivot.add(moon);
+
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const timer = new THREE.Timer();
+timer.connect(document);   // 页面不可见时暂停计时
+renderer.setAnimationLoop(time => {
+  timer.update(time);
+  const dt = reduce ? 0 : timer.getDelta();
+  turntable.rotation.y += dt * 0.5;                  // 转盘旋转，支臂、球和卫星都跟着转
+  planet.rotation.y += dt * 1.5;                     // 球自转，卫星跟着转
+  moonPivot.rotation.z += dt * 2;                    // 卫星绕球公转
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

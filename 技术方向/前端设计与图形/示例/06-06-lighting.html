@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>灯光与环境：三种布光的比较</title>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; color: #222; }
+  #stage { position: relative; width: 642px; height: 240px; }
+  .cap { display: flex; width: 642px; }
+  .cap span { flex: 1; text-align: center; }
+</style>
+</head>
+<body>
+<div id="stage" role="img" aria-label="同一个物体在三种布光下的效果：只有环境光时显得扁平；三点布光有明暗与影子；环境贴图照明有柔和的反射。"></div>
+<div class="cap"><span>只有均匀的环境光</span><span>三点布光与阴影</span><span>环境贴图照明</span></div>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const W = 642, H = 240, VW = W / 3;
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(W, H);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;   // 柔和程度由 shadow.radius 等参数控制
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.getElementById('stage').appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#f2f3f5');
+const camera = new THREE.PerspectiveCamera(35, VW / H, 0.1, 100);
+camera.position.set(0, 1.6, 5.5);
+camera.lookAt(0, 0.6, 0);
+
+// 同一个物体与地面
+const knot = new THREE.Mesh(
+  new THREE.TorusKnotGeometry(0.6, 0.22, 160, 24),
+  new THREE.MeshStandardMaterial({ color: '#c0c6d0', roughness: 0.3, metalness: 0.4 })
+);
+knot.position.y = 1;
+knot.castShadow = true;
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(10, 10), new THREE.MeshStandardMaterial({ color: '#e6e8ec' }));
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(knot, ground);
+
+// 布光一：只有均匀的环境光，没有方向，因此没有明暗
+const flat = new THREE.AmbientLight('#ffffff', 2.2);
+
+// 布光二：三点布光。主光决定明暗与影子，辅光减轻暗部，轮廓光勾出边缘
+const three = new THREE.Group();
+const key = new THREE.DirectionalLight('#fff4e5', 3.5);
+key.position.set(-3, 4, 3);
+key.castShadow = true;
+key.shadow.mapSize.set(1024, 1024);
+const fill = new THREE.DirectionalLight('#dfe8ff', 1.0);
+fill.position.set(3, 2, 3);
+const rim = new THREE.DirectionalLight('#ffffff', 2.5);
+rim.position.set(0, 3, -4);
+three.add(key, fill, rim, new THREE.AmbientLight('#ffffff', 0.15));
+
+// 布光三：环境贴图（基于图像的照明），提供柔和的照明与真实的反射
+const pmrem = new THREE.PMREMGenerator(renderer);
+const envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+// 把画面分成三格，每格启用不同的布光后分别渲染
+const setups = [
+  () => { scene.add(flat); },
+  () => { scene.add(three); },
+  () => { scene.environment = envMap; }
+];
+renderer.setScissorTest(true);
+setups.forEach((enable, i) => {
+  scene.remove(flat, three);
+  scene.environment = null;
+  enable();
+  renderer.setViewport(i * VW, 0, VW, H);
+  renderer.setScissor(i * VW, 0, VW, H);
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

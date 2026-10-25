@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第一个三维场景</title>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; color: #222; }
+  #stage { width: 100%; max-width: 640px; height: 360px; border: 1px solid #ddd; }
+</style>
+</head>
+<body>
+<div id="stage" role="img" aria-label="一个缓慢旋转的蓝色立方体，放在浅灰色的地面上。"></div>
+<script type="module">
+import * as THREE from 'three';
+
+const stage = document.getElementById('stage');
+
+// 1. 渲染器：把场景画到页面上的 <canvas> 中
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));   // 高清屏，但最多按 2 倍渲染，控制性能
+stage.appendChild(renderer.domElement);
+
+// 2. 场景：放置物体、灯光的容器
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#eef1f6');
+
+// 3. 相机：视野 45 度，近裁剪面 0.1，远裁剪面 100
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+camera.position.set(2.4, 1.9, 3.2);
+camera.lookAt(0, 0.5, 0);
+
+// 4. 灯光：天空光提供柔和的整体照明，平行光提供方向与明暗
+scene.add(new THREE.HemisphereLight('#ffffff', '#b0b4bc', 1.2));
+const sun = new THREE.DirectionalLight('#ffffff', 2.5);
+sun.position.set(-2, 5, 3);
+scene.add(sun);
+
+// 5. 物体 = 几何体（形状）＋ 材质（表面）
+const cube = new THREE.Mesh(
+  new THREE.BoxGeometry(1, 1, 1),
+  new THREE.MeshStandardMaterial({ color: '#2f6fdb', roughness: 0.4 })
+);
+cube.position.y = 0.5;
+scene.add(cube);
+const ground = new THREE.Mesh(
+  new THREE.CircleGeometry(2.2, 64),
+  new THREE.MeshStandardMaterial({ color: '#d9dde4' })
+);
+ground.rotation.x = -Math.PI / 2;   // 圆片默认竖立，转 90 度放平
+scene.add(ground);
+
+// 6. 尺寸：容器大小变化时，同步更新渲染尺寸与相机的宽高比
+new ResizeObserver(() => {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}).observe(stage);
+
+// 7. 动画循环：按经过的时间旋转；用户偏好减少动态效果时保持静止
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const timer = new THREE.Timer();
+timer.connect(document);   // 页面不可见时暂停计时
+renderer.setAnimationLoop(time => {
+  timer.update(time);
+  const dt = timer.getDelta();
+  if (!reduce) cube.rotation.y += dt * 0.6;
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

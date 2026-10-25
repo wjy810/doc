@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>综合项目：三维产品展示页</title>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5d6676; --accent: #2f6fdb; }
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 15px/1.6 system-ui, sans-serif; color: var(--ink); }
+  h1 { font-size: 22px; margin: 0 0 8px; }
+  .viewer { position: relative; width: 100%; max-width: 760px; height: 420px; background: #eef0f3; border-radius: 10px; overflow: hidden; }
+  .viewer canvas { display: block; touch-action: none; }
+  .card { position: absolute; top: 20px; width: 230px; background: rgba(255,255,255,.92); border-radius: 8px; padding: 12px 14px; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+  .card.left { left: 20px; } .card.right { right: 20px; }
+  .card h2 { font-size: 17px; margin: 0 0 4px; }
+  .card p { margin: 0 0 8px; color: var(--muted); font-size: 14px; }
+  .views { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .views button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .hotspot { position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%;
+             border: 2px solid #fff; background: var(--accent); color: #fff; font-size: 13px; cursor: pointer; }
+  .hotspot[hidden] { display: none; }
+  .status { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+  .tools { display: flex; gap: 12px; align-items: center; margin-top: 8px; font-size: 14px; }
+  #info { max-width: 760px; }
+  /* 窄屏：说明卡片移到画面下方，相机后退，让模型完整出现在较窄的画面中 */
+  @media (max-width: 560px) {
+    .viewer { height: 340px; }
+    .card { position: static; width: auto; margin-top: 8px; box-shadow: none; }
+  }
+</style>
+</head>
+<body>
+<h1>智能音箱（示意产品）</h1>
+<div class="views" role="group" aria-label="观察角度" id="views"></div>
+<div class="viewer" id="stage" role="img" aria-label="可旋转的智能音箱三维模型。下方有不依赖三维画面的产品信息。">
+  <div class="status" id="status" role="status"><p>正在加载三维模型…</p><progress id="bar" max="100" value="0"></progress></div>
+  <div class="card left" id="card"><h2 id="card-title"></h2><p id="card-text"></p></div>
+</div>
+<div class="tools">
+  <button id="reset">恢复默认视角</button>
+  <label><input type="checkbox" id="auto" checked> 自动旋转</label>
+  <details><summary>性能记录</summary><span id="perf">尚未加载</span></details>
+</div>
+<section id="info">
+  <h2>产品信息</h2>
+  <p>以下内容在模型加载失败或不显示三维画面时同样可以阅读（示意数据）。</p>
+  <ul>
+    <li>灯环：显示音量与工作状态，触摸滑动调节音量。</li>
+    <li>顶盖：四个触控按键与麦克风开孔。</li>
+    <li>外壳：织物包裹，透声防尘。</li>
+    <li>底座：防滑底垫与电源接口。</li>
+  </ul>
+</section>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const $ = id => document.getElementById(id);
+const stage = $('stage');
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const t0 = performance.now();
+
+// 每个观察角度：相机位置、关注中心、横向平移量、说明卡片的位置与内容、需要显示的标注。
+// 相机与目标一起沿“画面向右”的方向平移 shift，模型就会出现在画面另一侧，给说明卡片留出位置
+const VIEWS = {
+  home:   { label: '默认', pos: [4.6, 3.0, 6.4], center: [0, 1.3, 0], shift: 1.1, card: 'right', title: '一台安静的智能音箱',
+            text: '拖动旋转，滚轮缩放。选择上方的观察角度，查看不同部件。', spots: ['灯环', '底座'] },
+  front:  { label: '正面', pos: [0, 1.6, 7.2], center: [0, 1.3, 0], shift: -1.2, card: 'left', title: '织物外壳',
+            text: '外壳由织物包裹，声音可以穿过，灰尘被挡在外面。', spots: ['外壳'] },
+  top:    { label: '顶部', pos: [0, 8.6, 3.6], center: [0, 2.2, 0], shift: 1.3, card: 'right', title: '触控与灯环',
+            text: '顶盖上有四个触控按键；灯环用颜色表示音量与工作状态。', spots: ['灯环', '顶盖'] },
+  bottom: { label: '底部', pos: [3.6, -1.6, 4.4], center: [0, 0.5, 0], shift: 1.0, card: 'right', title: '稳固的底座',
+            text: '防滑底垫让音箱在桌面上不易移动，电源接口位于底座侧面。', spots: ['底座'] }
+};
+const SPOT_TEXT = { 灯环: '灯环：显示音量与工作状态。', 顶盖: '顶盖：触控按键与麦克风开孔。',
+                    外壳: '外壳：织物包裹，透声防尘。', 底座: '底座：防滑底垫与电源接口。' };
+
+// 渲染器、场景与相机
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+stage.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#eef0f3');
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
+camera.position.set(9, 6, 12);   // 加载完成后从远处飞入默认视角
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.minDistance = 3.5;
+controls.maxDistance = 14;
+controls.autoRotate = !reduce;
+controls.autoRotateSpeed = 0.8;
+controls.addEventListener('start', () => { flight = null; controls.autoRotate = false; $('auto').checked = false; });
+
+let current = 'home', flight = null;
+
+// 窄屏时相机后退，保证模型完整
+let distanceScale = 1;
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  distanceScale = w < 560 ? 1.35 : 1;
+}
+new ResizeObserver(resize).observe(stage);
+resize();
+
+// 切换观察角度：相机平滑移动；减少动态效果时直接跳转
+function go(name) {
+  const v = VIEWS[name];
+  current = name;
+  const center = new THREE.Vector3(...v.center);
+  const pos = new THREE.Vector3(...v.pos).sub(center).multiplyScalar(distanceScale).add(center);
+  const right = center.clone().sub(pos).cross(camera.up).normalize();   // 画面向右的方向
+  const shift = stage.clientWidth < 560 ? 0 : v.shift;                    // 窄屏时卡片在下方，不需要平移
+  const target = center.clone().addScaledVector(right, shift);
+  pos.addScaledVector(right, shift);
+  if (reduce) { camera.position.copy(pos); controls.target.copy(target); }
+  else flight = { from: camera.position.clone(), fromT: controls.target.clone(), to: pos, toT: target, t: 0 };
+  $('card').className = 'card ' + v.card;
+  $('card-title').textContent = v.title;
+  $('card-text').textContent = v.text;
+  for (const b of $('views').children) b.setAttribute('aria-pressed', String(b.dataset.view === name));
+  for (const s of spots) s.el.hidden = !v.spots.includes(s.name);
+}
+for (const [name, v] of Object.entries(VIEWS)) {
+  const b = document.createElement('button');
+  b.textContent = v.label;
+  b.dataset.view = name;
+  b.addEventListener('click', () => { controls.autoRotate = false; $('auto').checked = false; go(name); });
+  $('views').appendChild(b);
+}
+$('reset').addEventListener('click', () => go('home'));
+$('auto').addEventListener('change', e => { controls.autoRotate = e.target.checked && !reduce; });
+
+// 部件标注：按钮跟随部件在屏幕上的位置
+const spots = Object.keys(SPOT_TEXT).map(name => {
+  const el = document.createElement('button');
+  el.className = 'hotspot';
+  el.textContent = '+';
+  el.hidden = true;
+  el.setAttribute('aria-label', SPOT_TEXT[name]);
+  el.addEventListener('click', () => { $('card-title').textContent = name; $('card-text').textContent = SPOT_TEXT[name]; });
+  stage.appendChild(el);
+  return { name, el, anchor: new THREE.Vector3() };
+});
+
+// 加载模型：有进度，有失败时的替代内容
+let model = null, bytes = 0, fps = 60;
+new GLTFLoader().load('models/speaker.glb', gltf => {
+  model = gltf.scene;
+  scene.add(model);
+  for (const s of spots) {                 // 标注点放在部件表面的外侧
+    const part = model.getObjectByName(s.name);
+    const box = new THREE.Box3().setFromObject(part);
+    s.anchor.set(box.max.x, (box.min.y + box.max.y) / 2, 0);
+  }
+  $('status').remove();
+  go('home');
+  requestAnimationFrame(() => { model.userData.tti = performance.now() - t0; });
+}, e => {
+  bytes = e.loaded;
+  if (e.total) $('bar').value = e.loaded / e.total * 100;
+}, () => {
+  $('status').innerHTML = '<p><strong>三维模型暂时无法加载。</strong><br>产品信息见下方。通过本地服务器打开本页即可加载模型。</p>';
+  $('card').hidden = true;
+  for (const b of document.querySelectorAll('#views button, #reset, #auto')) b.disabled = true;
+});
+
+const timer = new THREE.Timer();
+timer.connect(document);
+const tmp = new THREE.Vector3(), toCam = new THREE.Vector3();
+renderer.setAnimationLoop(time => {
+  timer.update(time);
+  const dt = timer.getDelta();
+  if (dt > 0) fps += (1 / dt - fps) * 0.05;
+  if (flight) {                            // 相机飞行：0.8 秒，缓入缓出
+    flight.t = Math.min(1, flight.t + dt / 0.8);
+    const k = flight.t < 0.5 ? 2 * flight.t * flight.t : 1 - Math.pow(-2 * flight.t + 2, 2) / 2;
+    camera.position.lerpVectors(flight.from, flight.to, k);
+    controls.target.lerpVectors(flight.fromT, flight.toT, k);
+    if (flight.t === 1) flight = null;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  if (!model) return;
+  const w = stage.clientWidth, h = stage.clientHeight;
+  for (const s of spots) {
+    if (!VIEWS[current].spots.includes(s.name)) continue;
+    tmp.copy(s.anchor).applyMatrix4(model.matrixWorld);
+    // 背向相机的标注隐藏：比较“从模型中心指向标注”与“从模型中心指向相机”的方向
+    toCam.copy(camera.position).sub(new THREE.Vector3(0, tmp.y, 0));
+    const facing = new THREE.Vector3(tmp.x, 0, tmp.z).normalize().dot(toCam.setY(0).normalize()) > -0.2;
+    tmp.project(camera);
+    s.el.hidden = !facing;
+    s.el.style.left = `${(tmp.x + 1) / 2 * w}px`;
+    s.el.style.top = `${(1 - tmp.y) / 2 * h}px`;
+  }
+  const info = renderer.info.render;
+  $('perf').textContent = `模型 ${(bytes / 1024).toFixed(0)} KB；首次可交互 ${model.userData.tti ? model.userData.tti.toFixed(0) : '…'} 毫秒；` +
+    `每帧 ${info.calls} 次绘制调用、${info.triangles} 个三角形；约 ${fps.toFixed(0)} 帧／秒`;
+});
+</script>
+</body>
+</html>

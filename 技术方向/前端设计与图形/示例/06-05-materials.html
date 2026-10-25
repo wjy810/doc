@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>材质：粗糙度与金属度</title>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; color: #222; }
+  #stage { position: relative; width: 640px; height: 380px; border: 1px solid #ddd; }
+  .label { position: absolute; font-size: 13px; white-space: nowrap; transform: translate(-50%, -50%); }
+</style>
+</head>
+<body>
+<div id="stage" role="img" aria-label="十二个球：从左到右粗糙度从 0 增加到 1，从上到下金属度为 0、0.5、1。"></div>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const stage = document.getElementById('stage');
+const W = 640, H = 380;
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(W, H);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;   // 色调映射：把高亮度压缩到屏幕能显示的范围
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#ffffff');
+// 环境光照：用一个虚拟房间的光照来照亮并反射在物体表面
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+const camera = new THREE.PerspectiveCamera(30, W / H, 0.1, 100);
+camera.position.set(0, 0, 14);
+
+const roughness = [0, 0.33, 0.66, 1];
+const metalness = [0, 0.5, 1];
+metalness.forEach((m, row) => {
+  roughness.forEach((r, col) => {
+    const ball = new THREE.Mesh(
+      new THREE.SphereGeometry(0.9, 64, 32),
+      new THREE.MeshStandardMaterial({ color: '#c8a04a', roughness: r, metalness: m })
+    );
+    ball.position.set((col - 1.5) * 2.3 + 0.6, (1 - row) * 2.2, 0);
+    scene.add(ball);
+  });
+});
+renderer.render(scene, camera);
+
+// 行列标签：把三维坐标投影到屏幕上
+const label = (text, x, y) => {
+  const p = new THREE.Vector3(x, y, 0).project(camera);
+  const el = document.createElement('div');
+  el.className = 'label';
+  el.style.left = `${(p.x + 1) / 2 * W}px`;
+  el.style.top = `${(1 - p.y) / 2 * H}px`;
+  el.textContent = text;
+  stage.appendChild(el);
+};
+roughness.forEach((r, col) => label(`粗糙度 ${r}`, (col - 1.5) * 2.3 + 0.6, 3.4));
+metalness.forEach((m, row) => label(`金属度 ${m}`, -4.9, (1 - row) * 2.2));
+</script>
+</body>
+</html>

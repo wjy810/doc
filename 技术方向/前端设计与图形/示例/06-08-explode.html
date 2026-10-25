@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>物体动画：产品拆解视图</title>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; color: #222; }
+  .bar { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; }
+  #stage { width: 640px; height: 400px; border: 1px solid #ddd; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <label>拆解程度 <input id="amount" type="range" min="0" max="100" value="0"></label>
+  <button id="play">自动播放</button>
+  <span id="status" role="status"></span>
+</div>
+<div id="stage" role="img" aria-label="智能音箱的拆解视图：底座、外壳、扬声器单元、顶盖和灯环沿竖直方向分开。"></div>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// 由代码搭建的产品模型（与 06-10 相同）
+function buildSpeaker() {
+  const speaker = new THREE.Group();
+  const M = (color, roughness, metalness = 0, extra = {}) =>
+    new THREE.MeshStandardMaterial({ color, roughness, metalness, ...extra });
+  const part = (name, geo, mat, y) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.name = name; m.position.y = y; speaker.add(m); return m;
+  };
+  part('底座', new THREE.CylinderGeometry(1.0, 0.95, 0.16, 64), M('#2b2f36', 0.55, 0.3), 0.08);
+  part('外壳', new THREE.CylinderGeometry(0.92, 1.0, 2.2, 64), M('#46536a', 0.95), 1.26);
+  part('扬声器单元', new THREE.CylinderGeometry(0.62, 0.4, 0.5, 48), M('#5d6470', 0.35, 0.7), 1.3);
+  part('顶盖', new THREE.CylinderGeometry(0.93, 0.93, 0.14, 64), M('#e9ebee', 0.35), 2.43);
+  const ring = part('灯环', new THREE.TorusGeometry(0.6, 0.05, 16, 96),
+    M('#6ec3ff', 0.3, 0, { emissive: '#2a8fd8', emissiveIntensity: 1.2 }), 2.52);
+  ring.rotation.x = Math.PI / 2;
+  return speaker;
+}
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(640, 400);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+stage.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#f2f3f5');
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+const camera = new THREE.PerspectiveCamera(32, 640 / 400, 0.1, 100);
+camera.position.set(7, 5, 12);
+camera.lookAt(0, 2.3, 0);
+
+const speaker = buildSpeaker();
+speaker.rotation.y = -0.4;
+scene.add(speaker);
+
+// 每个部件：组装位置 + 拆解时的额外位移（沿 y 轴）
+const offsets = { 底座: -0.7, 外壳: 0, 扬声器单元: 1.9, 顶盖: 2.6, 灯环: 3.0 };
+const parts = speaker.children.map(m => ({ mesh: m, base: m.position.y, offset: offsets[m.name] }));
+
+let amount = 0;            // 当前拆解程度 0—1
+let target = 0;            // 目标拆解程度
+let autoplay = false;
+const ease = t => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // 缓入缓出
+
+const slider = document.getElementById('amount');
+slider.addEventListener('input', () => {
+  autoplay = false;                                // 用户操作时，自动播放让出控制权
+  document.getElementById('play').textContent = '自动播放';
+  target = slider.value / 100;
+});
+document.getElementById('play').addEventListener('click', e => {
+  autoplay = !autoplay;
+  e.target.textContent = autoplay ? '停止' : '自动播放';
+});
+
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const timer = new THREE.Timer();
+timer.connect(document);
+renderer.setAnimationLoop(time => {
+  timer.update(time);
+  const dt = timer.getDelta();
+  if (autoplay) {                                  // 自动播放：在 0 和 1 之间往返
+    target = (Math.sin(timer.getElapsed() * 0.8) + 1) / 2;
+    slider.value = Math.round(target * 100);
+  }
+  // 平滑地靠近目标；减少动态效果时直接跳到目标
+  amount = reduce ? target : amount + (target - amount) * Math.min(1, dt * 6);
+  for (const p of parts) p.mesh.position.y = p.base + p.offset * ease(amount);
+  document.getElementById('status').textContent = `拆解 ${Math.round(amount * 100)}%`;
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

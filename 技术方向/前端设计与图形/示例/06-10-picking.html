@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三维交互：选取、标注与恢复视角</title>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; color: #222; }
+  .layout { display: flex; gap: 12px; }
+  #stage { position: relative; width: 460px; height: 380px; border: 1px solid #ddd; }
+  #stage canvas { display: block; touch-action: none; }
+  .tag { position: absolute; background: #222; color: #fff; padding: 4px 8px; border-radius: 4px; font-size: 13px;
+         pointer-events: none; white-space: nowrap; transform: translate(12px, -50%); }
+  .tag::before { content: ''; position: absolute; left: -12px; top: 50%; width: 12px; border-top: 1px solid #222; }
+  aside { width: 168px; }
+  aside button { display: block; width: 100%; margin-bottom: 6px; text-align: left; }
+  aside button[aria-pressed="true"] { background: #2f6fdb; color: #fff; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <div id="stage" aria-describedby="help"></div>
+  <aside>
+    <div role="group" aria-label="选择部件" id="parts"></div>
+    <button id="reset">恢复默认视角</button>
+    <p id="desc" aria-live="polite">点击模型或右侧按钮查看部件。</p>
+  </aside>
+</div>
+<p id="help">拖动旋转，滚轮缩放，右键拖动平移；点击部件查看说明。右侧按钮提供不用鼠标的操作方式。</p>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+function buildSpeaker() {
+  const speaker = new THREE.Group();
+  const M = (color, roughness, metalness = 0, extra = {}) =>
+    new THREE.MeshStandardMaterial({ color, roughness, metalness, ...extra });
+  const part = (name, geo, mat, y) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.name = name; m.position.y = y; speaker.add(m); return m;
+  };
+  part('底座', new THREE.CylinderGeometry(1.0, 0.95, 0.16, 64), M('#2b2f36', 0.55, 0.3), 0.08);
+  part('外壳', new THREE.CylinderGeometry(0.92, 1.0, 2.2, 64), M('#46536a', 0.95), 1.26);
+  part('扬声器单元', new THREE.CylinderGeometry(0.62, 0.4, 0.5, 48), M('#5d6470', 0.35, 0.7), 1.3);
+  part('顶盖', new THREE.CylinderGeometry(0.93, 0.93, 0.14, 64), M('#e9ebee', 0.35), 2.43);
+  const ring = part('灯环', new THREE.TorusGeometry(0.6, 0.05, 16, 96),
+    M('#6ec3ff', 0.3, 0, { emissive: '#2a8fd8', emissiveIntensity: 1.2 }), 2.52);
+  ring.rotation.x = Math.PI / 2;
+  return speaker;
+}
+const descriptions = {
+  灯环: '灯环：显示音量与工作状态（示意）。', 顶盖: '顶盖：触控按键与麦克风开孔（示意）。',
+  外壳: '外壳：织物包裹，透声防尘（示意）。', 底座: '底座：防滑底垫与电源接口（示意）。'
+};
+
+const stage = document.getElementById('stage');
+const W = 460, H = 380;
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(W, H);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+stage.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#f2f3f5');
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+const camera = new THREE.PerspectiveCamera(35, W / H, 0.1, 100);
+const HOME = { position: new THREE.Vector3(4.2, 3.4, 5.6), target: new THREE.Vector3(0, 1.3, 0) };
+camera.position.copy(HOME.position);
+
+const speaker = buildSpeaker();
+scene.add(speaker);
+const pickable = speaker.children.filter(m => descriptions[m.name]);   // 外部可见的部件
+
+// 轨道控制：拖动旋转、滚轮缩放；限制距离与角度，避免钻进模型或翻到地面以下
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.copy(HOME.target);
+controls.enableDamping = true;
+controls.minDistance = 3;
+controls.maxDistance = 12;
+controls.maxPolarAngle = Math.PI * 0.55;
+controls.update();
+
+// 选中：高亮当前部件，并同步右侧的按钮与说明
+let selected = null;
+const tag = document.createElement('div');
+tag.className = 'tag';
+tag.hidden = true;
+stage.appendChild(tag);
+function select(mesh) {
+  if (selected) selected.material.emissiveIntensity = selected.name === '灯环' ? 1.2 : 0;
+  selected = mesh;
+  for (const b of document.querySelectorAll('#parts button')) b.setAttribute('aria-pressed', String(b.textContent === mesh?.name));
+  if (mesh) {
+    mesh.material.emissive ??= new THREE.Color();
+    if (mesh.name !== '灯环') { mesh.material.emissive.set('#e4572e'); mesh.material.emissiveIntensity = 0.35; }
+    tag.textContent = mesh.name;
+    document.getElementById('desc').textContent = descriptions[mesh.name];
+  }
+  tag.hidden = !mesh;
+}
+pickable.forEach(m => {
+  const b = document.createElement('button');
+  b.textContent = m.name;
+  b.setAttribute('aria-pressed', 'false');
+  b.addEventListener('click', () => select(m));
+  document.getElementById('parts').appendChild(b);
+});
+
+// 射线拾取：从相机穿过指针位置发出一条射线，找到最先碰到的部件。
+// 只有“点击”才选中，拖动旋转结束时不选中
+const raycaster = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let down = null;
+renderer.domElement.addEventListener('pointerdown', e => { down = { x: e.clientX, y: e.clientY }; });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const hit = raycaster.intersectObjects(pickable)[0];
+  select(hit ? hit.object : null);
+});
+
+// 恢复默认视角：相机与目标点平滑地回到初始位置
+let homing = 0;
+document.getElementById('reset').addEventListener('click', () => { homing = 1; });
+
+const anchor = new THREE.Vector3();
+renderer.setAnimationLoop(() => {
+  if (homing > 0) {
+    camera.position.lerp(HOME.position, 0.12);
+    controls.target.lerp(HOME.target, 0.12);
+    if (camera.position.distanceTo(HOME.position) < 0.01) homing = 0;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  if (selected) {               // 标签跟随部件：把部件的世界坐标投影到屏幕
+    selected.getWorldPosition(anchor);
+    anchor.x += 0.95;
+    anchor.project(camera);
+    tag.style.left = `${(anchor.x + 1) / 2 * W}px`;
+    tag.style.top = `${(1 - anchor.y) / 2 * H}px`;
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>相机：透视与正交、视野与焦距</title>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; color: #222; }
+  .cap { display: flex; width: 642px; }
+  .cap span { flex: 1; text-align: center; }
+</style>
+</head>
+<body>
+<div id="stage" role="img" aria-label="同一排立方体：透视相机下远处的立方体变小；广角时透视更夸张；正交相机下所有立方体一样大。"></div>
+<div class="cap"><span>透视相机，视野 30 度</span><span>透视相机，视野 75 度（广角）</span><span>正交相机</span></div>
+<script type="module">
+import * as THREE from 'three';
+
+const W = 642, H = 220, VW = W / 3;
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(W, H);
+document.getElementById('stage').appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#ffffff');
+scene.add(new THREE.HemisphereLight('#ffffff', '#888888', 1.4));
+const sun = new THREE.DirectionalLight('#ffffff', 2);
+sun.position.set(-2, 4, 3);
+scene.add(sun);
+scene.add(new THREE.GridHelper(30, 30, '#cccccc', '#eeeeee'));
+
+// 一排向远处延伸的立方体，大小完全相同
+for (let i = 0; i < 8; i++) {
+  const box = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1),
+    new THREE.MeshStandardMaterial({ color: i % 2 ? '#2f6fdb' : '#e4572e' }));
+  box.position.set(-1.2, 0.5, 2 - i * 2.2);
+  scene.add(box);
+}
+
+// 两台透视相机：视野越大（焦距越短），透视变形越明显。为了让近处的立方体大小相近，广角相机放得更近
+const tele = new THREE.PerspectiveCamera(30, VW / H, 0.1, 200);
+tele.position.set(3, 3, 12);
+tele.lookAt(-1, 0, -4);
+const wide = new THREE.PerspectiveCamera(75, VW / H, 0.1, 200);
+wide.position.set(1.6, 1.8, 5.5);
+wide.lookAt(-1, 0, -4);
+// 正交相机：没有近大远小，常用于工程图、等距视角与界面
+const s = 6;
+const ortho = new THREE.OrthographicCamera(-s * VW / H, s * VW / H, s, -s, 0.1, 200);
+ortho.position.set(10, 10, 12);
+ortho.lookAt(-1, 0, -4);
+
+renderer.setScissorTest(true);
+[tele, wide, ortho].forEach((cam, i) => {
+  renderer.setViewport(i * VW, 0, VW, H);
+  renderer.setScissor(i * VW, 0, VW, H);
+  renderer.render(scene, cam);
+});
+</script>
+</body>
+</html>

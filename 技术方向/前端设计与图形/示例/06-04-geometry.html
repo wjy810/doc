@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>形体与建模：面数、法线与着色方式</title>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; color: #222; }
+  #stage { position: relative; width: 640px; height: 300px; border: 1px solid #ddd; }
+  .label { position: absolute; width: 150px; text-align: center; font-size: 13px; transform: translateX(-50%); line-height: 1.4; }
+</style>
+</head>
+<body>
+<div id="stage" role="img" aria-label="四个球体：低面数平直着色、低面数平滑着色、高面数平滑着色、高面数线框。"></div>
+<script type="module">
+import * as THREE from 'three';
+
+const stage = document.getElementById('stage');
+const W = 640, H = 300;
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(W, H);
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#ffffff');
+const camera = new THREE.PerspectiveCamera(30, W / H, 0.1, 100);
+camera.position.set(0, 1.2, 11);
+camera.lookAt(0, -0.2, 0);
+scene.add(new THREE.HemisphereLight('#ffffff', '#888888', 1.2));
+const key = new THREE.DirectionalLight('#ffffff', 2.5);
+key.position.set(-3, 4, 5);
+scene.add(key);
+
+// 同一个球，分段数不同：分段越多，三角形越多，表面越圆，但计算量越大
+const low = new THREE.SphereGeometry(1, 8, 6);
+const high = new THREE.SphereGeometry(1, 48, 32);
+const color = '#2f6fdb';
+const variants = [
+  { geo: low, mat: new THREE.MeshStandardMaterial({ color, flatShading: true }), name: '低面数，平直着色' },
+  { geo: low, mat: new THREE.MeshStandardMaterial({ color }), name: '低面数，平滑着色' },
+  { geo: high, mat: new THREE.MeshStandardMaterial({ color }), name: '高面数，平滑着色' },
+  { geo: high, mat: new THREE.MeshBasicMaterial({ color, wireframe: true }), name: '高面数，线框' }
+];
+
+variants.forEach((v, i) => {
+  const mesh = new THREE.Mesh(v.geo, v.mat);
+  mesh.position.x = (i - 1.5) * 3.6;
+  mesh.rotation.y = 0.4;
+  scene.add(mesh);
+  // 三角形数量 = 索引数 ÷ 3
+  const triangles = v.geo.index.count / 3;
+  const p = mesh.position.clone().add(new THREE.Vector3(0, -1.35, 0)).project(camera);
+  const label = document.createElement('div');
+  label.className = 'label';
+  label.style.left = `${(p.x + 1) / 2 * W}px`;
+  label.style.top = `${(1 - p.y) / 2 * H}px`;
+  label.innerHTML = `${v.name}<br>${triangles} 个三角形`;
+  stage.appendChild(label);
+});
+
+renderer.render(scene, camera);
+</script>
+</body>
+</html>
