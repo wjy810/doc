@@ -30,6 +30,15 @@ python3 tools/check_docs.py --strict     # 提示项也视为失败
 
 脚本只依赖 Python 3.9 及以上的标准库，检查 GitHub 上的粗体渲染、页内与跨文件链接、表格列数、参考资料的引用与编号、代码块闭合、中文排版，以及阅读导航中声明的章数与资料数。安装 `cmarkgfm` 后，还会用 GitHub 使用的渲染库复核粗体。退出码为 0 表示没有错误。
 
+技术方向的新文档由两份原始手册扩写而来。`tools/check_coverage.py` 从原稿中抽出每一个知识点（章节标题、粗体条目、表格单元格、并列列举的每一项、西文术语），逐条确认它们写进了对应的新文档：
+
+```text
+python3 tools/check_coverage.py check              # 按原稿章节汇总覆盖情况
+python3 tools/check_coverage.py check --part 07    # 只看原稿第 07 章，加 --missing 列出未覆盖的知识点
+```
+
+知识点清单保存在 `tools/coverage/`，措辞不同但含义相同的写法登记在清单的“检查词”列中。
+
 ## 约定
 
 - 文中的数字、指标与规则除特别说明外均为示意，不代表真实的产品数据。
