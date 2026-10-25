@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>文字图形化：把文字变成点阵</title>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; color: #222; }
+  canvas { display: block; background: #fff; border: 1px solid #ddd; }
+  /* 视觉上隐藏、但读屏软件仍能读到的文字 */
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+</style>
+</head>
+<body>
+<h1 class="sr-only" id="text">创意编程</h1>
+<canvas id="c" width="640" height="240" aria-hidden="true"></canvas>
+<p>左半边：文字先画在看不见的画布上；右半边：按固定间隔读取像素，有颜色的位置变成一个点。</p>
+<script>
+const W = 640, H = 240, STEP = 6; // STEP 越小，点越密
+const text = document.getElementById('text').textContent;
+
+// 1. 在离屏画布上用普通方式画出文字
+const off = document.createElement('canvas');
+off.width = W; off.height = H;
+const octx = off.getContext('2d');
+octx.fillStyle = '#000';
+octx.font = 'bold 120px system-ui, sans-serif';
+octx.textAlign = 'center';
+octx.textBaseline = 'middle';
+octx.fillText(text, W / 2, H / 2);
+
+// 2. 每隔 STEP 像素检查一次：这个位置有没有被文字覆盖
+const data = octx.getImageData(0, 0, W, H).data;
+const points = [];
+for (let y = 0; y < H; y += STEP) {
+  for (let x = 0; x < W; x += STEP) {
+    const alpha = data[(y * W + x) * 4 + 3];
+    if (alpha > 128) points.push({ x, y });
+  }
+}
+
+// 3. 左半边显示原始文字，右半边显示点阵（同一组坐标，只是换了画法）
+const ctx = document.getElementById('c').getContext('2d');
+ctx.save();
+ctx.beginPath(); ctx.rect(0, 0, W / 2, H); ctx.clip();
+ctx.drawImage(off, 0, 0);
+ctx.restore();
+ctx.fillStyle = '#2f6fdb';
+for (const p of points) {
+  if (p.x < W / 2) continue;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, STEP * 0.4, 0, Math.PI * 2);
+  ctx.fill();
+}
+ctx.strokeStyle = '#ccc';
+ctx.setLineDash([4, 4]);
+ctx.beginPath(); ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H); ctx.stroke();
+ctx.fillStyle = '#666';
+ctx.font = '13px system-ui, sans-serif';
+ctx.fillText(`共 ${points.length} 个点（间隔 ${STEP} 像素）`, W / 2 + 12, H - 12);
+</script>
+</body>
+</html>

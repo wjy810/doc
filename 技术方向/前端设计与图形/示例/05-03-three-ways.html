@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>同一个圆的三种画法：SVG、Canvas 与 DOM</title>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; color: #222; }
+  .row { display: flex; gap: 16px; }
+  figure { margin: 0; }
+  figcaption { margin-top: 6px; }
+  .box { width: 200px; height: 200px; background: #fff; border: 1px solid #ddd; position: relative; }
+  /* DOM 写法：用一个带圆角的 div 当作圆 */
+  .dom-circle { position: absolute; left: 50px; top: 50px; width: 100px; height: 100px;
+                border-radius: 50%; background: #2f6fdb; cursor: pointer; border: 0; padding: 0; }
+</style>
+</head>
+<body>
+<div class="row">
+  <figure>
+    <!-- SVG：圆是一个元素，可以直接监听点击，也能被辅助技术识别 -->
+    <svg class="box" width="200" height="200" viewBox="0 0 200 200" role="img" aria-labelledby="svg-title">
+      <title id="svg-title">SVG 画出的蓝色圆，点击会变色</title>
+      <circle id="svg-circle" cx="100" cy="100" r="50" fill="#2f6fdb" style="cursor:pointer"/>
+    </svg>
+    <figcaption>SVG：圆是一个元素</figcaption>
+  </figure>
+  <figure>
+    <!-- Canvas：只有一张位图，圆画上去以后就不再是独立的对象 -->
+    <canvas id="cv" class="box" width="200" height="200" role="img" aria-label="Canvas 画出的蓝色圆，点击会变色"></canvas>
+    <figcaption>Canvas：圆只是像素</figcaption>
+  </figure>
+  <figure>
+    <div class="box">
+      <!-- DOM：用按钮承载交互，天然支持键盘与读屏 -->
+      <button class="dom-circle" id="dom-circle" aria-label="DOM 画出的蓝色圆，按下会变色"></button>
+    </div>
+    <figcaption>DOM：圆是一个按钮</figcaption>
+  </figure>
+</div>
+<script>
+const colors = ['#2f6fdb', '#e4572e', '#3a9d5d'];
+let i1 = 0, i2 = 0, i3 = 0;
+
+// SVG：元素自己接收点击
+document.getElementById('svg-circle').addEventListener('click', e => {
+  e.target.setAttribute('fill', colors[++i1 % colors.length]);
+});
+
+// Canvas：只能监听整张画布，再自己计算“点到了圆没有”
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+function drawCanvas() {
+  ctx.clearRect(0, 0, 200, 200);
+  ctx.beginPath();
+  ctx.arc(100, 100, 50, 0, Math.PI * 2);
+  ctx.fillStyle = colors[i2 % colors.length];
+  ctx.fill();
+}
+drawCanvas();
+cv.addEventListener('click', e => {
+  const r = cv.getBoundingClientRect();
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  if (Math.hypot(x - 100, y - 100) <= 50) { i2++; drawCanvas(); } // 命中检测
+});
+
+// DOM：按钮可以用鼠标、触摸、键盘（空格或回车）操作
+document.getElementById('dom-circle').addEventListener('click', e => {
+  e.currentTarget.style.background = colors[++i3 % colors.length];
+});
+</script>
+</body>
+</html>

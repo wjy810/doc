@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>路径插值：圆形逐渐变成星形</title>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; color: #222; }
+  svg { display: block; background: #fff; border: 1px solid #ddd; }
+</style>
+</head>
+<body>
+<svg id="s" width="640" height="200" viewBox="0 0 640 200" role="img"
+     aria-label="五个阶段：圆形在 t 等于 0、0.25、0.5、0.75、1 时逐渐变成五角星。"></svg>
+<p><button id="play">播放动画</button>　两个形状都先重新采样为 60 个点，再逐点插值。</p>
+<script>
+const N = 60; // 两个形状统一采样为相同数量的点：这是平滑变形的关键
+const NS = 'http://www.w3.org/2000/svg';
+
+// 圆：均匀取 N 个点，从正上方开始，顺时针
+function circlePoints(r) {
+  return Array.from({ length: N }, (_, i) => {
+    const a = -Math.PI / 2 + (i / N) * Math.PI * 2;
+    return { x: Math.cos(a) * r, y: Math.sin(a) * r };
+  });
+}
+
+// 五角星：先得到 10 个顶点，再沿边长均匀重新采样为 N 个点
+function starPoints(R, r) {
+  const v = Array.from({ length: 10 }, (_, i) => {
+    const a = -Math.PI / 2 + (i / 10) * Math.PI * 2;
+    const rad = i % 2 === 0 ? R : r;
+    return { x: Math.cos(a) * rad, y: Math.sin(a) * rad };
+  });
+  return resample(v, N);
+}
+
+// 沿多边形的周长等距取点
+function resample(poly, n) {
+  const seg = poly.map((p, i) => {
+    const q = poly[(i + 1) % poly.length];
+    return { p, q, len: Math.hypot(q.x - p.x, q.y - p.y) };
+  });
+  const total = seg.reduce((s, e) => s + e.len, 0);
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    let d = (k / n) * total, i = 0;
+    while (d > seg[i].len) { d -= seg[i].len; i++; }
+    const t = d / seg[i].len;
+    out.push({ x: seg[i].p.x + (seg[i].q.x - seg[i].p.x) * t, y: seg[i].p.y + (seg[i].q.y - seg[i].p.y) * t });
+  }
+  return out;
+}
+
+const A = circlePoints(46);
+const B = starPoints(56, 24);
+// 插值：同一序号的点在 A 与 B 之间按比例 t 移动
+const mix = t => A.map((a, i) => ({ x: a.x + (B[i].x - a.x) * t, y: a.y + (B[i].y - a.y) * t }));
+const toPath = (pts, cx, cy) => 'M ' + pts.map(p => `${(cx + p.x).toFixed(1)} ${(cy + p.y).toFixed(1)}`).join(' L ') + ' Z';
+
+const svg = document.getElementById('s');
+const stages = [0, 0.25, 0.5, 0.75, 1];
+stages.forEach((t, k) => {
+  const cx = 70 + k * 125, cy = 90;
+  const path = document.createElementNS(NS, 'path');
+  path.setAttribute('d', toPath(mix(t), cx, cy));
+  path.setAttribute('fill', '#2f6fdb');
+  path.setAttribute('fill-opacity', 0.85);
+  svg.appendChild(path);
+  const label = document.createElementNS(NS, 'text');
+  label.setAttribute('x', cx - 22); label.setAttribute('y', 185); label.setAttribute('font-size', 14);
+  label.textContent = `t = ${t}`;
+  svg.appendChild(label);
+});
+
+// 动画：在 0 和 1 之间往返；尊重“减少动态效果”的系统设置
+document.getElementById('play').addEventListener('click', () => {
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const live = document.createElementNS(NS, 'path');
+  live.setAttribute('fill', '#e4572e');
+  svg.innerHTML = '';
+  svg.appendChild(live);
+  const start = performance.now();
+  (function tick(now) {
+    const t = reduce ? 1 : (1 - Math.cos(((now - start) / 1000) * Math.PI)) / 2; // 缓入缓出
+    live.setAttribute('d', toPath(mix(t), 320, 100));
+    if (!reduce) requestAnimationFrame(tick);
+  })(start);
+});
+</script>
+</body>
+</html>

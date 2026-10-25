@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>像素处理：灰度、反相与阈值</title>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; color: #222; }
+  .row { display: flex; gap: 12px; }
+  figure { margin: 0; }
+  canvas { display: block; background: #fff; border: 1px solid #ddd; }
+</style>
+</head>
+<body>
+<div class="row" id="row"></div>
+<script>
+const W = 148, H = 148;
+const names = ['原图', '灰度', '反相', '阈值'];
+
+// 先画一张“原图”：渐变背景加几个形状
+function drawScene(ctx) {
+  const g = ctx.createLinearGradient(0, 0, W, H);
+  g.addColorStop(0, '#f6c445');
+  g.addColorStop(1, '#2f6fdb');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#e4572e';
+  ctx.beginPath(); ctx.arc(52, 58, 30, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#3a9d5d';
+  ctx.fillRect(80, 80, 50, 50);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 22px system-ui, sans-serif';
+  ctx.fillText('像素', 18, 130);
+}
+
+// 每个像素由 4 个数字组成：红、绿、蓝、透明度，取值 0—255
+const filters = [
+  null,
+  (r, g, b) => { const y = 0.2126 * r + 0.7152 * g + 0.0722 * b; return [y, y, y]; }, // 按亮度加权
+  (r, g, b) => [255 - r, 255 - g, 255 - b],
+  (r, g, b) => { const y = 0.2126 * r + 0.7152 * g + 0.0722 * b; const v = y > 128 ? 255 : 0; return [v, v, v]; }
+];
+
+filters.forEach((f, i) => {
+  const fig = document.createElement('figure');
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  c.setAttribute('role', 'img');
+  c.setAttribute('aria-label', names[i] + '效果');
+  const cap = document.createElement('figcaption');
+  cap.textContent = names[i];
+  fig.append(c, cap);
+  document.getElementById('row').appendChild(fig);
+
+  const ctx = c.getContext('2d');
+  drawScene(ctx);
+  if (!f) return;
+  const img = ctx.getImageData(0, 0, W, H);   // 读出全部像素
+  const d = img.data;
+  for (let k = 0; k < d.length; k += 4) {
+    const [r, g, b] = f(d[k], d[k + 1], d[k + 2]);
+    d[k] = r; d[k + 1] = g; d[k + 2] = b;     // 透明度 d[k + 3] 保持不变
+  }
+  ctx.putImageData(img, 0, 0);                // 写回画布
+});
+</script>
+</body>
+</html>

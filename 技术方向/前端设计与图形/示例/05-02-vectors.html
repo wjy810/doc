@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>向量与动画循环：小球追随指针</title>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; }
+  canvas { display: block; background: #fff; border: 1px solid #ddd; touch-action: none; }
+</style>
+</head>
+<body>
+<canvas id="c" width="640" height="360" role="img"
+  aria-label="一个小球朝指针所在的位置移动。蓝色箭头表示当前速度，橙色虚线表示期望的方向。"></canvas>
+<script>
+// 一个最小的二维向量：位置、速度、方向都可以用它表示
+class Vec {
+  constructor(x, y) { this.x = x; this.y = y; }
+  add(v) { return new Vec(this.x + v.x, this.y + v.y); }
+  sub(v) { return new Vec(this.x - v.x, this.y - v.y); }
+  mul(k) { return new Vec(this.x * k, this.y * k); }
+  len() { return Math.hypot(this.x, this.y); }
+  norm() { const l = this.len() || 1; return new Vec(this.x / l, this.y / l); }
+}
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let pos = new Vec(100, 260);        // 位置
+let vel = new Vec(180, 60);         // 速度：每秒移动多少像素（开始时朝右下方）
+let target = new Vec(480, 120);     // 目标：指针的位置
+const MAX_SPEED = 220;              // 最大速度（像素／秒）
+const STEER = 3;                    // 转向的灵敏程度
+
+// 事件：指针移动时更新目标
+canvas.addEventListener('pointermove', e => {
+  const r = canvas.getBoundingClientRect();
+  target = new Vec(e.clientX - r.left, e.clientY - r.top);
+});
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 0.05); // 两帧之间经过的秒数
+  last = now;
+
+  // 期望速度 = 指向目标的方向 × 最大速度；离目标越近越慢
+  const toTarget = target.sub(pos);
+  const speed = Math.min(MAX_SPEED, toTarget.len() * 2);
+  const desired = toTarget.norm().mul(speed);
+  // 让速度逐渐靠近期望速度，而不是瞬间改变
+  vel = vel.add(desired.sub(vel).mul(Math.min(1, STEER * dt)));
+  pos = pos.add(vel.mul(dt));
+
+  draw(desired);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+function draw(desired) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // 目标
+  ctx.strokeStyle = '#999';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(target.x - 8, target.y); ctx.lineTo(target.x + 8, target.y);
+  ctx.moveTo(target.x, target.y - 8); ctx.lineTo(target.x, target.y + 8);
+  ctx.stroke();
+  // 期望方向（虚线）
+  ctx.setLineDash([6, 6]);
+  ctx.strokeStyle = '#e4572e';
+  ctx.lineWidth = 2;
+  arrow(pos, pos.add(desired.mul(0.4)));
+  ctx.setLineDash([]);
+  // 小球
+  ctx.fillStyle = '#2f6fdb';
+  ctx.beginPath();
+  ctx.arc(pos.x, pos.y, 14, 0, Math.PI * 2);
+  ctx.fill();
+  // 当前速度（实线箭头）
+  ctx.strokeStyle = '#1b3f8b';
+  ctx.lineWidth = 3;
+  arrow(pos, pos.add(vel.mul(0.4)));
+  // 说明
+  ctx.fillStyle = '#333';
+  ctx.font = '14px system-ui, sans-serif';
+  ctx.fillText(`速度 ${vel.len().toFixed(0)} 像素／秒`, 16, 26);
+  ctx.fillText('移动指针，小球会转向并追随', 16, 46);
+}
+
+function arrow(a, b) {
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.stroke();
+  const d = b.sub(a);
+  if (d.len() < 4) return;
+  const ang = Math.atan2(d.y, d.x);
+  ctx.beginPath();
+  ctx.moveTo(b.x, b.y);
+  ctx.lineTo(b.x - 10 * Math.cos(ang - 0.4), b.y - 10 * Math.sin(ang - 0.4));
+  ctx.moveTo(b.x, b.y);
+  ctx.lineTo(b.x - 10 * Math.cos(ang + 0.4), b.y - 10 * Math.sin(ang + 0.4));
+  ctx.stroke();
+}
+</script>
+</body>
+</html>

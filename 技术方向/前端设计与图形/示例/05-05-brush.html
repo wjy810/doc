@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>画布与笔刷：平滑笔迹、高清屏与撤销</title>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; color: #222; }
+  .bar { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; }
+  canvas { display: block; width: 640px; height: 320px; background: #fff; border: 1px solid #ddd;
+           touch-action: none; cursor: crosshair; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <label>粗细 <input id="size" type="range" min="2" max="40" value="12"></label>
+  <label>颜色 <input id="color" type="color" value="#2f6fdb"></label>
+  <label>透明度 <input id="alpha" type="range" min="10" max="100" value="80"></label>
+  <button id="undo">撤销</button>
+  <button id="clear">清空</button>
+</div>
+<canvas id="c" role="img" aria-label="绘画区域：按住鼠标或手指拖动即可作画。"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// 高清屏：画布的像素数量 = 显示尺寸 × 设备像素比，否则线条会发虚
+function setupHiDPI() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // 之后都用 CSS 像素作画
+}
+setupHiDPI();
+
+// 撤销所需的数据结构：保存每一笔的参数与采样点，撤销时重画剩余的笔画
+const strokes = [];
+let current = null;
+
+function pointFrom(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  current = {
+    size: +document.getElementById('size').value,
+    color: document.getElementById('color').value,
+    alpha: +document.getElementById('alpha').value / 100,
+    points: [pointFrom(e)]
+  };
+});
+
+canvas.addEventListener('pointermove', e => {
+  if (!current) return;
+  // 快速移动时，浏览器会把多个采样点合并成一个事件；取出全部点，笔迹才连贯
+  const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  for (const ev of events) current.points.push(pointFrom(ev));
+  redraw();
+  drawStroke(current);
+});
+
+canvas.addEventListener('pointerup', () => {
+  if (current) strokes.push(current);
+  current = null;
+  redraw();
+});
+
+// 用二次曲线连接相邻采样点的中点，折线会变成平滑的曲线
+function drawStroke(s) {
+  const p = s.points;
+  ctx.save();
+  ctx.globalAlpha = s.alpha;          // 整笔统一透明，避免重叠处颜色变深
+  ctx.strokeStyle = s.color;
+  ctx.lineWidth = s.size;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(p[0].x, p[0].y);
+  if (p.length === 1) ctx.lineTo(p[0].x + 0.01, p[0].y);
+  for (let i = 1; i < p.length - 1; i++) {
+    const mx = (p[i].x + p[i + 1].x) / 2, my = (p[i].y + p[i + 1].y) / 2;
+    ctx.quadraticCurveTo(p[i].x, p[i].y, mx, my);
+  }
+  if (p.length > 1) ctx.lineTo(p[p.length - 1].x, p[p.length - 1].y);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function redraw() {
+  ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+  strokes.forEach(drawStroke);
+}
+
+document.getElementById('undo').addEventListener('click', () => { strokes.pop(); redraw(); });
+document.getElementById('clear').addEventListener('click', () => { strokes.length = 0; redraw(); });
+addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') { strokes.pop(); redraw(); }
+});
+</script>
+</body>
+</html>

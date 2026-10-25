@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>输入与环境响应：速度、平滑与模拟输入</title>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; color: #222; }
+  canvas { display: block; background: #fff; border: 1px solid #ddd; touch-action: none; }
+</style>
+</head>
+<body>
+<canvas id="c" width="640" height="360" role="img"
+  aria-label="移动指针时，圆的大小随移动速度变化；下方曲线比较原始速度与平滑后的速度。没有输入时自动演示。"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const AREA_H = 250;                 // 上方是画面，下方是速度曲线
+const ALPHA = 0.15;                 // 平滑系数：越小越平稳，但反应越慢
+let pointer = null;                 // 最近一次真实输入
+let lastInputTime = -Infinity;
+let pos = { x: 320, y: 125 }, prev = null, prevTime = 0;
+let rawSpeed = 0, smoothSpeed = 0;
+const trail = [], rawHistory = [], smoothHistory = [];
+
+canvas.addEventListener('pointermove', e => {
+  const r = canvas.getBoundingClientRect();
+  pointer = { x: e.clientX - r.left, y: Math.min(e.clientY - r.top, AREA_H) };
+  lastInputTime = performance.now();
+});
+canvas.addEventListener('pointerleave', () => { pointer = null; }); // 离开后回到演示模式
+
+function frame(now) {
+  // 1. 选择输入来源：两秒内有真实输入就用真实输入，否则用模拟输入
+  const simulated = !pointer || now - lastInputTime > 2000;
+  const t = now / 1000;
+  const target = simulated
+    ? { x: 320 + 230 * Math.sin(t * 1.3), y: 125 + 80 * Math.sin(t * 2.1) }
+    : pointer;
+  pos = target;
+
+  // 2. 速度 = 位移 ÷ 时间；原始值抖动很大，用指数移动平均平滑
+  if (prev) {
+    const dt = Math.max((now - prevTime) / 1000, 1 / 240);
+    rawSpeed = Math.hypot(pos.x - prev.x, pos.y - prev.y) / dt;
+    smoothSpeed += ALPHA * (rawSpeed - smoothSpeed);
+  }
+  prev = { ...pos };
+  prevTime = now;
+
+  trail.push({ ...pos });
+  if (trail.length > 40) trail.shift();
+  rawHistory.push(rawSpeed);
+  smoothHistory.push(smoothSpeed);
+  if (rawHistory.length > 320) { rawHistory.shift(); smoothHistory.shift(); }
+
+  draw(simulated);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+function draw(simulated) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // 轨迹：越早的点越淡
+  trail.forEach((p, i) => {
+    ctx.fillStyle = `rgba(47, 111, 219, ${i / trail.length * 0.5})`;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+  });
+  // 圆的大小由平滑后的速度决定，并限制最大值，避免画面失控
+  const r = 10 + Math.min(smoothSpeed, 1500) / 30;
+  ctx.fillStyle = '#e4572e';
+  ctx.beginPath(); ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#333';
+  ctx.font = '13px system-ui, sans-serif';
+  ctx.fillText(simulated ? '演示模式：模拟输入（移动指针可接管）' : '真实输入', 12, 20);
+
+  // 速度曲线
+  ctx.strokeStyle = '#eee';
+  ctx.beginPath(); ctx.moveTo(0, AREA_H); ctx.lineTo(640, AREA_H); ctx.stroke();
+  plot(rawHistory, '#bbb');
+  plot(smoothHistory, '#2f6fdb');
+  ctx.fillStyle = '#999'; ctx.fillText('原始速度', 12, AREA_H + 20);
+  ctx.fillStyle = '#2f6fdb'; ctx.fillText('平滑后的速度', 80, AREA_H + 20);
+}
+
+function plot(values, color) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  values.forEach((v, i) => {
+    const x = i * 2, y = 350 - Math.min(v, 2000) / 2000 * 80;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+</script>
+</body>
+</html>

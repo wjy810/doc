@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>三次贝塞尔曲线：拖动控制点</title>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; color: #222; }
+  svg { display: block; background: #fff; border: 1px solid #ddd; touch-action: none; }
+  .handle { cursor: grab; }
+  code { background: #eee; padding: 2px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<svg id="s" width="640" height="360" viewBox="0 0 640 360" role="img"
+     aria-label="三次贝塞尔曲线：起点、两个控制点和终点决定曲线的形状。可以拖动四个点。">
+  <path id="handles" fill="none" stroke="#bbb" stroke-dasharray="5 5"/>
+  <path id="construct" fill="none" stroke="#3a9d5d" stroke-width="1.5"/>
+  <path id="curve" fill="none" stroke="#2f6fdb" stroke-width="4" stroke-linecap="round"/>
+  <g id="samples" fill="#fff" stroke="#2f6fdb" stroke-width="2"></g>
+  <circle id="mid" r="6" fill="#3a9d5d"/>
+  <g id="points"></g>
+</svg>
+<p>路径数据：<code id="d"></code>　绿色线展示 t = 0.5 时的作图过程。</p>
+<script>
+const svg = document.getElementById('s');
+const NS = 'http://www.w3.org/2000/svg';
+// P0 起点，P1、P2 控制点，P3 终点
+const P = [ {x: 80, y: 280}, {x: 160, y: 60}, {x: 460, y: 60}, {x: 560, y: 280} ];
+const names = ['P0 起点', 'P1 控制点', 'P2 控制点', 'P3 终点'];
+
+const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+
+// de Casteljau 作图：在每条线段上取比例 t 的点，反复三次就得到曲线上的点
+function pointAt(t) {
+  const a = lerp(P[0], P[1], t), b = lerp(P[1], P[2], t), c = lerp(P[2], P[3], t);
+  const d = lerp(a, b, t), e = lerp(b, c, t);
+  return { a, b, c, d, e, p: lerp(d, e, t) };
+}
+
+const pts = document.getElementById('points');
+P.forEach((p, i) => {
+  const g = document.createElementNS(NS, 'g');
+  g.innerHTML = `<circle class="handle" r="9" fill="${i % 3 === 0 ? '#2f6fdb' : '#e4572e'}"/>
+                 <text font-size="13" fill="#333"></text>`;
+  pts.appendChild(g);
+  const c = g.querySelector('circle');
+  c.addEventListener('pointerdown', e => {
+    c.setPointerCapture(e.pointerId);
+    const move = ev => {
+      const r = svg.getBoundingClientRect();
+      p.x = Math.max(0, Math.min(640, ev.clientX - r.left));
+      p.y = Math.max(0, Math.min(360, ev.clientY - r.top));
+      render();
+    };
+    c.addEventListener('pointermove', move);
+    c.addEventListener('pointerup', () => c.removeEventListener('pointermove', move), { once: true });
+  });
+});
+
+function render() {
+  const d = `M ${P[0].x} ${P[0].y} C ${P[1].x} ${P[1].y}, ${P[2].x} ${P[2].y}, ${P[3].x} ${P[3].y}`;
+  document.getElementById('curve').setAttribute('d', d);
+  document.getElementById('d').textContent = d;
+  document.getElementById('handles').setAttribute('d',
+    `M ${P[0].x} ${P[0].y} L ${P[1].x} ${P[1].y} M ${P[3].x} ${P[3].y} L ${P[2].x} ${P[2].y}`);
+  // t = 0.5 的作图过程
+  const m = pointAt(0.5);
+  document.getElementById('construct').setAttribute('d',
+    `M ${m.a.x} ${m.a.y} L ${m.b.x} ${m.b.y} L ${m.c.x} ${m.c.y} M ${m.d.x} ${m.d.y} L ${m.e.x} ${m.e.y}`);
+  const mid = document.getElementById('mid');
+  mid.setAttribute('cx', m.p.x); mid.setAttribute('cy', m.p.y);
+  // 每隔 t = 0.1 取一个曲线上的点
+  const g = document.getElementById('samples');
+  g.innerHTML = '';
+  for (let k = 0; k <= 10; k++) {
+    const q = pointAt(k / 10).p;
+    const c = document.createElementNS(NS, 'circle');
+    c.setAttribute('cx', q.x); c.setAttribute('cy', q.y); c.setAttribute('r', 4);
+    g.appendChild(c);
+  }
+  // 控制点与标签
+  [...pts.children].forEach((g, i) => {
+    g.querySelector('circle').setAttribute('cx', P[i].x);
+    g.querySelector('circle').setAttribute('cy', P[i].y);
+    const t = g.querySelector('text');
+    t.setAttribute('x', P[i].x + 12); t.setAttribute('y', P[i].y - 12);
+    t.textContent = names[i];
+  });
+}
+render();
+</script>
+</body>
+</html>

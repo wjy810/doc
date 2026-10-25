@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>声音驱动视觉：频谱、波形与音量</title>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; color: #222; }
+  .bar { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; }
+  canvas { display: block; background: #111; border: 1px solid #ddd; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <button id="start">开始播放示例声音</button>
+  <button id="mute" disabled>静音</button>
+  <span id="status" role="status">尚未开始：浏览器要求用户先操作，页面才能播放声音。</span>
+</div>
+<canvas id="c" width="640" height="280" role="img"
+  aria-label="声音可视化：上方是频谱柱，中间是波形，右侧圆圈的大小表示音量。"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let ac, analyser, output, freqData, timeData, muted = false;
+
+document.getElementById('start').addEventListener('click', async () => {
+  // 1. 在用户点击之后创建音频环境（自动播放策略的要求）
+  ac = new AudioContext();
+  await ac.resume();
+  // 2. 声源：三个振荡器组成一个和弦，再用低频振荡让音量缓慢起伏
+  const mix = ac.createGain();
+  mix.gain.value = 0.25;
+  [220, 277.18, 329.63].forEach((f, i) => {
+    const o = ac.createOscillator();
+    o.type = i === 0 ? 'sawtooth' : 'triangle';
+    o.frequency.value = f;
+    o.connect(mix);
+    o.start();
+  });
+  const lfo = ac.createOscillator(), depth = ac.createGain();
+  lfo.frequency.value = 1.5;
+  depth.gain.value = 0.2;
+  lfo.connect(depth).connect(mix.gain);
+  lfo.start();
+  // 3. 分析器放在静音开关之前：静音只影响扬声器，画面仍然跟随声音
+  analyser = ac.createAnalyser();
+  analyser.fftSize = 1024;
+  analyser.smoothingTimeConstant = 0.8;
+  output = ac.createGain();
+  output.gain.value = 0.3;
+  mix.connect(analyser).connect(output).connect(ac.destination);
+  freqData = new Uint8Array(analyser.frequencyBinCount);
+  timeData = new Uint8Array(analyser.fftSize);
+
+  document.getElementById('start').disabled = true;
+  document.getElementById('mute').disabled = false;
+  document.getElementById('status').textContent = '正在播放。可以随时静音，画面会继续。';
+  requestAnimationFrame(draw);
+});
+
+document.getElementById('mute').addEventListener('click', e => {
+  muted = !muted;
+  output.gain.setTargetAtTime(muted ? 0 : 0.3, ac.currentTime, 0.05); // 平滑过渡，避免爆音
+  e.target.textContent = muted ? '取消静音' : '静音';
+});
+
+function draw() {
+  analyser.getByteFrequencyData(freqData);   // 频谱：每个频段的强度，0—255
+  analyser.getByteTimeDomainData(timeData);  // 波形：每个采样点的振幅，128 表示静止
+
+  // 音量：用均方根（RMS）衡量一段时间内的平均能量
+  let sum = 0;
+  for (const v of timeData) { const s = (v - 128) / 128; sum += s * s; }
+  const rms = Math.sqrt(sum / timeData.length);
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // 频谱柱：高度表达数据（强度）；颜色随频段变化，是艺术选择
+  const bins = 96, bw = 480 / bins;
+  for (let i = 0; i < bins; i++) {
+    const h = (freqData[i] / 255) * 150;
+    ctx.fillStyle = `hsl(${200 + i * 1.5}, 80%, 60%)`;
+    ctx.fillRect(16 + i * bw, 166 - h, bw - 1, h);
+  }
+  // 波形
+  ctx.strokeStyle = '#f6c445';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i < timeData.length; i++) {
+    const x = 16 + (i / timeData.length) * 480;
+    const y = 222 + ((timeData[i] - 128) / 128) * 40;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  // 音量圆
+  ctx.fillStyle = '#e4572e';
+  ctx.beginPath();
+  ctx.arc(570, 140, 10 + rms * 160, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#ddd';
+  ctx.font = '13px system-ui, sans-serif';
+  ctx.fillText('频谱', 16, 20);
+  ctx.fillText('波形', 16, 196);
+  ctx.fillText(`音量 ${(rms * 100).toFixed(0)}`, 540, 270);
+  requestAnimationFrame(draw);
+}
+</script>
+</body>
+</html>

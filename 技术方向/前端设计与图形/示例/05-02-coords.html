@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>坐标系与循环</title>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; }
+  canvas { display: block; background: #fff; border: 1px solid #ddd; }
+</style>
+</head>
+<body>
+<canvas id="c" width="640" height="360" role="img"
+  aria-label="画布坐标系：原点在左上角，x 向右增大，y 向下增大；下方是一排用循环画出、逐渐变大的圆。"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// 1. 网格：每 40 像素一条线，帮助看清坐标
+ctx.strokeStyle = '#e3e3e3';
+ctx.lineWidth = 1;
+for (let x = 0; x <= canvas.width; x += 40) line(x, 0, x, canvas.height);
+for (let y = 0; y <= canvas.height; y += 40) line(0, y, canvas.width, y);
+
+// 2. 坐标轴：原点 (0, 0) 在左上角，x 向右增大，y 向下增大
+ctx.strokeStyle = '#333';
+ctx.fillStyle = '#333';
+ctx.lineWidth = 2;
+ctx.font = '14px system-ui, sans-serif';
+arrow(4, 4, 220, 4);
+arrow(4, 4, 4, 200);
+ctx.fillText('x 增大 →', 150, 26);
+ctx.fillText('y 增大', 14, 190);
+ctx.fillText('原点 (0, 0)', 14, 44);
+
+// 3. 一个点：距离左边 280 像素，距离上边 120 像素
+dot(280, 120, '#e4572e');
+ctx.fillStyle = '#333';
+ctx.fillText('(280, 120)', 292, 116);
+
+// 4. 循环：从 x = 80 开始，每隔 60 像素画一个圆，半径逐渐变大
+ctx.fillStyle = '#2f6fdb';
+for (let i = 0; i < 9; i++) {
+  const x = 80 + i * 60;
+  const r = 6 + i * 2;
+  ctx.beginPath();
+  ctx.arc(x, 280, r, 0, Math.PI * 2);
+  ctx.fill();
+}
+ctx.fillStyle = '#333';
+ctx.fillText('for 循环：x = 80 + i × 60，半径 = 6 + i × 2', 80, 340);
+
+function line(x1, y1, x2, y2) {
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+}
+function dot(x, y, color) {
+  ctx.beginPath();
+  ctx.arc(x, y, 6, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+function arrow(x1, y1, x2, y2) {
+  line(x1, y1, x2, y2);
+  const a = Math.atan2(y2 - y1, x2 - x1);
+  ctx.beginPath();
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(x2 - 10 * Math.cos(a - 0.4), y2 - 10 * Math.sin(a - 0.4));
+  ctx.lineTo(x2 - 10 * Math.cos(a + 0.4), y2 - 10 * Math.sin(a + 0.4));
+  ctx.closePath();
+  ctx.fill();
+}
+</script>
+</body>
+</html>

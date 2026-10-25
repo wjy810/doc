@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>交互数据图形：筛选与细节查看</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.5 system-ui, sans-serif; color: #222; }
+  svg { display: block; background: #fff; border: 1px solid #ddd; }
+  .filters { margin-bottom: 8px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .tip { position: absolute; pointer-events: none; background: #222; color: #fff; padding: 4px 8px;
+         border-radius: 4px; font-size: 13px; opacity: 0; }
+  .bar:focus { outline: 3px solid #e4572e; }
+</style>
+</head>
+<body>
+<div class="filters" id="filters" role="group" aria-label="选择要显示的专业"></div>
+<svg id="chart" width="640" height="320" role="img" aria-labelledby="chart-title">
+  <title id="chart-title">各专业学生本周完成的简历分析份数（示意数据）</title>
+</svg>
+<div class="tip" id="tip"></div>
+<script>
+// 示意数据：本周各专业完成的简历分析（份）
+const data = [
+  { major: '计算机', value: 120 }, { major: '金融', value: 90 }, { major: '机械', value: 64 },
+  { major: '设计', value: 48 }, { major: '医学', value: 35 }
+];
+const visible = new Set(data.map(d => d.major));
+
+const svg = d3.select('#chart');
+const margin = { top: 24, right: 16, bottom: 40, left: 56 };
+const width = 640 - margin.left - margin.right;
+const height = 320 - margin.top - margin.bottom;
+const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+// 比例尺：把数据值（份数）映射为像素高度。纵轴范围固定为全部数据的最大值，
+// 筛选掉某些专业时，剩下的柱子高度不变，用户不会失去比较的基准
+const y = d3.scaleLinear().domain([0, d3.max(data, d => d.value)]).nice().range([height, 0]);
+const x = d3.scaleBand().padding(0.3).range([0, width]);
+const color = d3.scaleOrdinal().domain(data.map(d => d.major))
+  .range(['#2f6fdb', '#e4572e', '#3a9d5d', '#f6c445', '#7b5ea7']);
+
+g.append('g').call(d3.axisLeft(y).ticks(5));
+g.append('text').attr('x', -40).attr('y', -8).attr('font-size', 12).text('份');   // 单位
+const xAxis = g.append('g').attr('transform', `translate(0,${height})`);
+
+const tip = d3.select('#tip');
+function render() {
+  const shown = data.filter(d => visible.has(d.major));
+  x.domain(shown.map(d => d.major));
+  xAxis.call(d3.axisBottom(x));
+  g.selectAll('.bar')
+    .data(shown, d => d.major)
+    .join('rect')
+    .attr('class', 'bar')
+    .attr('tabindex', 0)                       // 键盘也能逐个查看
+    .attr('aria-label', d => `${d.major}：${d.value} 份`)
+    .attr('x', d => x(d.major))
+    .attr('width', x.bandwidth())
+    .attr('y', d => y(d.value))
+    .attr('height', d => height - y(d.value))
+    .attr('fill', d => color(d.major))
+    .on('pointerenter focus', (event, d) => {
+      const r = event.target.getBoundingClientRect();
+      tip.style('opacity', 1).text(`${d.major}：${d.value} 份`)
+        .style('left', `${r.left + window.scrollX}px`).style('top', `${r.top + window.scrollY - 30}px`);
+    })
+    .on('pointerleave blur', () => tip.style('opacity', 0));
+}
+
+// 筛选：每个专业一个复选框
+for (const d of data) {
+  const label = d3.select('#filters').append('label');
+  label.append('input').attr('type', 'checkbox').property('checked', true)
+    .on('change', function () { this.checked ? visible.add(d.major) : visible.delete(d.major); render(); });
+  label.append('span').text(' ' + d.major);
+}
+render();
+</script>
+</body>
+</html>
