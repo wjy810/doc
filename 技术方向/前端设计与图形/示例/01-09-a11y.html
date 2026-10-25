@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>多输入与可访问实现：标签页与表单</title>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 15px/1.6 system-ui, sans-serif; color: #1d2330; }
+  * { box-sizing: border-box; }
+  [role="tablist"] { display: flex; gap: 4px; border-bottom: 1px solid #c3c9d3; max-width: 560px; }
+  [role="tab"] { font: inherit; padding: 8px 16px; min-height: 44px; border: 1px solid transparent;  /* 触摸目标足够大 */
+                 border-radius: 8px 8px 0 0; background: none; cursor: pointer; color: #5d6676; }
+  [role="tab"][aria-selected="true"] { color: #1d2330; border-color: #c3c9d3; border-bottom-color: #fff; background: #fff; margin-bottom: -1px; font-weight: 600; }
+  [role="tabpanel"] { background: #fff; border: 1px solid #c3c9d3; border-top: 0; padding: 14px 16px; max-width: 560px; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }    /* 只在键盘操作时显示焦点框 */
+  label { display: block; font-weight: 600; margin-top: 8px; }
+  input, select { font: inherit; padding: 6px 8px; min-height: 40px; box-sizing: border-box; width: 100%; max-width: 320px; }
+  .hint { color: #5d6676; font-size: 13px; margin: 2px 0 0; }
+</style>
+</head>
+<body>
+<!-- 标签页：遵循 WAI-ARIA 创作实践中的模式。Tab 键进入标签列表，左右方向键切换，Home/End 跳到首尾 -->
+<div role="tablist" aria-label="简历设置">
+  <button role="tab" id="t1" aria-selected="true" aria-controls="p1">基本信息</button>
+  <button role="tab" id="t2" aria-selected="false" aria-controls="p2" tabindex="-1">求职意向</button>
+  <button role="tab" id="t3" aria-selected="false" aria-controls="p3" tabindex="-1">隐私</button>
+</div>
+<div role="tabpanel" id="p1" aria-labelledby="t1" tabindex="0">
+  <label for="name">姓名</label>
+  <input id="name" autocomplete="name">
+  <label for="school">学校</label>
+  <input id="school" autocomplete="organization" aria-describedby="school-hint">
+  <p class="hint" id="school-hint">填写正在就读或最近毕业的学校。</p>
+</div>
+<div role="tabpanel" id="p2" aria-labelledby="t2" tabindex="0" hidden>
+  <label for="role">目标岗位</label>
+  <select id="role"><option>前端开发</option><option>产品经理</option><option>数据分析</option></select>
+</div>
+<div role="tabpanel" id="p3" aria-labelledby="t3" tabindex="0" hidden>
+  <p>简历只用于生成分析建议，不会公开展示（示意）。</p>
+</div>
+<script>
+const tabs = [...document.querySelectorAll('[role="tab"]')];
+function select(tab, focus = true) {
+  for (const t of tabs) {
+    const on = t === tab;
+    t.setAttribute('aria-selected', String(on));
+    t.tabIndex = on ? 0 : -1;                     // 只有当前标签可以用 Tab 键到达（漫游 tabindex）
+    document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+  }
+  if (focus) tab.focus();
+}
+tabs.forEach((t, i) => {
+  t.addEventListener('click', () => select(t));
+  t.addEventListener('keydown', e => {
+    const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[e.key];
+    if (next === undefined) return;
+    e.preventDefault();
+    select(tabs[(next + tabs.length) % tabs.length]);
+  });
+});
+</script>
+</body>
+</html>

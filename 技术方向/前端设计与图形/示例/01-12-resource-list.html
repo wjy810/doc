@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>综合项目：资源列表页</title>
+<style>
+  :root { --ink: #1d2330; --muted: #5d6676; --line: #dde1e7; --accent: #2f6fdb; --bg: #f7f7f5; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); font: 15px/1.6 system-ui, sans-serif; color: var(--ink); }
+  h1 { font-size: 20px; margin: 0 0 10px; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; margin-bottom: 8px; }
+  .toolbar label { display: grid; font-size: 13px; color: var(--muted); }
+  input, select, button { font: inherit; min-height: 40px; padding: 4px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; color: var(--ink); }
+  .status { min-height: 24px; color: var(--muted); font-size: 14px; }
+  .layout { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  @media (min-width: 860px) { .layout.has-detail { grid-template-columns: 1fr 300px; } }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; align-content: start; }
+  .card { container-type: inline-size; display: block; text-decoration: none; color: inherit; background: #fff;
+          border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .card[aria-current="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  .thumb { aspect-ratio: 16 / 9; display: grid; place-items: center; color: var(--muted); font-size: 13px; background: #e9edf3; }
+  .body { padding: 10px 12px; display: grid; gap: 2px; }
+  .title { margin: 0; font-size: 15px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .skeleton { height: 190px; border-radius: 10px; background: linear-gradient(90deg, #eceff3, #f6f7f9, #eceff3); background-size: 200% 100%;
+              animation: shimmer 1.2s infinite linear; }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+  @media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+  .empty, .error { grid-column: 1 / -1; background: #fff; border: 1px dashed #c3c9d3; border-radius: 10px; padding: 20px; text-align: center; }
+  .error { border-color: #f0b8b0; }
+  aside { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; align-self: start; }
+  aside h2 { font-size: 17px; margin: 0 0 6px; }
+</style>
+</head>
+<body>
+<h1>求职资源库（示意数据）</h1>
+<form class="toolbar" role="search" id="toolbar">
+  <label>搜索<input id="q" type="search" placeholder="例如：简历"></label>
+  <label>分类<select id="cat"><option value="">全部</option><option>文章</option><option>清单</option><option>模型</option><option>日历</option></select></label>
+  <label>排序<select id="sort"><option value="new">最新</option><option value="short">阅读时间短</option><option value="title">标题</option></select></label>
+  <button type="button" id="reset">清除筛选</button>
+</form>
+<p class="status" id="status" role="status" aria-live="polite"></p>
+<div class="layout" id="layout">
+  <div class="grid" id="list" aria-busy="false"></div>
+  <aside id="detail" hidden aria-labelledby="detail-title">
+    <h2 id="detail-title"></h2>
+    <p class="meta" id="detail-meta"></p>
+    <p id="detail-text"></p>
+    <button type="button" id="close">关闭详情</button>
+  </aside>
+</div>
+<script>
+// ------- 示意数据与模拟接口 -------
+const DATA = [
+  { id: 1, title: '简历写作指南：怎样用一页纸说清楚你的项目经历、技能与成果，并让招聘方愿意继续读下去', type: '文章', minutes: 12, date: '2026-10-20', thumb: false },
+  { id: 2, title: '面试准备清单', type: '清单', minutes: 5, date: '2026-10-18', thumb: true },
+  { id: 3, title: '岗位能力模型：前端工程师', type: '模型', minutes: 8, date: '2026-10-12', thumb: true },
+  { id: 4, title: '作品集怎样展示团队项目中的个人贡献', type: '文章', minutes: 10, date: '2026-10-08', thumb: false },
+  { id: 5, title: '实习投递时间表', type: '日历', minutes: 3, date: '2026-09-30', thumb: true },
+  { id: 6, title: '简历中的数字：怎样量化你的成果', type: '文章', minutes: 7, date: '2026-09-26', thumb: true }
+];
+const failMode = new URLSearchParams(location.search).has('fail');
+function api(params, signal) {          // 模拟 300—700 毫秒的网络请求，可能失败
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => {
+      if (failMode) return reject(new Error('网络错误'));
+      let rows = DATA.filter(d => (!params.cat || d.type === params.cat) && d.title.includes(params.q));
+      const by = { new: (a, b) => b.date.localeCompare(a.date), short: (a, b) => a.minutes - b.minutes,
+                   title: (a, b) => a.title.localeCompare(b.title, 'zh-CN') }[params.sort];
+      resolve(rows.sort(by));
+    }, 300 + Math.random() * 400);
+    signal.addEventListener('abort', () => { clearTimeout(t); reject(new DOMException('已取消', 'AbortError')); });
+  });
+}
+
+// ------- 状态：全部来自地址栏，刷新或前进后退都能恢复上下文 -------
+const $ = id => document.getElementById(id);
+function readState() {
+  const p = new URLSearchParams(location.search);
+  return { q: p.get('q') || '', cat: p.get('cat') || '', sort: p.get('sort') || 'new', id: Number(p.get('id')) || null };
+}
+function writeState(s, push = false) {
+  const p = new URLSearchParams();
+  if (s.q) p.set('q', s.q); if (s.cat) p.set('cat', s.cat); if (s.sort !== 'new') p.set('sort', s.sort);
+  if (s.id) p.set('id', s.id); if (failMode) p.set('fail', '1');
+  const url = location.pathname + (p.toString() ? '?' + p : '');
+  push ? history.pushState(null, '', url) : history.replaceState(null, '', url);
+}
+let state = readState(), rows = [], controller = null, latest = 0;
+
+// ------- 渲染：加载、空结果、失败、成功四种状态 -------
+function h(tag, attrs = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  el.append(...children);
+  return el;
+}
+function renderLoading() {
+  $('list').setAttribute('aria-busy', 'true');
+  $('list').replaceChildren(...Array.from({ length: 3 }, () => h('div', { class: 'skeleton', 'aria-hidden': 'true' })));
+  $('status').textContent = '正在加载…';
+}
+function renderError() {
+  const retry = h('button', { type: 'button' }, '重试');
+  retry.addEventListener('click', load);
+  $('list').replaceChildren(h('div', { class: 'error' }, h('p', {}, '资源加载失败，已保留你的筛选条件。'), retry));
+  $('status').textContent = '加载失败';
+}
+function renderList() {
+  $('list').setAttribute('aria-busy', 'false');
+  if (!rows.length) {
+    const clear = h('button', { type: 'button' }, '清除筛选');
+    clear.addEventListener('click', () => update({ q: '', cat: '' }));
+    $('list').replaceChildren(h('div', { class: 'empty' }, h('p', {}, `没有找到与“${state.q || state.cat}”相关的资源。`), clear));
+  } else {
+    $('list').replaceChildren(...rows.map(d => {
+      const a = h('a', { class: 'card', href: `?id=${d.id}`, 'aria-current': String(d.id === state.id) },
+        d.thumb ? h('div', { class: 'thumb', style: 'background:linear-gradient(135deg,#9db8e8,#f3c98b)', 'aria-hidden': 'true' })
+                : h('div', { class: 'thumb' }, '暂无缩略图'),
+        h('div', { class: 'body' }, h('h2', { class: 'title' }, d.title), h('p', { class: 'meta' }, `${d.type} · 约 ${d.minutes} 分钟 · ${d.date}`)));
+      a.addEventListener('click', e => { e.preventDefault(); update({ id: d.id }, true); });
+      return a;
+    }));
+  }
+  $('status').textContent = `共 ${rows.length} 项`;
+  renderDetail();
+}
+function renderDetail() {
+  const d = rows.find(r => r.id === state.id);
+  $('detail').hidden = !d;
+  $('layout').classList.toggle('has-detail', Boolean(d));
+  if (!d) return;
+  $('detail-title').textContent = d.title;             // 详情中显示完整标题
+  $('detail-meta').textContent = `${d.type} · 约 ${d.minutes} 分钟 · 更新于 ${d.date}`;
+  $('detail-text').textContent = '这里显示资源的摘要与链接（示意）。';
+}
+
+// ------- 加载：只采用最新一次请求的结果 -------
+async function load() {
+  controller?.abort();
+  controller = new AbortController();
+  const id = ++latest;
+  renderLoading();
+  try {
+    const result = await api(state, controller.signal);
+    if (id !== latest) return;
+    rows = result;
+    renderList();
+  } catch (e) {
+    if (e.name !== 'AbortError' && id === latest) renderError();
+  }
+}
+
+// ------- 交互：筛选改变时更新地址并重新加载；选中项只改变详情，不重新加载 -------
+function update(change, push = false) {
+  const reload = ['q', 'cat', 'sort'].some(k => k in change && change[k] !== state[k]);
+  state = { ...state, ...change };
+  writeState(state, push);
+  syncControls();
+  reload ? load() : renderList();
+}
+function syncControls() { $('q').value = state.q; $('cat').value = state.cat; $('sort').value = state.sort; }
+let timer;
+$('q').addEventListener('input', e => { clearTimeout(timer); timer = setTimeout(() => update({ q: e.target.value.trim() }), 250); });
+$('cat').addEventListener('change', e => update({ cat: e.target.value }));
+$('sort').addEventListener('change', e => update({ sort: e.target.value }));
+$('reset').addEventListener('click', () => update({ q: '', cat: '', sort: 'new' }));
+$('close').addEventListener('click', () => update({ id: null }, true));
+addEventListener('popstate', () => { const next = readState(); const reload = ['q', 'cat', 'sort'].some(k => next[k] !== state[k]);
+  state = next; syncControls(); reload ? load() : renderList(); });
+$('toolbar').addEventListener('submit', e => e.preventDefault());
+
+syncControls();
+load();
+</script>
+</body>
+</html>

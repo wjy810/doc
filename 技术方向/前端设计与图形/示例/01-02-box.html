@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>结构与样式的地基：盒模型、定位与层叠</title>
+<style>
+  :root { --ink: #1d2330; --muted: #5d6676; --line: #dde1e7; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.6 system-ui, sans-serif; color: var(--ink); }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  h2 { font-size: 15px; margin: 0 0 8px; }
+  .note { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+
+  /* 1. 盒模型：同样写 width: 160px，两种 box-sizing 得到不同的实际宽度 */
+  .box { width: 160px; padding: 16px; border: 6px solid #9db8e8; background: #eef3fb; margin: 6px 0; }
+  .content-box { box-sizing: content-box; }   /* 宽度只算内容：实际宽度 = 160 + 16×2 + 6×2 */
+  .border-box { box-sizing: border-box; }     /* 宽度包含内边距和边框：实际宽度就是 160 */
+
+  /* 2. 定位：徽标相对于卡片定位，因为卡片设置了 position: relative */
+  .card { position: relative; border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-top: 4px; }
+  .badge { position: absolute; top: -8px; right: -8px; background: #e4572e; color: #fff; font-size: 12px;
+           border-radius: 99px; padding: 0 8px; }
+  .sticky-wrap { height: 92px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; margin-top: 10px; }
+  .sticky-wrap h3 { position: sticky; top: 0; margin: 0; padding: 4px 10px; font-size: 13px; background: #eef3fb; }
+  .sticky-wrap p { margin: 0; padding: 2px 10px; }
+
+  /* 3. 裁切与顶层：overflow: hidden 会裁掉里面的下拉菜单；放到顶层（popover）就不会 */
+  .clip { position: relative; overflow: hidden; height: 76px; border: 1px dashed #c3c9d3; border-radius: 8px; padding: 8px; }
+  .menu { position: absolute; top: 40px; left: 8px; margin: 0; padding: 4px 0; list-style: none; background: #fff;
+          border: 1px solid #c3c9d3; border-radius: 6px; box-shadow: 0 6px 16px rgba(0,0,0,.12); width: 150px; }
+  .menu li { padding: 2px 10px; }
+  [popover].menu { position: fixed; inset: auto; }   /* 顶层中的元素按视口定位 */
+  button { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; }
+</style>
+</head>
+<body>
+<div class="row">
+  <section>
+    <h2>盒模型</h2>
+    <div class="box content-box" id="b1">content-box</div>
+    <div class="box border-box" id="b2">border-box</div>
+    <p class="note" id="sizes"></p>
+  </section>
+  <section>
+    <h2>定位</h2>
+    <div class="card">简历分析报告<span class="badge">新</span></div>
+    <div class="sticky-wrap" id="sticky">
+      <h3>第 1 节：基本信息（吸顶标题）</h3>
+      <p>姓名、学校、联系方式</p><p>求职意向</p><p>实习经历</p><p>项目经历</p><p>技能</p>
+    </div>
+    <p class="note">徽标用 absolute 贴在卡片右上角；滚动列表时，节标题用 sticky 停在顶部。</p>
+  </section>
+  <section>
+    <h2>裁切与顶层</h2>
+    <div class="clip">
+      <button type="button">排序方式 ▾</button>
+      <ul class="menu" aria-label="被裁掉的菜单"><li>最新</li><li>阅读时间短</li><li>标题</li></ul>
+    </div>
+    <div class="clip" style="margin-top:8px">
+      <button type="button" popovertarget="m2" id="open2">排序方式 ▾</button>
+      <ul class="menu" popover id="m2"><li>最新</li><li>阅读时间短</li><li>标题</li></ul>
+    </div>
+    <p class="note">上：菜单被父元素的 overflow: hidden 裁掉。下：使用 popover，菜单进入顶层，不受裁切。</p>
+  </section>
+</div>
+<script>
+// 读出两个盒子的实际宽度
+const w = id => document.getElementById(id).getBoundingClientRect().width;
+document.getElementById('sizes').textContent =
+  `都写了 width: 160px；实际宽度分别是 ${w('b1')} 像素和 ${w('b2')} 像素。`;
+
+// 让吸顶标题的效果在截图中可见：先滚动一段距离
+document.getElementById('sticky').scrollTop = 40;
+
+// popover 菜单打开后，放到按钮的正下方（较新的浏览器也可以用 CSS 锚点定位完成）
+const menu = document.getElementById('m2');
+const opener = document.getElementById('open2');
+menu.addEventListener('toggle', e => {
+  if (e.newState !== 'open') return;
+  const r = opener.getBoundingClientRect();
+  menu.style.left = `${r.left}px`;
+  menu.style.top = `${r.bottom + 4}px`;
+});
+</script>
+</body>
+</html>

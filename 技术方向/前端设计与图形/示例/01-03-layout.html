@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>布局与响应式：内在尺寸、网格与容器查询</title>
+<style>
+  :root { --ink: #1d2330; --muted: #5d6676; --line: #dde1e7; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 15px/1.6 system-ui, sans-serif; color: var(--ink); }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+
+  /* 1. 网格：每列至少 220 像素，放得下几列就放几列，剩余空间平均分配 */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+
+  /* 2. 卡片是一个“容器”：卡片内部的布局取决于卡片自己的宽度，而不是整个窗口的宽度 */
+  .card { container-type: inline-size; background: #fff; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .card-inner { height: 100%; }
+  .card-body { display: grid; gap: 4px; padding: 12px 14px; align-content: start; }
+  .thumb { aspect-ratio: 16 / 9; background: #e9edf3; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .title { margin: 0; font-size: 16px; line-height: 1.4;
+           /* 长标题：最多显示两行，超出部分省略，完整标题放在 title 属性与详情中 */
+           display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+  .tag { border: 1px solid var(--line); border-radius: 99px; padding: 0 8px; }
+
+  /* 3. 容器查询：卡片足够宽时，图片放在左边，文字放在右边 */
+  @container (min-width: 420px) {
+    .card-inner { display: grid; grid-template-columns: 180px 1fr; }
+    .thumb { aspect-ratio: auto; height: 100%; min-height: 120px; }
+  }
+  /* 第一张卡片横跨两列，用来演示同一组件在宽容器中的样子 */
+  .card.wide { grid-column: span 2; }
+  @media (max-width: 520px) { .card.wide { grid-column: auto; } }
+</style>
+</head>
+<body>
+<h1>资源列表（示意数据）</h1>
+<div class="grid" id="grid"></div>
+<script>
+// 示意数据：包含长标题、缺失的缩略图与较长的标签，用来检验布局是否经得起真实内容
+const items = [
+  { title: '简历写作指南：怎样用一页纸说清楚你的项目经历、技能与成果，并让招聘方愿意继续读下去', type: '文章', minutes: 12, tags: ['简历', '入门'], img: null },
+  { title: '面试准备清单', type: '清单', minutes: 5, tags: ['面试'], img: 'gradient' },
+  { title: '岗位能力模型：前端工程师', type: '模型', minutes: 8, tags: ['前端', '能力画布'], img: 'gradient' },
+  { title: '作品集怎样展示团队项目中的个人贡献', type: '文章', minutes: 10, tags: ['作品集'], img: null },
+  { title: '实习投递时间表', type: '日历', minutes: 3, tags: ['实习', '时间规划', '校园招聘'], img: 'gradient' }
+];
+const grid = document.getElementById('grid');
+// 小工具：创建元素。文字一律通过 textContent 写入，避免把数据当作 HTML 解析
+function h(tag, attrs = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  for (const c of children) el.append(c);
+  return el;
+}
+items.forEach((it, i) => {
+  const thumb = it.img
+    ? h('div', { class: 'thumb', style: 'background:linear-gradient(135deg,#9db8e8,#f3c98b)' })
+    : h('div', { class: 'thumb', role: 'img', 'aria-label': '暂无缩略图' }, '暂无缩略图');
+  const meta = h('div', { class: 'meta' }, h('span', {}, it.type), h('span', {}, `约 ${it.minutes} 分钟`),
+    ...it.tags.map(t => h('span', { class: 'tag' }, t)));
+  const body = h('div', { class: 'card-body' }, h('h2', { class: 'title', title: it.title }, it.title), meta);
+  grid.append(h('article', { class: 'card' + (i === 0 ? ' wide' : '') }, h('div', { class: 'card-inner' }, thumb, body)));
+});
+</script>
+</body>
+</html>

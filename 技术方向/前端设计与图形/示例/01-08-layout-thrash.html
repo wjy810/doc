@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>渲染性能：交替读写布局与批量读写</title>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.6 system-ui, sans-serif; color: #1d2330; }
+  .box { width: 100px; height: 4px; background: #2f6fdb; margin: 1px 0; }
+  #boxes { height: 120px; overflow: hidden; border: 1px solid #dde1e7; background: #fff; }
+  table { border-collapse: collapse; margin-top: 10px; background: #fff; }
+  td, th { border: 1px solid #dde1e7; padding: 6px 10px; text-align: left; }
+  .bar { height: 12px; background: #e4572e; }
+  .bar.good { background: #3a9d5d; }
+</style>
+</head>
+<body>
+<p>对 800 个元素做同样的事：读取父容器的宽度，再把自己的宽度设为它的一半。</p>
+<div id="boxes"></div>
+<table><thead><tr><th>写法</th><th>耗时</th><th style="width:260px">相对比较</th></tr></thead><tbody id="out"></tbody></table>
+<script>
+const host = document.getElementById('boxes');
+for (let i = 0; i < 800; i++) { const d = document.createElement('div'); d.className = 'box'; host.append(d); }
+const boxes = [...host.children];
+
+// 写法一：读、写、读、写……每次写入后再读取，浏览器都要立即重新计算布局（强制同步布局）
+function interleaved(scale) {
+  for (const b of boxes) {
+    const w = b.parentElement.offsetWidth;      // 读取布局
+    b.style.width = (w * scale) + 'px';         // 修改样式，使布局失效
+  }
+}
+// 写法二：先把需要的值全部读出来，再一次性写入，布局只计算一次
+function batched(scale) {
+  const widths = boxes.map(b => b.parentElement.offsetWidth);
+  boxes.forEach((b, i) => { b.style.width = (widths[i] * scale) + 'px'; });
+}
+
+function measure(fn) {
+  const runs = [];
+  for (let k = 0; k < 5; k++) {
+    host.style.width = (600 + k) + 'px';         // 每次改变容器宽度，确保布局真的需要重新计算
+    const t0 = performance.now();
+    fn(0.5 + k * 0.01);
+    host.offsetWidth;                            // 让最后一次布局也计入时间
+    runs.push(performance.now() - t0);
+  }
+  runs.sort((a, b) => a - b);
+  return runs[2];                                // 取中位数，减少偶然波动
+}
+
+const a = measure(interleaved), b = measure(batched);
+const max = Math.max(a, b);
+function row(name, ms, cls) {
+  const tr = document.createElement('tr');
+  const bar = document.createElement('div');
+  bar.className = 'bar' + (cls ? ' ' + cls : '');
+  bar.style.width = (ms / max * 100) + '%';
+  for (const content of [name, `${ms.toFixed(1)} 毫秒`, bar]) {
+    const td = document.createElement('td');
+    td.append(content);
+    tr.append(td);
+  }
+  return tr;
+}
+document.getElementById('out').replaceChildren(row('交替读写', a), row('先读后写', b, 'good'));
+</script>
+</body>
+</html>

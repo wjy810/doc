@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>应用状态：搜索请求的竞态</title>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 14px/1.6 system-ui, sans-serif; color: #1d2330; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 760px; }
+  section { background: #fff; border: 1px solid #dde1e7; border-radius: 8px; padding: 10px 12px; }
+  h2 { font-size: 15px; margin: 0 0 6px; }
+  .shown { font-size: 15px; font-weight: 600; }
+  .bad { color: #b42318; } .good { color: #067647; }
+  ol { margin: 6px 0 0; padding-left: 20px; color: #5d6676; font-size: 13px; }
+  input { font: inherit; padding: 4px 8px; width: 220px; }
+</style>
+</head>
+<body>
+<p><label>搜索 <input id="q" placeholder="输入岗位名称"></label>（示例会自动依次输入“前”“前端”“前端实习”）</p>
+<div class="row">
+  <section><h2>未处理竞态</h2><p>显示的结果：<span class="shown" id="naive">—</span></p><ol id="log1"></ol></section>
+  <section><h2>只采用最新请求的结果</h2><p>显示的结果：<span class="shown" id="safe">—</span></p><ol id="log2"></ol></section>
+</div>
+<script>
+// 模拟后端：较短的关键词返回的结果更多，处理得更慢（示意）
+const delays = { '前': 900, '前端': 500, '前端实习': 200 };
+function fakeSearch(q, signal) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => resolve(`“${q}”的结果`), delays[q] ?? 300);
+    signal?.addEventListener('abort', () => { clearTimeout(t); reject(new DOMException('已取消', 'AbortError')); });
+  });
+}
+const log = (id, text) => { const li = document.createElement('li'); li.textContent = text; document.getElementById(id).append(li); };
+
+// 写法一：每次输入都发请求，谁最后返回就显示谁 → 慢的旧请求会覆盖新结果
+async function naive(q) {
+  const t0 = performance.now();
+  const r = await fakeSearch(q);
+  log('log1', `${Math.round(performance.now() - t0)} 毫秒后返回 ${r}`);
+  document.getElementById('naive').textContent = r;
+}
+
+// 写法二：新的请求开始时取消上一个请求；即使无法取消，也只采用最新一次请求的结果
+let controller = null, latest = 0;
+async function safe(q) {
+  controller?.abort();
+  controller = new AbortController();
+  const id = ++latest;
+  try {
+    const r = await fakeSearch(q, controller.signal);
+    if (id !== latest) return;                      // 双重保险：过期的结果直接丢弃
+    log('log2', `采用 ${r}`);
+    document.getElementById('safe').textContent = r;
+  } catch (e) {
+    if (e.name === 'AbortError') log('log2', `取消“${q}”的请求`);
+    else throw e;
+  }
+}
+
+const input = document.getElementById('q');
+input.addEventListener('input', () => { naive(input.value); safe(input.value); });
+
+// 自动演示：快速依次输入三个词
+['前', '前端', '前端实习'].forEach((v, i) => setTimeout(() => {
+  input.value = v;
+  input.dispatchEvent(new Event('input'));
+}, i * 120));
+setTimeout(() => {
+  const ok = document.getElementById('naive').textContent.includes('前端实习');
+  document.getElementById('naive').className = 'shown ' + (ok ? 'good' : 'bad');
+  document.getElementById('safe').className = 'shown good';
+}, 1400);
+</script>
+</body>
+</html>

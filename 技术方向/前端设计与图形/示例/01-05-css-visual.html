@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CSS 视觉表达：每一层装饰都有作用</title>
+<style>
+  body { margin: 0; padding: 16px; background: #f7f7f5; font: 15px/1.6 system-ui, sans-serif; color: #1d2330; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .scene { position: relative; width: 300px; height: 220px; border-radius: 12px; overflow: hidden;
+           background: linear-gradient(135deg, #2f6fdb, #7b5ea7 55%, #e4572e); }       /* 渐变：品牌氛围 */
+  .scene::before { content: ''; position: absolute; inset: 0;                           /* 圆点纹理：增加质感 */
+           background: radial-gradient(circle, rgba(255,255,255,.25) 1px, transparent 1.5px) 0 0 / 14px 14px; }
+  .card { position: absolute; left: 24px; right: 24px; bottom: 20px; padding: 12px 14px; border-radius: 10px; }
+  .glass { background: rgba(255,255,255,.18); backdrop-filter: blur(10px);               /* 毛玻璃：与背景分层 */
+           border: 1px solid rgba(255,255,255,.35); color: #fff; }
+  .solid { background: #fff; color: #1d2330;
+           box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 8px 24px rgba(0,0,0,.18); }       /* 阴影：表示浮起的层级 */
+  .badge { position: absolute; top: 16px; left: 16px; width: 64px; height: 64px; background: #f6c445;
+           clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%); } /* 裁切：形状 */
+  .title { font-weight: 600; margin: 0; }
+  .note { font-size: 13px; margin: 0; }
+  .contrast { margin-top: 6px; font-size: 13px; }
+  .bad { color: #b42318; } .good { color: #067647; }
+</style>
+</head>
+<body>
+<div class="row">
+  <figure style="margin:0">
+    <div class="scene" id="s1"><div class="badge"></div>
+      <div class="card glass"><p class="title">毛玻璃卡片</p><p class="note">背景较亮的位置，白字可能看不清</p></div></div>
+    <figcaption class="contrast" id="c1"></figcaption>
+  </figure>
+  <figure style="margin:0">
+    <div class="scene" id="s2"><div class="badge"></div>
+      <div class="card solid"><p class="title">实色卡片与阴影</p><p class="note">文字对比稳定，阴影表示层级</p></div></div>
+    <figcaption class="contrast" id="c2"></figcaption>
+  </figure>
+</div>
+<script>
+// WCAG 的对比度计算：先把颜色换算为相对亮度，再计算 (较亮 + 0.05) ÷ (较暗 + 0.05)
+function luminance([r, g, b]) {
+  const f = c => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+}
+function ratio(a, b) {
+  const [l1, l2] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (l1 + 0.05) / (l2 + 0.05);
+}
+// 毛玻璃卡片下方最亮处的背景约为橙色 #e4572e 与 18% 白色叠加；正文需要至少 4.5:1
+const mix = (c, w, a) => c.map((v, i) => v * (1 - a) + w[i] * a);
+const glassBg = mix([228, 87, 46], [255, 255, 255], 0.18);
+const r1 = ratio([255, 255, 255], glassBg);
+const r2 = ratio([29, 35, 48], [255, 255, 255]);
+const show = (id, r) => {
+  const ok = r >= 4.5;
+  const b = document.createElement('b');
+  b.className = ok ? 'good' : 'bad';
+  b.textContent = `${r.toFixed(2)}:1`;
+  document.getElementById(id).replaceChildren('文字对比度 ', b, `（正文要求至少 4.5:1，${ok ? '通过' : '不通过'}）`);
+};
+show('c1', r1);
+show('c2', r2);
+</script>
+</body>
+</html>

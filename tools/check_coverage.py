@@ -342,10 +342,10 @@ def cmd_check(args: list[str]) -> int:
                 state = "已覆盖" if found else ("缺失" if final else "待写")
             elif any(any(t in texts[d] for t in terms) for d in written):
                 state = "已覆盖"
-            elif any(any(t in body for t in terms) for name, body in texts.items() if name not in targets):
-                state = "他处覆盖" if written else "待写"
-            elif not written:
+            elif len(written) < len(targets):  # 还有目标文档没写出来：可能由它覆盖
                 state = "待写"
+            elif any(any(t in body for t in terms) for name, body in texts.items() if name not in targets):
+                state = "他处覆盖"
             else:
                 state = "缺失"
             stats.setdefault(chapter, {}).setdefault(state, 0)
