@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>图标与符号：一致的线宽、圆角与细节密度</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: #1d2330; font: 14px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 16px; }
+  section { background: #fff; border: 1px solid #e2e5ea; border-radius: 12px; padding: 14px 18px; }
+  h2 { font-size: 13px; color: #616a7a; font-weight: 400; margin: 0 0 10px; }
+  .set { display: flex; gap: 18px; flex-wrap: wrap; align-items: end; }
+  .item { display: grid; justify-items: center; gap: 4px; font-size: 12px; color: #616a7a; }
+  svg { color: #1d2330; display: block; }
+  /* 一致的图标：24 × 24 网格，2 像素线宽，圆头圆角，不填充 */
+  .line { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .sizes { display: flex; gap: 22px; align-items: end; }
+  .sizes .group { display: flex; gap: 10px; align-items: end; }
+  .label-btn { display: inline-flex; gap: 6px; align-items: center; font: inherit; padding: 6px 12px; border: 1px solid #c3c9d3; border-radius: 8px; background: #fff; }
+  .icon-btn { display: inline-grid; place-items: center; width: 36px; height: 36px; border: 1px solid #c3c9d3; border-radius: 8px; background: #fff; }
+  .note { font-size: 12px; color: #616a7a; margin: 10px 0 0; }
+</style>
+</head>
+<body>
+<!-- 图标定义：每个图标都画在 24 × 24 的网格中 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="home" viewBox="0 0 24 24"><path class="line" d="M3 10.5 12 3l9 7.5M5 9v11h5v-6h4v6h5V9"/></symbol>
+  <symbol id="search" viewBox="0 0 24 24"><circle class="line" cx="10.5" cy="10.5" r="6.5"/><path class="line" d="m15.5 15.5 5 5"/></symbol>
+  <symbol id="bookmark" viewBox="0 0 24 24"><path class="line" d="M6 3.5h12v17l-6-4.5-6 4.5z"/></symbol>
+  <symbol id="chat" viewBox="0 0 24 24"><path class="line" d="M4 5h16v11H10l-6 4.5z"/></symbol>
+  <symbol id="user" viewBox="0 0 24 24"><circle class="line" cx="12" cy="8" r="4"/><path class="line" d="M4 20.5c0-4.2 3.6-6.5 8-6.5s8 2.3 8 6.5"/></symbol>
+  <symbol id="filter" viewBox="0 0 24 24"><path class="line" d="M4 6h9m4 0h3M4 12h3m4 0h9M4 18h11m4 0h1"/><circle class="line" cx="15" cy="6" r="2"/><circle class="line" cx="9" cy="12" r="2"/><circle class="line" cx="17" cy="18" r="2"/></symbol>
+  <!-- 细节很多的齿轮：大尺寸好看，小尺寸糊成一团 -->
+  <symbol id="gear-detail" viewBox="0 0 24 24"><g class="line" style="stroke-width:1">
+    <circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="2.5"/><circle cx="12" cy="12" r="1"/>
+    <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4M8.4 3.2l.7 1.9M15.6 20.8l-.7-1.9M3.2 15.6l1.9-.7M20.8 8.4l-1.9.7"/></g></symbol>
+  <!-- 简化的齿轮：减少细节，保留轮廓特征 -->
+  <symbol id="gear-simple" viewBox="0 0 24 24"><path class="line" d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/><circle class="line" cx="12" cy="12" r="5"/><circle class="line" cx="12" cy="12" r="1.8"/></symbol>
+</svg>
+
+<div class="grid">
+  <section>
+    <h2>一致的一套：同样的网格、线宽、圆角和视觉重量</h2>
+    <div class="set" id="consistent"></div>
+  </section>
+  <section>
+    <h2>混在一起的一套：实心与空心混用、线宽不同、角度和细节不统一</h2>
+    <div class="set">
+      <div class="item"><svg width="32" height="32" viewBox="0 0 24 24"><path d="M3 11 12 3l9 8v10h-6v-6h-6v6H3z" fill="currentColor"/></svg>首页</div>
+      <div class="item"><svg width="32" height="32" viewBox="0 0 24 24"><circle cx="9" cy="9" r="7.5" fill="none" stroke="currentColor" stroke-width="1"/><path d="m14.5 14.5 7 7" stroke="currentColor" stroke-width="1"/></svg>搜索</div>
+      <div class="item"><svg width="32" height="32" viewBox="0 0 24 24"><path d="M6 3h12v18l-6-5-6 5z" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linejoin="miter"/></svg>收藏</div>
+      <div class="item"><svg width="32" height="32" viewBox="0 0 24 24"><defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#7aa7ff"/><stop offset="1" stop-color="#2f6fdb"/></linearGradient></defs><path d="M3 6l17-3v11l-10 2-6 5z" fill="url(#g)"/></svg>消息</div>
+      <div class="item"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9.5"/><circle cx="9" cy="10" r=".8"/><circle cx="15" cy="10" r=".8"/><path d="M8.5 14.5q3.5 3 7 0"/></svg>用户</div>
+      <div class="item"><svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="5" width="18" height="2.5"/><rect x="6" y="11" width="12" height="2.5"/><rect x="9" y="17" width="6" height="2.5"/></svg>筛选</div>
+    </div>
+  </section>
+  <section>
+    <h2>细节密度：16、24、48 像素下的两种齿轮</h2>
+    <div class="sizes">
+      <div class="group"><svg width="16" height="16"><use href="#gear-detail"/></svg><svg width="24" height="24"><use href="#gear-detail"/></svg><svg width="48" height="48"><use href="#gear-detail"/></svg></div>
+      <div class="group"><svg width="16" height="16"><use href="#gear-simple"/></svg><svg width="24" height="24"><use href="#gear-simple"/></svg><svg width="48" height="48"><use href="#gear-simple"/></svg></div>
+    </div>
+    <p class="note">左：细节多，在 16 像素时糊成一团。右：减少细节、加粗线条，小尺寸仍能认出。</p>
+  </section>
+  <section>
+    <h2>含义不明确的图标，配上文字</h2>
+    <div class="set">
+      <div class="item"><span class="icon-btn" role="img" aria-label="筛选"><svg width="20" height="20"><use href="#filter"/></svg></span>只有图标：是“筛选”还是“设置”？</div>
+      <div class="item"><button class="label-btn" type="button"><svg width="18" height="18" aria-hidden="true"><use href="#filter"/></svg>筛选</button>图标加文字：含义明确</div>
+    </div>
+  </section>
+</div>
+<script>
+const names = { home: '首页', search: '搜索', bookmark: '收藏', chat: '消息', user: '用户', filter: '筛选' };
+const box = document.getElementById('consistent');
+for (const [id, name] of Object.entries(names)) {
+  const item = document.createElement('div');
+  item.className = 'item';
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', '32'); svg.setAttribute('height', '32'); svg.setAttribute('aria-hidden', 'true');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', '#' + id);
+  svg.append(use);
+  item.append(svg, name);
+  box.append(item);
+}
+</script>
+</body>
+</html>

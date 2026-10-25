@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>插画与图形语言：同一个空状态的三种画法</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/lxgw-wenkai@5.3.0/500.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: #1d2330; font: 14px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
+  .card { border-radius: 14px; padding: 18px; text-align: center; display: grid; justify-items: center; gap: 6px; }
+  .card svg { width: 200px; height: 150px; }
+  .card h2 { font-size: 17px; margin: 4px 0 0; }
+  .card p { margin: 0; font-size: 13px; color: #5b6475; max-width: 18em; }
+  .card button { font: inherit; margin-top: 8px; padding: 7px 16px; border-radius: 8px; border: 0; }
+  .tag { font-size: 12px; color: #616a7a; margin: 8px 0 0; }
+
+  /* 几何：纯色块、圆与圆角矩形，干净、现代 */
+  .geo { background: #fff; border: 1px solid #e2e5ea; }
+  .geo button { background: #2f6fdb; color: #fff; font-weight: 700; }
+
+  /* 手绘：线条有轻微抖动，楷体标题，暖色纸面 */
+  .hand { background: #fffdf7; border: 1.5px solid #3a3a3a; border-radius: 16px 12px 18px 10px; }
+  .hand h2 { font-family: "LXGW WenKai", serif; font-weight: 500; font-size: 20px; }
+  .hand button { background: none; border: 1.5px solid #3a3a3a; border-radius: 12px 8px 14px 9px; font-family: "LXGW WenKai", serif; font-size: 15px; }
+
+  /* 纸感拼贴：纸张纹理、撕边、胶带与投影 */
+  .paper { background: #efe6d6; position: relative; overflow: hidden; }
+  .paper::before { content: ''; position: absolute; inset: 0; filter: url(#grain); opacity: .5; pointer-events: none; }
+  .paper > * { position: relative; }
+  .paper button { background: #c8553d; color: #fff8ee; font-weight: 700; box-shadow: 2px 2px 0 #7a3324; }
+</style>
+</head>
+<body>
+<!-- 共享的滤镜：抖动的线条、纸张的颗粒 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <filter id="wobble"><feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="2" seed="3"/><feDisplacementMap in="SourceGraphic" scale="4"/></filter>
+  <filter id="grain" x="0" y="0" width="100%" height="100%">
+    <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" seed="7" result="n"/>
+    <feColorMatrix in="n" type="matrix" values="0 0 0 0 0.35  0 0 0 0 0.28  0 0 0 0 0.18  0 0 0 .55 0"/>
+  </filter>
+  <filter id="torn"><feTurbulence type="fractalNoise" baseFrequency="0.06" numOctaves="3" seed="11"/><feDisplacementMap in="SourceGraphic" scale="7"/></filter>
+  <filter id="drop"><feDropShadow dx="2" dy="3" stdDeviation="2" flood-color="#5a4630" flood-opacity=".35"/></filter>
+</svg>
+
+<div class="row">
+  <div class="card geo">
+    <svg viewBox="0 0 200 150" role="img" aria-label="几何风格：一个打开的文件夹和一枚书签">
+      <circle cx="100" cy="78" r="60" fill="#eef3fb"/>
+      <rect x="52" y="58" width="96" height="62" rx="8" fill="#9db8e8"/>
+      <path d="M52 66a8 8 0 0 1 8-8h26l8 8h46a8 8 0 0 1 8 8v4H52z" fill="#2f6fdb"/>
+      <rect x="58" y="72" width="84" height="48" rx="6" fill="#cfdcf3"/>
+      <path d="M118 40h22v40l-11-8-11 8z" fill="#f0a35e"/>
+      <circle cx="44" cy="44" r="5" fill="#f0a35e"/><circle cx="160" cy="112" r="4" fill="#2f6fdb"/>
+    </svg>
+    <h2>还没有收藏的资源</h2>
+    <p>看到有用的文章或清单时，点击书签就能收藏到这里。</p>
+    <button type="button">去资源库看看</button>
+    <p class="tag">几何：纯色块与圆角，清楚、现代，适合工具类产品</p>
+  </div>
+
+  <div class="card hand">
+    <svg viewBox="0 0 200 150" role="img" aria-label="手绘风格：一个打开的文件夹和一枚书签">
+      <g filter="url(#wobble)" fill="none" stroke="#3a3a3a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M50 64h30l8 8h56v50H50z" fill="#fde9b8"/>
+        <path d="M50 78h94" />
+        <path d="M118 36h22v42l-11-8-11 8z" fill="#f4b183"/>
+        <path d="M62 92h40M62 102h28" stroke-width="1.6"/>
+        <path d="M34 40l6 6M40 40l-6 6M160 112c4-4 8 4 12 0" stroke-width="1.6"/>
+      </g>
+    </svg>
+    <h2>还没有收藏的资源</h2>
+    <p>看到有用的文章或清单时，点击书签就能收藏到这里。</p>
+    <button type="button">去资源库看看</button>
+    <p class="tag">手绘：线条有轻微抖动，亲切、轻松，适合面向学生的产品</p>
+  </div>
+
+  <div class="card paper">
+    <svg viewBox="0 0 200 150" role="img" aria-label="纸感拼贴风格：一个打开的文件夹和一枚书签">
+      <g filter="url(#drop)">
+        <path d="M48 62h32l8 8h60v52H48z" fill="#f7d58c" filter="url(#torn)"/>
+        <rect x="56" y="78" width="86" height="40" fill="#fbf3e2" filter="url(#torn)"/>
+        <path d="M116 34h24v44l-12-9-12 9z" fill="#c8553d" filter="url(#torn)"/>
+      </g>
+      <rect x="62" y="56" width="26" height="9" fill="#e9dcc3" opacity=".85" transform="rotate(-12 75 60)"/>
+      <rect x="128" y="104" width="24" height="9" fill="#e9dcc3" opacity=".85" transform="rotate(10 140 108)"/>
+    </svg>
+    <h2>还没有收藏的资源</h2>
+    <p>看到有用的文章或清单时，点击书签就能收藏到这里。</p>
+    <button type="button">去资源库看看</button>
+    <p class="tag">纸感拼贴：纹理、撕边与投影，有温度，适合内容与品牌专题</p>
+  </div>
+</div>
+</body>
+</html>

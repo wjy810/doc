@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>一套可用于起步的视觉规则</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5.3.0/400.css">
+<style>
+  /* ---------- 规则写成变量：页面中的数值只能从这里取 ---------- */
+  :root {
+    --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px; --space-7: 48px;
+    --text-caption: 13px; --text-body: 16px; --text-h3: 20px; --text-h2: 24px; --text-h1: 32px;
+    --leading-body: 1.7; --leading-title: 1.3;
+    --color-bg: #f6f5f2; --color-surface: #ffffff; --color-text: #1d2330; --color-muted: #5b6475;
+    --color-border: #8a93a3; --color-divider: #e3e6eb; --color-primary: #2f6fdb; --color-on-primary: #ffffff;
+    --color-success: #067647; --color-warning: #8a5300; --color-danger: #b42318;
+    --radius-control: 6px; --radius-card: 10px; --radius-dialog: 14px;
+    --shadow-1: 0 1px 2px rgba(16, 24, 40, .08);
+    --shadow-2: 0 2px 4px rgba(16, 24, 40, .06), 0 6px 16px rgba(16, 24, 40, .10);
+    --shadow-3: 0 4px 8px rgba(16, 24, 40, .08), 0 16px 40px rgba(16, 24, 40, .18);
+    --duration-fast: 150ms; --duration-base: 200ms; --duration-slow: 300ms;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: var(--space-5); background: var(--color-bg); color: var(--color-text);
+         font: var(--text-body) / var(--leading-body) Inter, "Noto Sans SC", system-ui, sans-serif; }
+  .sheet { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: var(--space-4); }
+  section { background: var(--color-surface); border-radius: var(--radius-card); box-shadow: var(--shadow-1); padding: var(--space-4); }
+  h2 { font-size: var(--text-caption); color: var(--color-muted); font-weight: 400; margin: 0 0 var(--space-3); }
+  .k { font-size: 12px; color: var(--color-muted); font-variant-numeric: tabular-nums; }
+  .spaces { display: grid; gap: 6px; }
+  .spaces div { display: grid; grid-template-columns: 40px 1fr; align-items: center; gap: var(--space-2); }
+  .spaces i { display: block; height: 10px; background: #9db8e8; border-radius: 2px; }
+  .type p { margin: 0 0 var(--space-1); line-height: var(--leading-title); }
+  .roles { display: grid; gap: 6px; }
+  .roles div { display: grid; grid-template-columns: 22px 1fr auto; gap: var(--space-2); align-items: center; font-size: 14px; }
+  .roles i { width: 22px; height: 22px; border-radius: 5px; border: 1px solid rgba(0,0,0,.08); }
+  .radii, .shadows, .targets { display: flex; gap: var(--space-4); align-items: end; flex-wrap: wrap; }
+  .radii div, .shadows div { width: 70px; height: 54px; background: #eef3fb; display: grid; place-items: end center; padding-bottom: 4px; font-size: 12px; color: var(--color-muted); }
+  .shadows div { background: var(--color-surface); border-radius: var(--radius-card); }
+  .targets button { font: inherit; font-size: 12px; border: 0; background: var(--color-primary); color: var(--color-on-primary); border-radius: var(--radius-control); padding: 0; display: grid; place-items: center; }
+  .motion { display: grid; gap: 6px; font-size: 14px; }
+  .motion div { display: grid; grid-template-columns: 64px 1fr; gap: var(--space-2); align-items: center; }
+  .motion i { display: block; height: 8px; border-radius: 4px; background: var(--color-primary); opacity: .8; }
+  .images { display: grid; grid-template-columns: 1.78fr 1fr; gap: var(--space-2); align-items: start; }
+  .images div { border-radius: var(--radius-control); display: grid; place-items: center; font-size: 12px; color: var(--color-muted); }
+  .sample { display: flex; }
+  .sample .card { flex: 1; background: var(--color-surface); border-radius: var(--radius-card); box-shadow: var(--shadow-2); padding: var(--space-4); }
+  .sample h3 { font-size: var(--text-h3); line-height: var(--leading-title); margin: 0 0 var(--space-1); }
+  .sample p { margin: 0 0 var(--space-3); color: var(--color-muted); font-size: var(--text-caption); line-height: 1.5; }
+  .sample input { font: inherit; width: 100%; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-control); margin-bottom: var(--space-3); }
+  .sample .primary { font: inherit; font-weight: 700; min-height: 44px; padding: 0 var(--space-5); border: 0; border-radius: var(--radius-control);
+                     background: var(--color-primary); color: var(--color-on-primary); transition: transform var(--duration-fast); }
+  .sample .primary:active { transform: scale(.97); }
+  .ok { color: var(--color-success); } .bad { color: var(--color-danger); }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <section><h2>间距：以 4 为单位，常用 8、16、24、32</h2><div class="spaces" id="spaces"></div></section>
+  <section class="type"><h2>字号：正文 16，小标题 20—24，页面标题 32；正文行高 1.7</h2>
+    <p style="font-size:var(--text-h1);font-weight:700">页面标题 32</p>
+    <p style="font-size:var(--text-h2);font-weight:700">标题 24</p>
+    <p style="font-size:var(--text-h3);font-weight:700">小标题 20</p>
+    <p style="font-size:var(--text-body)">正文 16：用数字说明你解决了什么问题。</p>
+    <p style="font-size:var(--text-caption);color:var(--color-muted)">注释 13：更新于 2026-10-20</p></section>
+  <section><h2>颜色角色与对比度（与白色表面比较）</h2><div class="roles" id="roles"></div></section>
+  <section><h2>圆角：控件 6、卡片 10、弹窗 14</h2><div class="radii">
+    <div style="border-radius:var(--radius-control)">控件</div><div style="border-radius:var(--radius-card)">卡片</div><div style="border-radius:var(--radius-dialog)">弹窗</div></div></section>
+  <section><h2>阴影：只有三档，对应三种层级</h2><div class="shadows">
+    <div style="box-shadow:var(--shadow-1)">静止</div><div style="box-shadow:var(--shadow-2)">悬停</div><div style="box-shadow:var(--shadow-3)">浮层</div></div></section>
+  <section><h2>点击目标：不小于 24 × 24；触屏主要操作约 44 × 44</h2><div class="targets">
+    <button style="width:24px;height:24px" aria-label="最小目标示例">24</button><button style="width:44px;height:44px" aria-label="触屏目标示例">44</button>
+    <span class="k">小于 24 像素的目标，与相邻目标保持足够间距</span></div></section>
+  <section><h2>动效：小反馈约 150—300 毫秒</h2><div class="motion">
+    <div><span class="k">150 毫秒</span><i style="width:30%"></i></div><div><span class="k">200 毫秒</span><i style="width:40%"></i></div>
+    <div><span class="k">300 毫秒</span><i style="width:60%"></i></div><span class="k">距离越远、变化越大，时长越长</span></div></section>
+  <section><h2>图片：约定比例、主体位置与缺失状态</h2><div class="images">
+    <div style="aspect-ratio:16/9;background:linear-gradient(135deg,#9db8e8,#f3c98b)">16:9</div>
+    <div style="aspect-ratio:1;background:#e9edf3">暂无图片</div></div></section>
+  <div class="sample">
+    <div class="card">
+      <h3>只用这些规则搭出的卡片</h3>
+      <p>间距、字号、颜色、圆角、阴影和时长都来自上面的变量。</p>
+      <label class="k" for="email">邮箱</label>
+      <input id="email" value="student@example.com">
+      <button class="primary" type="button">订阅岗位提醒</button>
+    </div>
+  </div>
+</div>
+<script>
+const root = getComputedStyle(document.documentElement);
+const v = name => root.getPropertyValue(name).trim();
+// 间距色条：宽度直接取变量的值
+document.getElementById('spaces').append(...[1, 2, 3, 4, 5, 6, 7].map(i => {
+  const row = document.createElement('div');
+  const label = document.createElement('span'); label.className = 'k'; label.textContent = v(`--space-${i}`).replace('px', '');
+  const bar = document.createElement('i'); bar.style.width = `calc(var(--space-${i}) * 4)`;
+  row.append(label, bar);
+  return row;
+}));
+// 对比度：从变量读出颜色，按 WCAG 公式计算
+const rgb = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+const lum = c => { const [r, g, b] = c.map(x => { x /= 255; return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+const white = rgb(v('--color-surface'));
+const roles = [['正文', '--color-text', 4.5], ['次要文字', '--color-muted', 4.5], ['控件边框', '--color-border', 3], ['主操作', '--color-primary', 4.5],
+               ['成功', '--color-success', 4.5], ['警示', '--color-warning', 4.5], ['错误', '--color-danger', 4.5], ['分隔线（装饰）', '--color-divider', 0]];
+document.getElementById('roles').append(...roles.map(([name, token, need]) => {
+  const row = document.createElement('div');
+  const sw = document.createElement('i'); sw.style.background = `var(${token})`;
+  const label = document.createElement('span'); label.textContent = name;
+  const r = ratio(rgb(v(token)), white);
+  const res = document.createElement('span'); res.className = 'k ' + (need ? (r >= need ? 'ok' : 'bad') : '');
+  res.textContent = need ? `${r.toFixed(1)}:1 ${r >= need ? '≥' : '<'} ${need}:1` : `${r.toFixed(1)}:1 不要求`;
+  row.append(sw, label, res);
+  return row;
+}));
+</script>
+</body>
+</html>

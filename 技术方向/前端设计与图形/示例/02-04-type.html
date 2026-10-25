@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>字体设计与字体应用：气质、字面、层级与数字</title>
+<!-- 中文网络字体按字符范围拆成许多小文件，页面只下载用到的部分 -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-serif-sc@5.3.1/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/lxgw-wenkai@5.3.0/500.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5.3.0/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/source-serif-4@5.3.1/400.css">
+<style>
+  :root { --ink: #1d2330; --muted: #616a7a; --line: #e2e5ea; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink);
+         font: 14px/1.6 Inter, "Noto Sans SC", system-ui, sans-serif; }    /* 西文与数字用 Inter，汉字回退到思源黑体 */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 16px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  h2 { font-size: 13px; color: var(--muted); font-weight: 400; margin: 0 0 10px; }
+  .sample { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 12px; padding: 6px 0; border-top: 1px solid var(--line); }
+  .sample:first-of-type { border-top: 0; }
+  .sample p { margin: 0; font-size: 23px; line-height: 1.35; }
+  .sample small { color: var(--muted); font-size: 12px; text-align: right; width: 7.5em; }
+  .sans { font-family: "Noto Sans SC", sans-serif; font-weight: 700; }
+  .serif { font-family: "Noto Serif SC", serif; font-weight: 700; }
+  .kai { font-family: "LXGW WenKai", serif; font-weight: 500; }
+  canvas { width: 100%; height: auto; display: block; }
+  .scale div { display: grid; grid-template-columns: 92px 1fr; align-items: baseline; gap: 8px; }
+  .scale span { color: var(--muted); font-size: 12px; }
+  .scale p { margin: 2px 0; line-height: 1.3; font-family: "Noto Sans SC", sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  th { font-weight: 400; color: var(--muted); font-size: 12px; }
+  .tnum td { font-variant-numeric: tabular-nums; }    /* 等宽数字：每个数字一样宽，竖向对齐 */
+  .cap { font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <section>
+    <h2>同一句话，三种字体气质</h2>
+    <div class="sample"><p class="sans">让每一次投递都更有把握</p><small>思源黑体<br>稳定、清晰</small></div>
+    <div class="sample"><p class="serif">让每一次投递都更有把握</p><small>思源宋体<br>正式、书卷气</small></div>
+    <div class="sample"><p class="kai">让每一次投递都更有把握</p><small>霞鹜文楷<br>亲切、手写感</small></div>
+  </section>
+  <section>
+    <h2>字面：同样的字号，字形实际占多大（灰框为字身，蓝框为字形）</h2>
+    <canvas id="face" aria-label="三种中文字体与两种西文字体的字面比较"></canvas>
+  </section>
+  <section class="scale">
+    <h2>字号层级：从 16 像素正文出发，每级乘以 1.25</h2>
+    <div><span>展示 39 像素</span><p style="font-size:39px;font-weight:700">职业能力画布</p></div>
+    <div><span>页面标题 31 像素</span><p style="font-size:31px;font-weight:700">简历分析报告</p></div>
+    <div><span>标题 25 像素</span><p style="font-size:25px;font-weight:700">项目经历</p></div>
+    <div><span>小标题 20 像素</span><p style="font-size:20px;font-weight:700">量化你的贡献</p></div>
+    <div><span>正文 16 像素</span><p style="font-size:16px">用数字说明你解决了什么问题。</p></div>
+    <div><span>注释 13 像素</span><p style="font-size:12.8px;color:#616a7a">更新于 2026-10-20 · 约 8 分钟</p></div>
+  </section>
+  <section>
+    <h2>数字：比例数字与等宽数字</h2>
+    <p class="cap">比例数字（默认）：1 比 8 窄，小数点对不齐</p>
+    <table><tr><th>方向</th><th>投递数</th><th>回复率</th></tr>
+      <tr><td>前端开发</td><td>1,111</td><td>11.1%</td></tr>
+      <tr><td>数据分析</td><td>8,808</td><td>88.8%</td></tr>
+      <tr><td>产品经理</td><td>1,481</td><td>18.1%</td></tr></table>
+    <p class="cap">等宽数字：font-variant-numeric: tabular-nums</p>
+    <table class="tnum"><tr><th>方向</th><th>投递数</th><th>回复率</th></tr>
+      <tr><td>前端开发</td><td>1,111</td><td>11.1%</td></tr>
+      <tr><td>数据分析</td><td>8,808</td><td>88.8%</td></tr>
+      <tr><td>产品经理</td><td>1,481</td><td>18.1%</td></tr></table>
+  </section>
+</div>
+<script>
+// 等字体真正加载完成后再测量，否则测到的是回退字体
+const faces = [
+  { family: 'Noto Sans SC', weight: 700, label: '思源黑体', text: '国' },
+  { family: 'Noto Serif SC', weight: 700, label: '思源宋体', text: '国' },
+  { family: 'LXGW WenKai', weight: 500, label: '霞鹜文楷', text: '国' },
+  { family: 'Inter', weight: 400, label: 'Inter', text: 'x' },
+  { family: 'Source Serif 4', weight: 400, label: 'Source Serif', text: 'x' }
+];
+Promise.all(faces.map(f => document.fonts.load(`${f.weight} 80px "${f.family}"`, f.text))).then(draw);
+
+function draw() {
+  // 画布的像素尺寸跟随显示宽度与设备像素比，文字才清晰
+  const c = document.getElementById('face'), ctx = c.getContext('2d');
+  const W = c.clientWidth, H = 230, dpr = window.devicePixelRatio || 1;
+  c.width = W * dpr; c.height = H * dpr; c.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const S = 56, top = 20, gap = (W - 2 * 6 - 5 * S) / 4;
+  faces.forEach((f, i) => {
+    const x = 6 + i * (S + gap);
+    ctx.font = `${f.weight} ${S}px "${f.family}"`;
+    ctx.textBaseline = f.text === 'x' ? 'alphabetic' : 'ideographic';
+    const m = ctx.measureText(f.text);
+    const y = f.text === 'x' ? top + S * 0.8 : top + S;   // 汉字以字身底边定位，西文以基线定位
+    ctx.strokeStyle = '#c3c9d3'; ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, top + 0.5, S, S);            // 字身：字号决定的方框
+    const gx = x + (S - m.width) / 2;
+    ctx.fillStyle = '#1d2330';
+    ctx.fillText(f.text, gx, y);
+    const box = { l: gx - m.actualBoundingBoxLeft, r: gx + m.actualBoundingBoxRight,
+                  t: y - m.actualBoundingBoxAscent, b: y + m.actualBoundingBoxDescent };
+    ctx.strokeStyle = '#2f6fdb';
+    ctx.strokeRect(box.l + 0.5, box.t + 0.5, box.r - box.l, box.b - box.t);   // 字形：墨迹实际覆盖的范围
+    const ratio = (box.b - box.t) / S;
+    ctx.textBaseline = 'alphabetic';
+    ctx.font = '12px Inter, "Noto Sans SC", sans-serif';
+    const last = i === faces.length - 1;                // 最后一项右对齐，避免文字超出画布
+    ctx.textAlign = last ? 'right' : 'left';
+    const lx = last ? x + S : x;
+    ctx.fillStyle = '#1d2330';
+    ctx.fillText(f.label, lx, top + S + 26);
+    ctx.fillStyle = '#616a7a';
+    ctx.fillText(f.text === 'x' ? `x 字高 ${Math.round(ratio * 100)}%` : `字面高 ${Math.round(ratio * 100)}%`, lx, top + S + 44);
+    ctx.textAlign = 'left';
+  });
+  ctx.fillStyle = '#616a7a';
+  ctx.font = '13px Inter, "Noto Sans SC", sans-serif';
+  ctx.fillText('字面越大，同样的字号看起来越大。', 6, 150);
+  ctx.fillText('搭配两种字体时，按看起来的大小对齐，', 6, 172);
+  ctx.fillText('而不是按字号的数值对齐。', 6, 194);
+}
+</script>
+</body>
+</html>

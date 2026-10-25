@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>信息与数据设计：按任务选择图表</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5.3.0/400.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: #1d2330; font: 13px/1.5 Inter, "Noto Sans SC", system-ui, sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 16px; }
+  figure { margin: 0; background: #fff; border: 1px solid #e2e5ea; border-radius: 12px; padding: 14px 16px 10px; }
+  .task { font-size: 12px; color: #2f6fdb; font-weight: 700; }
+  h2 { font-size: 16px; margin: 2px 0 0; }
+  .sub { color: #616a7a; font-size: 12px; margin: 2px 0 6px; }
+  figcaption { color: #8a92a0; font-size: 11px; margin-top: 4px; }
+  svg { width: 100%; height: auto; display: block; font-family: Inter, "Noto Sans SC", sans-serif; }
+  .axis text { fill: #616a7a; font-size: 11px; font-variant-numeric: tabular-nums; }
+  .axis line, .grid-line { stroke: #e6e9ee; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <figure><div class="task">比较</div><h2>数据分析方向的回复率最高</h2><p class="sub">各方向简历投递后收到回复的比例（%）</p><svg id="c1" viewBox="0 0 400 200"></svg>
+    <figcaption>来源：示意数据，每个方向约 900—1,400 次投递</figcaption></figure>
+  <figure><div class="task">趋势</div><h2>九月起每周投递量明显上升</h2><p class="sub">每周投递数（次）；浅色带为 95% 区间</p><svg id="c2" viewBox="0 0 400 200"></svg>
+    <figcaption>来源：示意数据；区间表示由于抽样，真实值可能所在的范围</figcaption></figure>
+  <figure><div class="task">分布</div><h2>多数简历评分集中在 60—75 分</h2><p class="sub">200 份简历的评分分布（分）</p><svg id="c3" viewBox="0 0 400 200"></svg>
+    <figcaption>来源：示意数据；竖线为中位数</figcaption></figure>
+  <figure><div class="task">关联</div><h2>项目经历越多，面试邀请往往越多</h2><p class="sub">每份简历的项目数与收到的面试邀请数</p><svg id="c4" viewBox="0 0 400 200"></svg>
+    <figcaption>来源：示意数据；相关不等于因果，项目多的人可能在其他方面也更有优势</figcaption></figure>
+</div>
+<script>
+// 固定随机种子：每次打开得到同样的示意数据
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const rand = mulberry32(42);
+const normal = () => Math.sqrt(-2 * Math.log(rand() || 1e-9)) * Math.cos(2 * Math.PI * rand());
+const NS = 'http://www.w3.org/2000/svg';
+function el(parent, tag, attrs = {}, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (text !== undefined) e.textContent = text;
+  parent.append(e);
+  return e;
+}
+const scale = (d0, d1, r0, r1) => v => r0 + (v - d0) / (d1 - d0) * (r1 - r0);
+const ACCENT = '#2f6fdb', NEUTRAL = '#b8c0cc';
+
+// ---------- 比较：排序的横向条形图，直接标出数值，最高的一项用强调色 ----------
+{
+  const svg = document.getElementById('c1');
+  const data = [['数据分析', 21.0], ['前端开发', 18.1], ['测试开发', 15.4], ['产品经理', 11.8], ['UI 设计', 9.2]];
+  const x = scale(0, 25, 70, 380), barH = 22, gap = 12, top = 10;
+  const ax = el(svg, 'g', { class: 'axis' });
+  for (const t of [0, 5, 10, 15, 20, 25]) {
+    el(ax, 'line', { x1: x(t), x2: x(t), y1: top - 4, y2: top + data.length * (barH + gap) - gap + 4, class: 'grid-line' });
+    el(ax, 'text', { x: x(t), y: 196, 'text-anchor': 'middle' }, t + '%');
+  }
+  data.forEach(([name, v], i) => {
+    const y = top + i * (barH + gap);
+    el(svg, 'text', { x: 62, y: y + 15, 'text-anchor': 'end', 'font-size': 12, fill: '#1d2330' }, name);
+    el(svg, 'rect', { x: x(0), y, width: x(v) - x(0), height: barH, rx: 3, fill: i === 0 ? ACCENT : NEUTRAL });
+    el(svg, 'text', { x: x(v) + 6, y: y + 15, 'font-size': 12, fill: '#1d2330' }, v.toFixed(1) + '%');
+  });
+}
+
+// ---------- 趋势：折线加不确定性区间 ----------
+{
+  const svg = document.getElementById('c2');
+  const weeks = Array.from({ length: 16 }, (_, i) => i + 1);
+  const mean = weeks.map(w => 120 + (w > 8 ? (w - 8) * 26 : 0) + normal() * 8);
+  const half = weeks.map(w => 18 + w * 1.2);                 // 区间的一半宽度（示意）
+  const x = scale(1, 16, 40, 390), y = scale(0, 400, 175, 8);
+  const ax = el(svg, 'g', { class: 'axis' });
+  for (const t of [0, 100, 200, 300, 400]) {
+    el(ax, 'line', { x1: 40, x2: 390, y1: y(t), y2: y(t), class: 'grid-line' });
+    el(ax, 'text', { x: 34, y: y(t) + 4, 'text-anchor': 'end' }, t);
+  }
+  for (const w of [1, 4, 8, 12, 16]) el(ax, 'text', { x: x(w), y: 194, 'text-anchor': w === 1 ? 'start' : w === 16 ? 'end' : 'middle' }, `第 ${w} 周`);
+  const band = weeks.map((w, i) => `${x(w)},${y(mean[i] + half[i])}`).concat(weeks.slice().reverse().map((w, j) => {
+    const i = weeks.length - 1 - j; return `${x(w)},${y(mean[i] - half[i])}`; })).join(' ');
+  el(svg, 'polygon', { points: band, fill: 'rgba(47,111,219,.15)' });
+  el(svg, 'polyline', { points: weeks.map((w, i) => `${x(w)},${y(mean[i])}`).join(' '), fill: 'none', stroke: ACCENT, 'stroke-width': 2.5 });
+  el(svg, 'line', { x1: x(8.5), x2: x(8.5), y1: 10, y2: 175, stroke: '#8a92a0', 'stroke-dasharray': '3 3' });
+  el(svg, 'text', { x: x(8.5) + 4, y: 20, 'font-size': 11, fill: '#616a7a' }, '九月开学');
+}
+
+// ---------- 分布：直方图加中位数 ----------
+{
+  const svg = document.getElementById('c3');
+  const scores = Array.from({ length: 200 }, () => Math.max(30, Math.min(99, 68 + normal() * 9)));
+  const bins = Array.from({ length: 14 }, (_, i) => 30 + i * 5);
+  const counts = bins.map(b => scores.filter(s => s >= b && s < b + 5).length);
+  const sorted = scores.slice().sort((a, b) => a - b);
+  const median = (sorted[99] + sorted[100]) / 2;
+  const x = scale(30, 100, 30, 390), y = scale(0, Math.max(...counts) * 1.15, 175, 10);
+  const ax = el(svg, 'g', { class: 'axis' });
+  for (const t of [30, 40, 50, 60, 70, 80, 90, 100]) el(ax, 'text', { x: x(t), y: 194, 'text-anchor': 'middle' }, t);
+  for (const t of [0, 20, 40]) { el(ax, 'line', { x1: 30, x2: 390, y1: y(t), y2: y(t), class: 'grid-line' }); el(ax, 'text', { x: 24, y: y(t) + 4, 'text-anchor': 'end' }, t); }
+  bins.forEach((b, i) => el(svg, 'rect', { x: x(b) + 1, y: y(counts[i]), width: x(b + 5) - x(b) - 2, height: y(0) - y(counts[i]),
+    fill: b >= 60 && b < 75 ? ACCENT : NEUTRAL }));
+  el(svg, 'line', { x1: x(median), x2: x(median), y1: 10, y2: 175, stroke: '#1d2330', 'stroke-width': 1.5 });
+  el(svg, 'text', { x: x(median) + 5, y: 20, 'font-size': 11, fill: '#1d2330' }, `中位数 ${median.toFixed(0)}`);
+}
+
+// ---------- 关联：散点图加拟合线 ----------
+{
+  const svg = document.getElementById('c4');
+  const pts = Array.from({ length: 40 }, () => { const p = Math.floor(rand() * 7); return [p + (rand() - .5) * .4, Math.max(0, 0.6 * p + 0.5 + normal() * 0.9)]; });
+  const n = pts.length, mx = pts.reduce((s, p) => s + p[0], 0) / n, my = pts.reduce((s, p) => s + p[1], 0) / n;
+  const k = pts.reduce((s, p) => s + (p[0] - mx) * (p[1] - my), 0) / pts.reduce((s, p) => s + (p[0] - mx) ** 2, 0);
+  const x = scale(-0.5, 6.5, 40, 390), y = scale(0, 6, 175, 10);
+  const ax = el(svg, 'g', { class: 'axis' });
+  for (const t of [0, 2, 4, 6]) { el(ax, 'line', { x1: 40, x2: 390, y1: y(t), y2: y(t), class: 'grid-line' }); el(ax, 'text', { x: 34, y: y(t) + 4, 'text-anchor': 'end' }, t); }
+  for (const t of [0, 1, 2, 3, 4, 5, 6]) el(ax, 'text', { x: x(t), y: 194, 'text-anchor': 'middle' }, t + (t === 6 ? ' 个项目' : ''));
+  for (const [px, py] of pts) el(svg, 'circle', { cx: x(px), cy: y(py), r: 4, fill: ACCENT, 'fill-opacity': .55 });
+  el(svg, 'line', { x1: x(-0.3), y1: y(my + k * (-0.3 - mx)), x2: x(6.3), y2: y(my + k * (6.3 - mx)), stroke: '#1d2330', 'stroke-width': 1.5 });
+  el(svg, 'text', { x: 46, y: 18, 'font-size': 11, fill: '#616a7a' }, '面试邀请（次）');
+}
+</script>
+</body>
+</html>

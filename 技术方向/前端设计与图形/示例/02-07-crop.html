@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>摄影与图像编排：按主体裁切，在图片上放文字</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: #1d2330; font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  h2 { font-size: 13px; color: #616a7a; font-weight: 400; margin: 0 0 8px; }
+  section { background: #fff; border: 1px solid #e2e5ea; border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
+  .crops { display: grid; grid-template-columns: 2.2fr 1.2fr 1fr; gap: 12px; align-items: end; max-width: 620px; }
+  .pair { display: grid; gap: 6px; }
+  .pair img { width: 100%; object-fit: cover; border-radius: 6px; display: block; background: #dde3ea; }
+  .r169 { aspect-ratio: 16 / 9; } .r11 { aspect-ratio: 1; } .r45 { aspect-ratio: 4 / 5; }
+  .focal { object-position: 78% 60%; }      /* 主体大约在图片横向 78%、纵向 60% 的位置 */
+  .cap { color: #616a7a; font-size: 12px; }
+  .overlays { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 760px; }
+  canvas { width: 100%; height: auto; border-radius: 6px; display: block; }
+  .bad { color: #b42318; } .good { color: #067647; }
+</style>
+</head>
+<body>
+<section>
+  <h2>同一张照片，三种比例：每组上面居中裁切，下面按主体位置裁切（object-position）</h2>
+  <div class="crops" id="crops"></div>
+</section>
+<section>
+  <h2>图片上的文字：测量文字区域里最亮的背景，计算最低对比度</h2>
+  <div class="overlays">
+    <div class="pair"><canvas id="o1" width="640" height="360"></canvas><span class="cap" id="r1"></span></div>
+    <div class="pair"><canvas id="o2" width="640" height="360"></canvas><span class="cap" id="r2"></span></div>
+  </div>
+</section>
+<script>
+// ---------- 用代码画一张“照片”：主体（穿橙色外套的人）在右侧，面朝左 ----------
+const W = 1200, H = 800;
+const scene = document.createElement('canvas');
+scene.width = W; scene.height = H;
+const g = scene.getContext('2d');
+let sky = g.createLinearGradient(0, 0, 0, 520);
+sky.addColorStop(0, '#8fbbe9'); sky.addColorStop(1, '#f6e2c8');
+g.fillStyle = sky; g.fillRect(0, 0, W, 520);
+const sun = g.createRadialGradient(330, 250, 10, 330, 250, 160);
+sun.addColorStop(0, 'rgba(255,250,230,1)'); sun.addColorStop(0.4, 'rgba(255,240,200,.7)'); sun.addColorStop(1, 'rgba(255,240,200,0)');
+g.fillStyle = sun; g.fillRect(0, 0, 700, 520);
+g.fillStyle = '#9db4cf';                                   // 远山
+g.beginPath(); g.moveTo(0, 470); g.bezierCurveTo(250, 380, 450, 430, 650, 400); g.bezierCurveTo(850, 370, 1000, 430, 1200, 410); g.lineTo(1200, 520); g.lineTo(0, 520); g.fill();
+let ground = g.createLinearGradient(0, 520, 0, H);
+ground.addColorStop(0, '#7e9f6c'); ground.addColorStop(1, '#4d6b45');
+g.fillStyle = ground; g.fillRect(0, 520, W, H - 520);
+g.fillStyle = '#5b4636'; g.fillRect(142, 380, 16, 170);   // 左侧的树
+g.fillStyle = '#4f7a4a'; g.beginPath(); g.arc(150, 360, 70, 0, Math.PI * 2); g.fill();
+// 人物：位于横向约 78% 处
+const px = 940;
+g.fillStyle = '#2b3a55'; g.fillRect(px - 34, 600, 26, 170); g.fillRect(px + 8, 600, 26, 170);    // 腿
+g.fillStyle = '#e4572e'; g.beginPath(); g.roundRect(px - 52, 430, 104, 190, 26); g.fill();       // 橙色外套
+g.fillStyle = '#e8c3a0'; g.beginPath(); g.arc(px, 385, 40, 0, Math.PI * 2); g.fill();           // 脸
+g.beginPath(); g.moveTo(px - 38, 380); g.lineTo(px - 50, 395); g.lineTo(px - 36, 398); g.fill();  // 鼻子：朝向左边
+g.fillStyle = '#2b2b35'; g.beginPath(); g.arc(px + 6, 372, 40, Math.PI * 1.05, Math.PI * 2.15); g.fill(); // 头发在后脑
+const url = scene.toDataURL('image/png');
+
+// ---------- 三种比例 × 两种裁切 ----------
+const crops = document.getElementById('crops');
+for (const [cls, name] of [['r169', '16:9 横幅'], ['r11', '1:1 卡片'], ['r45', '4:5 手机竖图']]) {
+  const pair = document.createElement('div');
+  pair.className = 'pair';
+  const a = new Image(); a.src = url; a.className = cls; a.alt = '居中裁切的风景与人物';
+  const b = new Image(); b.src = url; b.className = cls + ' focal'; b.alt = '按主体裁切的风景与人物';
+  const cap = document.createElement('span'); cap.className = 'cap'; cap.textContent = name;
+  pair.append(a, b, cap);
+  crops.append(pair);
+}
+
+// ---------- 图片上的文字：先画图（与可选的遮罩），量出文字区域最亮的像素，再画文字 ----------
+function overlay(id, capId, withScrim) {
+  const c = document.getElementById(id), ctx = c.getContext('2d');
+  const cw = c.width, ch = c.height;
+  ctx.drawImage(scene, 0, 0, W, W * ch / cw, 0, 0, cw, ch);   // 取照片上部的 16:9 区域
+  if (withScrim) {                                            // 深色遮罩：在文字区域内保持足够深，之后再逐渐变透明
+    const s = ctx.createLinearGradient(0, 0, cw * 0.8, 0);    // 到人物之前完全透明，不压暗主体
+    for (const [t, a] of [[0, .72], [.55, .6], [.75, .4], [.9, .15], [1, 0]]) s.addColorStop(t, `rgba(12, 20, 38, ${a})`);
+    ctx.fillStyle = s; ctx.fillRect(0, 0, cw, ch);
+  }
+  const box = { x: 36, y: 120, w: 330, h: 110 };               // 文字将要占据的区域
+  const px = ctx.getImageData(box.x, box.y, box.w, box.h).data;
+  let maxL = 0;
+  for (let i = 0; i < px.length; i += 4) {
+    const lin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+    maxL = Math.max(maxL, 0.2126 * lin(px[i]) + 0.7152 * lin(px[i + 1]) + 0.0722 * lin(px[i + 2]));
+  }
+  const ratio = 1.05 / (maxL + 0.05);                         // 白色文字的相对亮度为 1
+  ctx.fillStyle = '#fff';
+  ctx.font = '700 34px "Noto Sans SC", sans-serif';
+  ctx.fillText('找到适合你的', box.x, box.y + 40);
+  ctx.fillText('第一份实习', box.x, box.y + 88);
+  const ok = ratio >= 3;                                      // 34 像素粗体属于大号文字，至少 3:1
+  const cap = document.getElementById(capId);
+  const b = document.createElement('b');
+  b.className = ok ? 'good' : 'bad';
+  b.textContent = `${ratio.toFixed(1)}:1`;
+  cap.replaceChildren(withScrim ? '加深色渐变遮罩：' : '直接放在图片上：', '最低对比度 ', b, ok ? '，大号文字要求 3:1，通过' : '，大号文字要求 3:1，不通过');
+}
+document.fonts.load('700 34px "Noto Sans SC"', '找到适合你的第一份实习').then(() => {
+  overlay('o1', 'r1', false);
+  overlay('o2', 'r2', true);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>同一产品的三种视觉方向</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-serif-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-serif-sc@5.3.1/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5.3.0/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5.3.0/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.3.0/400.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #e9e8e4; font: 14px/1.6 "Noto Sans SC", sans-serif; color: #1d2330; }
+  .board { margin-bottom: 22px; padding: 16px; border-radius: 14px; background: #f4f4f1; }
+  .board > h1 { font-size: 15px; margin: 0 0 10px; color: #1d2330; }
+  .board > h1 small { font-weight: 400; color: #616a7a; margin-left: 8px; }
+  .views { display: grid; grid-template-columns: repeat(3, 300px); gap: 16px; }
+  .view { height: 430px; overflow: hidden; position: relative; }
+  .view-label { font-size: 12px; color: #616a7a; margin: 0 0 6px; }
+  /* ---------- 三种方向共用同一份结构，只通过下面的变量和少量规则区分 ---------- */
+  .page { height: 100%; padding: var(--pad); background: var(--bg); color: var(--ink); font-family: var(--body-font); border-radius: var(--frame-radius); border: var(--frame-border); }
+  .nav { display: flex; justify-content: space-between; align-items: center; font-size: 12px; margin-bottom: var(--gap-lg); }
+  .logo { font-family: var(--title-font); font-weight: 700; font-size: 15px; color: var(--ink); }
+  .nav div span { color: var(--muted); margin-left: 10px; }
+  .kicker { font-family: var(--label-font); font-size: 11px; letter-spacing: var(--label-spacing); color: var(--accent); margin: 0 0 6px; }
+  .headline, .title { word-break: keep-all; }   /* 标题只在 <wbr> 处换行，不把词语拆开 */
+  .headline { font-family: var(--title-font); font-weight: 700; font-size: var(--h1); line-height: 1.25; margin: 0 0 var(--gap); }
+  .lede { color: var(--muted); margin: 0 0 var(--gap-lg); }
+  .search { display: block; width: 100%; padding: 9px 12px; border: var(--field-border); border-radius: var(--radius); background: var(--field-bg); color: var(--muted); font-size: 13px; margin-bottom: var(--gap); }
+  .cta { display: inline-block; padding: 9px 18px; background: var(--accent); color: var(--on-accent); border-radius: var(--radius); font-weight: 700; font-size: 13px; box-shadow: var(--glow); }
+  .chips { display: flex; gap: 6px; margin-top: var(--gap-lg); }
+  .chips span { font-size: 12px; padding: 2px 10px; border: var(--chip-border); border-radius: var(--chip-radius); color: var(--ink); background: var(--chip-bg); }
+  .crumb { font-family: var(--label-font); font-size: 11px; color: var(--muted); letter-spacing: var(--label-spacing); margin: 0 0 8px; }
+  .title { font-family: var(--title-font); font-weight: 700; font-size: var(--h2); line-height: 1.3; margin: 0 0 6px; }
+  .meta { font-family: var(--label-font); font-size: 11px; color: var(--muted); margin: 0 0 var(--gap); }
+  .figure { height: 90px; border-radius: var(--radius); background: var(--img); margin-bottom: var(--gap); filter: var(--img-filter); }
+  .body p { margin: 0 0 8px; font-size: 13px; line-height: 1.75; }
+  .quote { border-left: var(--quote-border); padding-left: 10px; font-family: var(--title-font); color: var(--ink); }
+  .empty { height: 100%; display: grid; place-content: center; justify-items: center; text-align: center; gap: 8px; }
+  .art { width: 96px; height: 76px; position: relative; margin-bottom: 6px; }
+  .art i { position: absolute; display: block; }
+  .art .folder { left: 8px; top: 22px; width: 80px; height: 50px; background: var(--art-a); border-radius: var(--radius); border: var(--art-border); }
+  .art .mark { left: 58px; top: 6px; width: 20px; height: 34px; background: var(--accent); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 75%, 0 100%); }
+  .empty h3 { font-family: var(--title-font); font-size: 17px; margin: 0; }
+  .empty p { margin: 0 0 6px; color: var(--muted); font-size: 13px; max-width: 16em; }
+
+  /* 简约：白底、一个强调色、充足留白、细分隔线 */
+  [data-dir="minimal"] { --bg: #ffffff; --ink: #1d2330; --muted: #616a7a; --accent: #2f6fdb; --on-accent: #fff;
+    --body-font: "Noto Sans SC", sans-serif; --title-font: "Noto Sans SC", sans-serif; --label-font: "Noto Sans SC", sans-serif; --label-spacing: 0;
+    --pad: 22px; --gap: 12px; --gap-lg: 20px; --h1: 26px; --h2: 20px; --radius: 8px; --frame-radius: 12px; --frame-border: 1px solid #e2e5ea;
+    --field-border: 1px solid #c9ced6; --field-bg: #fff; --chip-border: 1px solid #e2e5ea; --chip-radius: 99px; --chip-bg: #f6f7f9;
+    --img: linear-gradient(135deg, #dbe6f8, #f6efe4); --img-filter: none; --quote-border: 3px solid #2f6fdb; --glow: none;
+    --art-a: #dbe6f8; --art-border: 0; }
+  /* 编辑设计：米色纸面、宋体大标题、细黑线、红色点缀、方角、首字放大 */
+  [data-dir="editorial"] { --bg: #f7f3ec; --ink: #1b1b1b; --muted: #5d5850; --accent: #b8322a; --on-accent: #fff;
+    --body-font: "Noto Serif SC", serif; --title-font: "Noto Serif SC", serif; --label-font: Inter, "Noto Sans SC", sans-serif; --label-spacing: .12em;
+    --pad: 20px; --gap: 10px; --gap-lg: 16px; --h1: 30px; --h2: 22px; --radius: 0; --frame-radius: 2px; --frame-border: 1px solid #d9d1c3;
+    --field-border: 0; --field-bg: transparent; --chip-border: 0; --chip-radius: 0; --chip-bg: transparent;
+    --img: linear-gradient(160deg, #cfc6b8, #8f877b); --img-filter: grayscale(1) contrast(1.05); --quote-border: 0; --glow: none;
+    --art-a: transparent; --art-border: 1.5px solid #1b1b1b; }
+  [data-dir="editorial"] .nav { border-bottom: 1px solid #1b1b1b; padding-bottom: 6px; }
+  [data-dir="editorial"] .search { border-bottom: 1px solid #1b1b1b; padding-left: 0; }
+  [data-dir="editorial"] .chips span { padding: 0 8px 0 0; border-right: 1px solid #c9bfae; color: var(--muted); }
+  [data-dir="editorial"] .body p:first-of-type::first-letter { font-size: 2.6em; float: left; line-height: 1; margin: 2px 6px 0 0; color: var(--accent); font-weight: 700; }
+  [data-dir="editorial"] .quote { border-top: 1px solid #1b1b1b; border-bottom: 1px solid #1b1b1b; padding: 6px 0; font-size: 15px; }
+  [data-dir="editorial"] .headline { letter-spacing: -.01em; }
+  /* 科技：深色、网格背景、等宽字体标签、发光的强调色 */
+  [data-dir="tech"] { --bg: #0b1018; --ink: #e8edf6; --muted: #8d98ab; --accent: #5eead4; --on-accent: #06261f;
+    --body-font: Inter, "Noto Sans SC", sans-serif; --title-font: Inter, "Noto Sans SC", sans-serif; --label-font: "JetBrains Mono", monospace; --label-spacing: .04em;
+    --pad: 20px; --gap: 12px; --gap-lg: 18px; --h1: 25px; --h2: 19px; --radius: 10px; --frame-radius: 12px; --frame-border: 1px solid #1f2a3a;
+    --field-border: 1px solid #2a3850; --field-bg: #111a26; --chip-border: 1px solid #2a3850; --chip-radius: 6px; --chip-bg: #111a26;
+    --img: radial-gradient(circle at 30% 40%, rgba(94,234,212,.55), transparent 55%), linear-gradient(135deg, #1b2a44, #0f1726); --img-filter: none;
+    --quote-border: 2px solid #5eead4; --glow: 0 0 18px rgba(94,234,212,.45);
+    --art-a: #111a26; --art-border: 1px solid #5eead4; }
+  [data-dir="tech"] .page { background-image: linear-gradient(rgba(94,234,212,.06) 1px, transparent 1px), linear-gradient(90deg, rgba(94,234,212,.06) 1px, transparent 1px);
+    background-size: 22px 22px; }
+  [data-dir="tech"] .headline { background: linear-gradient(90deg, #e8edf6, #5eead4); -webkit-background-clip: text; background-clip: text; color: transparent; }
+</style>
+</head>
+<body>
+<div id="boards"></div>
+<template id="views">
+  <div class="views">
+    <div><p class="view-label">首页</p><div class="view"><div class="page">
+      <div class="nav"><span class="logo">职途</span><div><span>资源库</span><span>岗位</span><span>我的</span></div></div>
+      <p class="kicker">求职准备</p>
+      <h2 class="headline">找到适合你的<wbr>第一份实习</h2>
+      <p class="lede">从简历到面试，一步一步准备。</p>
+      <span class="search">搜索岗位或资源</span>
+      <span class="cta">开始准备</span>
+      <div class="chips"><span>简历</span><span>面试</span><span>作品集</span></div>
+    </div></div></div>
+    <div><p class="view-label">详情页</p><div class="view"><div class="page">
+      <p class="crumb">资源库 / 文章</p>
+      <h2 class="title">简历中的数字：<wbr>怎样量化你的成果</h2>
+      <p class="meta">文章 · 约 7 分钟 · 2026-09-26</p>
+      <div class="figure"></div>
+      <div class="body">
+        <p>招聘方读一份简历通常只有几十秒。具体的数字能让他们迅速看到你带来的变化。</p>
+        <p class="quote">用数字说明变化，而不是只描述职责。</p>
+      </div>
+    </div></div></div>
+    <div><p class="view-label">空状态</p><div class="view"><div class="page"><div class="empty">
+      <div class="art"><i class="folder"></i><i class="mark"></i></div>
+      <h3>还没有收藏的资源</h3>
+      <p>看到有用的内容时，点击书签就能收藏到这里。</p>
+      <span class="cta">去资源库看看</span>
+    </div></div></div></div>
+  </div>
+</template>
+<script>
+const dirs = [['minimal', '简约', '白底、一个强调色、充足留白：清楚、可信，适合工具型产品'],
+              ['editorial', '编辑设计', '宋体大标题、细线与红色点缀：有内容感，适合专题与长文'],
+              ['tech', '科技', '深色、网格、等宽字体与发光强调色：有未来感，适合技术与数据产品']];
+const boards = document.getElementById('boards');
+for (const [id, name, note] of dirs) {
+  const board = document.createElement('section');
+  board.className = 'board'; board.id = id; board.dataset.dir = id;
+  const h = document.createElement('h1');
+  const small = document.createElement('small'); small.textContent = note;
+  h.append(name, small);
+  board.append(h, document.getElementById('views').content.cloneNode(true));
+  boards.append(board);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>视觉层级：同一份内容的两种组织方式</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #616a7a; --line: #e2e5ea; --accent: #2f6fdb; --money: #b54708; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font-family: "Noto Sans SC", system-ui, sans-serif; }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; max-width: 760px; }
+  .label { font-size: 13px; color: var(--muted); margin: 0 0 8px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 20px; transition: filter .2s; }
+  body.blur .card { filter: blur(3px); }        /* 模糊测试：看不清文字时，还能分辨出哪些东西最重要吗？ */
+  .toolbar { margin-top: 16px; }
+  button { font: inherit; }
+
+  /* 左：所有信息同样的字号、粗细、颜色和间距 */
+  .flat p { margin: 0 0 8px; font-size: 15px; line-height: 1.6; color: #444; }
+  .flat .btns button { font-size: 15px; padding: 6px 14px; border: 1px solid #bbb; background: #f2f2f2; border-radius: 4px; margin-right: 8px; color: #444; }
+
+  /* 右：用字号、粗细、颜色、间距和位置区分主次，并把相关信息分组 */
+  .clear h2 { margin: 0; font-size: 22px; line-height: 1.3; font-weight: 700; }
+  .clear .meta { margin: 6px 0 0; font-size: 14px; color: var(--muted); }
+  .clear .salary { margin: 14px 0 0; font-size: 20px; font-weight: 700; color: var(--money); }
+  .clear .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; padding: 0; list-style: none; }
+  .clear .tags li { font-size: 12px; color: #3b4558; background: #eef1f5; border-radius: 99px; padding: 2px 10px; }
+  .clear .desc { margin: 18px 0 0; font-size: 15px; line-height: 1.7; color: #3b4558; }
+  .clear .btns { display: flex; gap: 12px; align-items: center; margin-top: 20px; }
+  .clear .primary { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 10px 20px; font-weight: 700; }
+  .clear .ghost { background: none; border: 0; color: var(--accent); padding: 10px 4px; }
+  .switch { font-size: 14px; padding: 6px 12px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; }
+</style>
+</head>
+<body>
+<div class="row">
+  <section>
+    <p class="label">层级不清：一切同样重要，等于没有重点</p>
+    <div class="card flat">
+      <p>前端开发实习生</p>
+      <p>星河科技 · 上海 · 本科及以上</p>
+      <p>每天 300 元 · 每周至少 4 天</p>
+      <p>React · TypeScript · 可转正</p>
+      <p>参与求职平台的简历编辑器与岗位匹配页面开发，和设计师一起完善交互细节。</p>
+      <div class="btns"><button>投递简历</button><button>收藏</button></div>
+    </div>
+  </section>
+  <section>
+    <p class="label">层级清楚：先看到岗位，再看到待遇与操作</p>
+    <div class="card clear">
+      <h2>前端开发实习生</h2>
+      <p class="meta">星河科技 · 上海 · 本科及以上</p>
+      <p class="salary">每天 300 元</p>
+      <ul class="tags"><li>每周至少 4 天</li><li>React</li><li>TypeScript</li><li>可转正</li></ul>
+      <p class="desc">参与求职平台的简历编辑器与岗位匹配页面开发，和设计师一起完善交互细节。</p>
+      <div class="btns"><button class="primary">投递简历</button><button class="ghost">收藏</button></div>
+    </div>
+  </section>
+</div>
+<div class="toolbar"><button class="switch" id="blur" aria-pressed="false">模糊测试</button></div>
+<script>
+const btn = document.getElementById('blur');
+btn.addEventListener('click', () => {
+  const on = document.body.classList.toggle('blur');
+  btn.setAttribute('aria-pressed', String(on));
+});
+</script>
+</body>
+</html>

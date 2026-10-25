@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>版式与构图：三种页面的网格骨架</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<style>
+  :root { --ink: #1d2330; --muted: #616a7a; --text: #c9ced8; --img: #b9cbe8; --accent: #2f6fdb; --warm: #f0c27b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 14px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; }
+  figure { margin: 0; }
+  figcaption { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  figcaption b { color: var(--ink); }
+
+  /* 每个缩略页面都是 12 栏网格：栏宽相等，栏间距 8 像素，左右留白 14 像素 */
+  .page { position: relative; height: 420px; background: #fff; border: 1px solid #dde1e7; border-radius: 10px; overflow: hidden;
+          padding: 14px; display: grid; grid-template-columns: repeat(12, 1fr); column-gap: 8px; row-gap: 10px; align-content: start; }
+  .overlay { position: absolute; inset: 0 14px; display: grid; grid-template-columns: repeat(12, 1fr); column-gap: 8px; pointer-events: none; }
+  .overlay i { background: rgba(228, 87, 46, .10); border-inline: 1px solid rgba(228, 87, 46, .25); }
+  body.no-grid .overlay { display: none; }
+
+  .t { height: 6px; border-radius: 3px; background: var(--text); }          /* 一行正文 */
+  .h { height: 12px; border-radius: 4px; background: var(--ink); }          /* 标题 */
+  .img { background: var(--img); border-radius: 6px; }
+  .btn { height: 18px; border-radius: 5px; background: var(--accent); }
+  .lines { display: grid; gap: 7px; }
+  .span-12 { grid-column: 1 / -1; }
+
+  /* 长文：正文只占中间 8 栏，行长受控；图片可以更宽，制造节奏 */
+  .article .h { grid-column: 3 / 11; height: 16px; margin-top: 18px; }
+  .article .meta { grid-column: 3 / 11; height: 6px; width: 40%; background: #dfe3ea; border-radius: 3px; }
+  .article .lines { grid-column: 3 / 11; }
+  .article .wide { grid-column: 2 / 12; height: 88px; }
+  .article .quote { grid-column: 3 / 11; border-left: 3px solid var(--warm); padding-left: 8px; }
+
+  /* 仪表盘：信息密度高，四个指标各占 3 栏，图表 8 栏、列表 4 栏，表格占满 */
+  .dash .bar { grid-column: 1 / -1; height: 22px; background: #eef1f5; border-radius: 6px; }
+  .dash .kpi { grid-column: span 3; height: 48px; border: 1px solid #e2e5ea; border-radius: 6px; padding: 6px; display: grid; gap: 5px; align-content: start; }
+  .dash .kpi .num { height: 12px; width: 60%; background: var(--ink); border-radius: 3px; }
+  .dash .chart { grid-column: 1 / 9; height: 120px; border: 1px solid #e2e5ea; border-radius: 6px;
+                 background: linear-gradient(to top, rgba(47,111,219,.18), transparent 70%); }
+  .dash .list { grid-column: 9 / 13; height: 120px; border: 1px solid #e2e5ea; border-radius: 6px; padding: 6px; }
+  .dash .table { grid-column: 1 / -1; display: grid; gap: 8px; border: 1px solid #e2e5ea; border-radius: 6px; padding: 8px; }
+
+  /* 营销页：大标题与大图形成第一屏的视觉重心，下面按“三栏特点 → 证言 → 行动”展开 */
+  .landing .hero-text { grid-column: 1 / 8; display: grid; gap: 8px; align-content: center; padding-top: 10px; }
+  .landing .hero-text .h { height: 18px; }
+  .landing .hero-img { grid-column: 8 / 13; height: 120px; background: linear-gradient(135deg, var(--img), var(--warm)); }
+  .landing .feature { grid-column: span 4; display: grid; gap: 6px; margin-top: 14px; }
+  .landing .feature .icon { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); opacity: .8; }
+  .landing .band { grid-column: 1 / -1; height: 64px; background: #f6f2ea; border-radius: 6px; margin-top: 10px; }
+  .landing .cta { grid-column: 4 / 10; display: grid; gap: 8px; justify-items: center; margin-top: 8px; }
+  .toolbar { margin-top: 14px; }
+  .toolbar button { font: inherit; padding: 4px 12px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; }
+</style>
+</head>
+<body>
+<div class="row">
+  <figure>
+    <div class="page article" aria-label="长文页面的骨架">
+      <div class="h"></div><div class="meta"></div>
+      <div class="lines"><div class="t"></div><div class="t"></div><div class="t"></div><div class="t" style="width:70%"></div></div>
+      <div class="img wide"></div>
+      <div class="lines"><div class="t"></div><div class="t"></div><div class="t" style="width:85%"></div></div>
+      <div class="quote lines"><div class="t" style="background:#e9c48a"></div><div class="t" style="background:#e9c48a;width:60%"></div></div>
+      <div class="lines"><div class="t"></div><div class="t"></div><div class="t"></div><div class="t" style="width:40%"></div></div>
+      <div class="overlay" aria-hidden="true"></div>
+    </div>
+    <figcaption><b>长文</b>：正文只占中间 8 栏，每行字数受控；宽图打破单调，引文用色线分组。</figcaption>
+  </figure>
+  <figure>
+    <div class="page dash" aria-label="仪表盘的骨架">
+      <div class="bar"></div>
+      <div class="kpi"><div class="t" style="width:50%"></div><div class="num"></div></div>
+      <div class="kpi"><div class="t" style="width:50%"></div><div class="num"></div></div>
+      <div class="kpi"><div class="t" style="width:50%"></div><div class="num"></div></div>
+      <div class="kpi"><div class="t" style="width:50%"></div><div class="num"></div></div>
+      <div class="chart"></div>
+      <div class="list lines"><div class="t"></div><div class="t"></div><div class="t"></div><div class="t"></div><div class="t"></div></div>
+      <div class="table"><div class="t" style="background:#9aa3b2"></div><div class="t"></div><div class="t"></div><div class="t"></div><div class="t"></div></div>
+      <div class="overlay" aria-hidden="true"></div>
+    </div>
+    <figcaption><b>仪表盘</b>：密度高、对齐严格，相同的东西用相同的宽度，方便扫视和比较。</figcaption>
+  </figure>
+  <figure>
+    <div class="page landing" aria-label="营销页面的骨架">
+      <div class="hero-text"><div class="h"></div><div class="h" style="width:70%"></div><div class="t"></div><div class="t" style="width:80%"></div><div class="btn" style="width:40%;margin-top:6px"></div></div>
+      <div class="img hero-img"></div>
+      <div class="feature"><div class="icon"></div><div class="t" style="background:#9aa3b2;width:70%"></div><div class="t"></div><div class="t" style="width:80%"></div></div>
+      <div class="feature"><div class="icon"></div><div class="t" style="background:#9aa3b2;width:70%"></div><div class="t"></div><div class="t" style="width:80%"></div></div>
+      <div class="feature"><div class="icon"></div><div class="t" style="background:#9aa3b2;width:70%"></div><div class="t"></div><div class="t" style="width:80%"></div></div>
+      <div class="band"></div>
+      <div class="cta"><div class="h" style="width:80%"></div><div class="btn" style="width:40%"></div></div>
+      <div class="overlay" aria-hidden="true"></div>
+    </div>
+    <figcaption><b>营销页</b>：第一屏的大标题与大图形成视觉重心，往下按“特点、证言、行动”的节奏展开。</figcaption>
+  </figure>
+</div>
+<div class="toolbar"><button id="toggle" aria-pressed="true">显示网格</button></div>
+<script>
+for (const o of document.querySelectorAll('.overlay')) o.append(...Array.from({ length: 12 }, () => document.createElement('i')));
+const b = document.getElementById('toggle');
+b.addEventListener('click', () => {
+  const hidden = document.body.classList.toggle('no-grid');
+  b.setAttribute('aria-pressed', String(!hidden));
+});
+</script>
+</body>
+</html>
