@@ -26,6 +26,7 @@
     W205  疑似对话残留表述，例如“此前讨论”“本次新增”。
     W206  章节编号不连续或与所属章不一致。
     W207  同一行重复出现的常见字词，例如“的的”。
+    W208  阅读导航声明的章数、章号范围或资料数与正文不一致。
 """
 
 from __future__ import annotations
@@ -57,6 +58,10 @@ RE_REF_CITE = re.compile(r"\]\(#(ref-[A-Za-z0-9-]+)\)")
 RE_FILE_LINK = re.compile(r"\]\((?!https?://|mailto:|#)([^)\s#]+)(?:#([^)\s]+))?\)")
 RE_NUMBERED_HEADING = re.compile(r"^(\d{1,2})(?:\.(\d{1,2}))?\s")
 RE_DUP_WORD = re.compile(r"(的的|了了|是是|在在|和和|与与|或或|及及|对对)")
+RE_CHAPTER_COUNT = re.compile(r"正文共 (\d+) 章(?:（(\d+)—(\d+)）)?")
+RE_SOURCE_COUNT = re.compile(r"(\d+) [项组][^，。；\d]*?资料")
+RE_CHAPTER_ANCHOR = re.compile(r"(?:ch|chapter-)(\d+)")
+RE_REF_ROW = re.compile(r"^\|\s*R\d+\s*\|")
 
 ARTIFACT_PHRASES = (
     "此前讨论",
@@ -227,12 +232,14 @@ def check_file(path: Path, report: Report, record_links: bool = True) -> None:
 
         for match in RE_HTML_ANCHOR.finditer(raw):
             anchors.add(match.group(1))
-        for match in RE_LINK_TARGET.finditer(raw):
+        # 行内代码里的链接只是示例，不参与跳转与引用检查。
+        linkable = RE_CODE_SPAN.sub("", raw)
+        for match in RE_LINK_TARGET.finditer(linkable):
             links.append((lineno, unquote(match.group(1) or match.group(2))))
-        for match in RE_REF_CITE.finditer(raw):
+        for match in RE_REF_CITE.finditer(linkable):
             citations.append((lineno, match.group(1)))
         if record_links:
-            for match in RE_FILE_LINK.finditer(raw):
+            for match in RE_FILE_LINK.finditer(linkable):
                 FILE_LINKS.append((path, lineno, match.group(1), match.group(2) or ""))
 
         heading = RE_HEADING.match(raw)
@@ -293,6 +300,7 @@ def check_file(path: Path, report: Report, record_links: bool = True) -> None:
         report.add(path, fence_line, "E105", "代码块围栏没有闭合")
 
     check_with_cmark(path, lines, report)
+    check_counts(path, lines, anchors, report)
 
     for lineno, target in links:
         if target not in anchors:
@@ -309,6 +317,26 @@ def check_file(path: Path, report: Report, record_links: bool = True) -> None:
     numbered = [c for c in cited_once if re.search(r"\d+$", c)]
     if numbered != sorted(numbered, key=lambda c: (re.sub(r"\d+$", "", c), int(re.search(r"\d+$", c).group(0)))):
         report.add(path, 1, "W201", "参考资料首次引用顺序：" + " ".join(c.removeprefix("ref-") for c in numbered))
+
+
+def check_counts(path: Path, lines: list[str], anchors: set[str], report: Report) -> None:
+    """阅读导航里的“正文共 N 章（起—止）”与“M 项资料”应与正文、附录一致。"""
+    chapters = sorted(int(m.group(1)) for a in anchors if (m := RE_CHAPTER_ANCHOR.fullmatch(a)))
+    refs = sum(1 for a in anchors if a.startswith("ref-")) or sum(1 for line in lines if RE_REF_ROW.match(line))
+    for lineno, raw in enumerate(lines, start=1):
+        declared = RE_CHAPTER_COUNT.search(raw)
+        if not declared:
+            continue
+        if chapters and int(declared.group(1)) != len(chapters):
+            report.add(path, lineno, "W208", f"声明 {declared.group(1)} 章，正文有 {len(chapters)} 章")
+        if chapters and declared.group(2):
+            first, last = int(declared.group(2)), int(declared.group(3))
+            if (first, last) != (chapters[0], chapters[-1]):
+                report.add(path, lineno, "W208", f"声明章号 {declared.group(2)}—{declared.group(3)}，正文为 {chapters[0]:02d}—{chapters[-1]:02d}")
+        sources = RE_SOURCE_COUNT.search(raw)
+        if sources and int(sources.group(1)) != refs:
+            report.add(path, lineno, "W208", f"声明 {sources.group(1)} 项资料，附录列出 {refs} 项")
+        return
 
 
 def check_with_cmark(path: Path, lines: list[str], report: Report) -> None:
