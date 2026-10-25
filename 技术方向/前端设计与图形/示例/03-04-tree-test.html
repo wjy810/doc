@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>信息架构：用树测试比较两种导航</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; --ok: #067647; --bad: #b42318; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 14px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .task { background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; max-width: 980px; }
+  .task b { display: block; font-size: 12px; color: var(--accent); }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; max-width: 980px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  h2 { font-size: 15px; margin: 0; } .sub { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+  ul { list-style: none; margin: 0; padding-left: 16px; } .tree > ul { padding-left: 0; }
+  li { margin: 2px 0; }
+  .node { font: inherit; border: 0; background: none; padding: 3px 6px; border-radius: 6px; cursor: pointer; color: var(--ink); }
+  .node:hover { background: #eef1f5; }
+  /* 展开标记用不含文字的三角形：CSS 生成的文字会被算进按钮名称，读屏软件会读出“▸” */
+  .node[aria-expanded]::before { content: ''; display: inline-block; margin-right: 6px; vertical-align: middle;
+    border-left: 5px solid #8a93a3; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .15s; }
+  .node[aria-expanded="true"]::before { transform: rotate(90deg); }
+  .leaf { display: flex; align-items: center; gap: 6px; }
+  .pick { font: inherit; font-size: 12px; border: 1px solid #c3c9d3; background: #fff; border-radius: 6px; padding: 0 8px; cursor: pointer; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  .result { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: #f6f7f9; font-size: 13px; min-height: 64px; }
+  .result .ok { color: var(--ok); font-weight: 700; } .result .bad { color: var(--bad); font-weight: 700; }
+  .path { color: var(--muted); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 6px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left; font-variant-numeric: tabular-nums; }
+  th { color: var(--muted); font-weight: 400; }
+  .summary { max-width: 980px; margin-top: 16px; }
+  button.reset { font: inherit; font-size: 12px; margin-top: 8px; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; }
+</style>
+</head>
+<body>
+<div class="task"><b>任务</b>你已经上传了一份简历，现在想把它的名称改成“前端实习简历 2026 秋”。你会在哪里找到这个功能？（点击展开，找到后点“选这里”）</div>
+<div class="cols">
+  <section><h2>方案 A：按系统模块组织</h2><p class="sub">菜单名称来自开发时的模块划分</p><div class="tree" id="treeA"></div><div class="result" id="resA" aria-live="polite"></div></section>
+  <section><h2>方案 B：按用户任务组织</h2><p class="sub">菜单名称来自用户要完成的事</p><div class="tree" id="treeB"></div><div class="result" id="resB" aria-live="polite"></div></section>
+</div>
+<section class="summary">
+  <h2>多人测试的结果（示意数据，每个方案 8 人）</h2>
+  <table>
+    <tr><th>方案</th><th>找到正确位置</th><th>直接找到（没有回退）</th><th>用时中位数</th><th>最常见的第一次点击</th></tr>
+    <tr><td>A 按系统模块</td><td>4／8</td><td>2／8</td><td>41 秒</td><td>“我的”（5 人）</td></tr>
+    <tr><td>B 按用户任务</td><td>8／8</td><td>7／8</td><td>12 秒</td><td>“简历”（8 人）</td></tr>
+  </table>
+  <p class="sub" style="margin-top:6px">树测试只看结构与命名，不受视觉设计影响；8 人足以发现明显的问题，但不足以得出精确的比例（见示例 03-10）。</p>
+</section>
+<script>
+// 两棵导航树：叶子节点为 true 表示正确答案
+const A = { 首页: null, 我的: { 个人资料: null, 账号设置: null, 消息: null },
+            工具: { 文件管理: { 我的文档: { 上传: null, 重命名: true, 删除: null } }, 'AI 分析': null }, 社区: null };
+const B = { 简历: { 创建简历: null, 我的简历: { 重命名: true, 下载: null, 删除: null }, 简历分析: null },
+            岗位: { 搜索岗位: null, 收藏的岗位: null }, 准备面试: null, 账号: null };
+
+function h(tag, attrs = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k.startsWith('on')) el.addEventListener(k.slice(2), v); else el.setAttribute(k, v);
+  }
+  el.append(...children);
+  return el;
+}
+
+function setup(tree, treeId, resId) {
+  const log = { clicks: [], start: null, done: false };
+  // 记录每一次点击的路径；点到不在当前路径下的节点，就算一次“回退”
+  function record(path) {
+    if (log.done) return;
+    log.start ??= performance.now();
+    log.clicks.push(path);
+    show();
+  }
+  function build(obj, path) {
+    return h('ul', {}, ...Object.entries(obj).map(([name, child]) => {
+      const p = [...path, name];
+      if (child && typeof child === 'object') {
+        const sub = build(child, p);
+        sub.hidden = true;
+        const btn = h('button', { type: 'button', class: 'node', 'aria-expanded': 'false', onclick: () => {
+          const open = btn.getAttribute('aria-expanded') !== 'true';
+          btn.setAttribute('aria-expanded', String(open));
+          sub.hidden = !open;
+          record(p);
+        } }, name);
+        return h('li', {}, btn, sub);
+      }
+      return h('li', { class: 'leaf' }, h('button', { type: 'button', class: 'node', onclick: () => record(p) }, name),
+        h('button', { type: 'button', class: 'pick', onclick: () => finish(p, child === true) }, '选这里'));
+    }));
+  }
+  function backtracks() {
+    let n = 0;
+    for (let i = 1; i < log.clicks.length; i++) {
+      const prev = log.clicks[i - 1], cur = log.clicks[i];
+      if (!prev.every((x, j) => cur[j] === x)) n++;       // 新的点击不在上一次的路径之下
+    }
+    return n;
+  }
+  function finish(path, correct) {
+    if (log.done) return;
+    record(path);
+    log.done = true;
+    log.correct = correct;
+    log.time = (performance.now() - log.start) / 1000;
+    show();
+  }
+  function show() {
+    const res = document.getElementById(resId);
+    const lines = [h('div', { class: 'path' }, '点击路径：', log.clicks.map(p => p.at(-1)).join(' → ') || '（尚未开始）')];
+    if (log.done) {
+      const b = backtracks();
+      lines.unshift(h('div', {}, h('span', { class: log.correct ? 'ok' : 'bad' }, log.correct ? '找到了正确位置' : '选错了位置'),
+        `，${b ? `回退 ${b} 次` : '没有回退'}，点击 ${log.clicks.length} 次，用时 ${log.time.toFixed(1)} 秒`));
+    }
+    res.replaceChildren(...lines, h('button', { type: 'button', class: 'reset', onclick: reset }, '重新测试'));
+  }
+  function reset() {
+    log.clicks = []; log.start = null; log.done = false;
+    document.getElementById(treeId).replaceChildren(build(tree, []));
+    show();
+  }
+  reset();
+}
+setup(A, 'treeA', 'resA');
+setup(B, 'treeB', 'resB');
+</script>
+</body>
+</html>

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>反馈与错误恢复：说清问题、保留输入、可以撤销</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; --bad: #b42318; --ok: #067647; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 14px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; max-width: 960px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; position: relative; }
+  h2 { font-size: 17px; margin: 0 0 10px; }
+  label { display: block; font-weight: 700; margin-top: 10px; }
+  .hint { color: var(--muted); font-size: 12px; margin: 0; }
+  input, select, textarea { font: inherit; width: 100%; padding: 6px 10px; border: 1px solid #8a93a3; border-radius: 6px; margin-top: 2px; }
+  [aria-invalid="true"] { border: 2px solid var(--bad); }
+  .error { color: var(--bad); font-size: 13px; font-weight: 700; margin: 2px 0 0; }
+  .summary { border: 3px solid var(--bad); border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; }
+  .summary h3 { margin: 0 0 4px; font-size: 15px; }
+  .summary ul { margin: 0; padding-left: 18px; }
+  .summary a { color: var(--bad); font-weight: 700; }
+  .banner { border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; }
+  .banner.bad { background: #fdf0ee; } .banner.ok { background: #ecf8f1; }
+  button { font: inherit; padding: 7px 16px; border-radius: 8px; border: 1px solid #c3c9d3; background: #fff; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; margin-top: 14px; min-width: 120px; }
+  button[aria-disabled="true"] { opacity: .6; cursor: progress; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  .toggle { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; font-weight: 400; margin-top: 12px; }
+  .toggle input { width: auto; }
+  ul.jobs { list-style: none; margin: 0; padding: 0; }
+  ul.jobs li { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  ul.jobs li small { display: block; color: var(--muted); }
+  .toast { position: absolute; left: 18px; right: 18px; bottom: 16px; background: #1d2330; color: #fff; border-radius: 8px; padding: 8px 12px;
+           display: flex; justify-content: space-between; align-items: center; }
+  .toast button { background: none; border: 0; color: #9ec2ff; font-weight: 700; padding: 2px 6px; }
+  .danger { color: var(--bad); border-color: #f0b8b0; margin-top: 12px; }
+</style>
+</head>
+<body>
+<div class="cols">
+  <section aria-labelledby="f-title">
+    <h2 id="f-title">投递：前端开发实习生</h2>
+    <div id="messages" tabindex="-1"></div>
+    <form id="form" novalidate>
+      <label for="name">姓名</label>
+      <input id="name" autocomplete="name" aria-describedby="name-err">
+      <p class="error" id="name-err" hidden></p>
+      <label for="email">邮箱</label>
+      <p class="hint" id="email-hint">投递结果会发送到这个邮箱</p>
+      <input id="email" type="email" autocomplete="email" aria-describedby="email-hint email-err">
+      <p class="error" id="email-err" hidden></p>
+      <label for="resume">选择简历</label>
+      <select id="resume" aria-describedby="resume-err"><option value="">请选择</option><option>前端实习简历 2026 秋</option><option>通用简历</option></select>
+      <p class="error" id="resume-err" hidden></p>
+      <button class="primary" id="submit" type="submit">提交投递</button>
+      <label class="toggle"><input type="checkbox" id="busy"> 模拟服务器繁忙</label>
+    </form>
+  </section>
+  <section aria-labelledby="j-title">
+    <h2 id="j-title">收藏的岗位</h2>
+    <ul class="jobs" id="jobs"></ul>
+    <button class="danger" id="clear" type="button">清空全部收藏…</button>
+    <dialog id="confirm" aria-labelledby="c-title">
+      <form method="dialog">
+        <h3 id="c-title" style="margin:0 0 6px">清空全部收藏？</h3>
+        <p id="c-text" style="margin:0 0 12px"></p>
+        <button value="cancel">保留收藏</button> <button value="ok" class="danger" style="margin:0">清空</button>
+      </form>
+    </dialog>
+    <div id="toast-slot" aria-live="polite"></div>
+  </section>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+function h(tag, attrs = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k.startsWith('on')) el.addEventListener(k.slice(2), v); else el.setAttribute(k, v);
+  }
+  el.append(...children);
+  return el;
+}
+
+// ---------- 表单：错误要说清是哪里、怎样改；所有输入都保留 ----------
+const rules = {
+  name: v => v.trim() ? '' : '请输入姓名',
+  email: v => !v.trim() ? '请输入邮箱，投递结果会发送到这里' : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? '' : '邮箱格式不正确，例如 name@example.com',
+  resume: v => v ? '' : '请选择要投递的简历'
+};
+let submitting = false;
+$('form').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (submitting) return;                                   // 防止重复提交
+  const errors = Object.entries(rules).map(([id, rule]) => [id, rule($(id).value)]).filter(([, msg]) => msg);
+  for (const id of Object.keys(rules)) {
+    const msg = errors.find(([eid]) => eid === id)?.[1] || '';
+    $(id).setAttribute('aria-invalid', String(Boolean(msg)));
+    $(id + '-err').textContent = msg; $(id + '-err').hidden = !msg;
+  }
+  if (errors.length) {
+    // 错误汇总：列出每个问题，点击可以跳到对应的输入框
+    $('messages').replaceChildren(h('div', { class: 'summary', role: 'alert' },
+      h('h3', {}, `有 ${errors.length} 处需要修改`),
+      h('ul', {}, ...errors.map(([id, msg]) => h('li', {}, h('a', { href: '#' + id, onclick: ev => { ev.preventDefault(); $(id).focus(); } }, msg))))));
+    $('messages').focus();
+    return;
+  }
+  submitting = true;
+  $('submit').setAttribute('aria-disabled', 'true');
+  $('submit').textContent = '正在提交…';
+  $('messages').replaceChildren();
+  await new Promise(r => setTimeout(r, 600));
+  submitting = false;
+  $('submit').removeAttribute('aria-disabled');
+  $('submit').textContent = '提交投递';
+  if ($('busy').checked) {
+    $('messages').replaceChildren(h('div', { class: 'banner bad', role: 'alert' },
+      '提交没有成功：服务器暂时繁忙。你填写的内容都已保留，可以稍后重试。'));
+  } else {
+    $('messages').replaceChildren(h('div', { class: 'banner ok', role: 'status' },
+      '已投递。我们会在 3 个工作日内通过邮件告诉你结果。'));
+  }
+});
+
+// ---------- 收藏：删除后可以撤销，比“确定要删除吗？”更少打断 ----------
+let jobs = [
+  { id: 1, title: '前端开发实习生', org: '星河科技 · 上海' }, { id: 2, title: '数据分析实习生', org: '远山数据 · 杭州' },
+  { id: 3, title: '测试开发实习生', org: '青石软件 · 北京' }, { id: 4, title: '产品助理', org: '云帆教育 · 深圳' }
+];
+let toastTimer;
+function renderJobs() {
+  $('jobs').replaceChildren(...jobs.map(j => h('li', {}, h('span', {}, j.title, h('small', {}, j.org)),
+    h('button', { type: 'button', 'aria-label': `删除收藏：${j.title}`, onclick: () => remove(j) }, '删除'))));
+  $('clear').disabled = !jobs.length;
+}
+function remove(job) {
+  const index = jobs.indexOf(job);
+  jobs = jobs.filter(j => j !== job);
+  renderJobs();
+  clearTimeout(toastTimer);
+  const undoBtn = h('button', { type: 'button', onclick: () => {
+    jobs.splice(index, 0, job);                             // 放回原来的位置
+    clearTimeout(toastTimer);
+    renderJobs(); $('toast-slot').replaceChildren();
+  } }, '撤销');
+  $('toast-slot').replaceChildren(h('div', { class: 'toast' }, `已删除“${job.title}”`, undoBtn));
+  toastTimer = setTimeout(() => $('toast-slot').replaceChildren(), 6000);
+}
+// 一次清空全部：影响大，用确认对话框写清后果
+$('clear').addEventListener('click', () => {
+  $('c-text').textContent = `将删除全部 ${jobs.length} 个收藏，删除后无法恢复。`;
+  $('confirm').returnValue = '';
+  $('confirm').showModal();
+});
+$('confirm').addEventListener('close', () => { if ($('confirm').returnValue === 'ok') { jobs = []; renderJobs(); } });
+renderJobs();
+</script>
+</body>
+</html>

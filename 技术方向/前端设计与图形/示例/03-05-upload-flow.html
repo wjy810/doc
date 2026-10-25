@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>任务流程：上传简历并得到分析结果</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; --ok: #067647; --warn: #8a5300; --bad: #b42318; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 14px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .layout { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(320px, 1.1fr); gap: 16px; max-width: 1000px; }
+  @media (max-width: 720px) { .layout { grid-template-columns: 1fr; } }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  h2 { font-size: 13px; color: var(--muted); font-weight: 400; margin: 0 0 8px; }
+  .hint { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  .files { display: grid; gap: 6px; margin-bottom: 12px; }
+  button { font: inherit; padding: 6px 12px; border: 1px solid #c3c9d3; border-radius: 8px; background: #fff; color: var(--ink); cursor: pointer; text-align: left; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; text-align: center; }
+  button:disabled { opacity: .5; cursor: default; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  .file small { color: var(--muted); margin-left: 6px; }
+  .status { border-radius: 10px; padding: 12px 14px; background: #f6f7f9; min-height: 92px; }
+  .status[data-tone="ok"] { background: #ecf8f1; } .status[data-tone="bad"] { background: #fdf0ee; } .status[data-tone="busy"] { background: #eef3fb; }
+  .status p { margin: 0 0 8px; }
+  .bar { height: 8px; background: #dbe3f0; border-radius: 4px; overflow: hidden; margin: 0 0 8px; }
+  .bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .2s linear; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .toggle { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); margin-top: 12px; }
+  svg { width: 100%; height: auto; display: block; }
+  .node rect { fill: #fff; stroke: #c3c9d3; stroke-width: 1.5; }
+  .node text { font-size: 12px; fill: var(--ink); text-anchor: middle; dominant-baseline: middle; }
+  .node.current rect { fill: var(--accent); stroke: var(--accent); }
+  .node.current text { fill: #fff; font-weight: 700; }
+  .edge { stroke: #b8c0cc; stroke-width: 1.3; fill: none; marker-end: url(#arrow); }
+  .edge.taken { stroke: var(--accent); stroke-width: 2; }
+  .elabel { font-size: 10px; fill: var(--muted); }
+  ol.history { margin: 0; padding-left: 20px; font-size: 13px; color: var(--muted); max-height: 140px; overflow: auto; }
+  .note { font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="layout">
+  <section aria-labelledby="task-title">
+    <h1 id="task-title">简历分析</h1>
+    <p class="hint">选择一份简历（PDF 或 Word，不超过 10 MB）。分析大约需要 1 分钟（示例中加快了时间）。</p>
+    <h2>示例文件</h2>
+    <div class="files" id="files"></div>
+    <label class="note">或者选择自己的文件（只检查名称、类型和大小，不会上传）：<input type="file" id="real" accept=".pdf,.doc,.docx"></label>
+    <h2 style="margin-top:14px">当前状态</h2>
+    <div class="status" id="status" role="status" aria-live="polite"></div>
+    <label class="toggle"><input type="checkbox" id="netfail"> 模拟网络中断（上传到 60% 时失败）</label>
+  </section>
+  <section>
+    <h2>状态图：蓝色是当前状态，蓝色箭头是刚刚发生的转换</h2>
+    <svg id="diagram" viewBox="0 0 440 300" role="img" aria-label="上传与分析流程的状态图"></svg>
+    <h2 style="margin-top:10px">历史记录（保存在本机，刷新后仍在）</h2>
+    <ol class="history" id="history"></ol>
+  </section>
+</div>
+<script>
+// ---------- 状态机：所有状态和允许的转换都列在这里，界面只根据当前状态显示 ----------
+const STATES = {
+  idle:      { label: '未选择',  x: 60,  y: 40 },
+  checking:  { label: '校验中',  x: 200, y: 40 },
+  invalid:   { label: '校验失败', x: 360, y: 40 },
+  uploading: { label: '上传中',  x: 200, y: 130 },
+  analyzing: { label: '分析中',  x: 200, y: 220 },
+  done:      { label: '完成',    x: 360, y: 220 },
+  failed:    { label: '失败',    x: 360, y: 130 },
+  cancelled: { label: '已取消',  x: 60,  y: 180 }
+};
+const TRANSITIONS = [
+  ['idle', 'select', 'checking'], ['invalid', 'select', 'checking'], ['done', 'select', 'checking'],
+  ['failed', 'select', 'checking'], ['cancelled', 'select', 'checking'],
+  ['checking', 'valid', 'uploading'], ['checking', 'invalid', 'invalid'],
+  ['uploading', 'uploaded', 'analyzing'], ['uploading', 'fail', 'failed'], ['uploading', 'cancel', 'cancelled'],
+  ['analyzing', 'analyzed', 'done'], ['analyzing', 'fail', 'failed'], ['analyzing', 'cancel', 'cancelled'],
+  ['failed', 'retry', 'uploading']
+];
+const EDGE_LABEL = { select: '选择文件', valid: '通过', invalid: '不通过', uploaded: '上传完成', analyzed: '分析完成', fail: '出错', cancel: '取消', retry: '重试' };
+
+const SAMPLES = [
+  { name: '前端实习简历.pdf', size: 1.2, type: 'pdf' },
+  { name: '个人照片.png', size: 2.4, type: 'png' },
+  { name: '作品集合集.pdf', size: 32, type: 'pdf' },
+  { name: '前端实习简历（扫描件）.pdf', size: 3.1, type: 'pdf', scanned: true }
+];
+const KEY = 'resume-flow-demo';
+let job = load() || { state: 'idle', file: null, progress: 0, failedStep: null, message: '' };
+let lastEdge = null, timer = null;
+
+function load() { try { return JSON.parse(localStorage.getItem(KEY))?.job; } catch { return null; } }
+function save(history) {
+  try {
+    const data = JSON.parse(localStorage.getItem(KEY) || '{}');
+    data.job = job;
+    if (history) data.history = [history, ...(data.history || [])].slice(0, 20);
+    localStorage.setItem(KEY, JSON.stringify(data));
+  } catch { /* 无法使用本地存储时，只是不保存历史 */ }
+}
+function history() { try { return JSON.parse(localStorage.getItem(KEY) || '{}').history || []; } catch { return []; } }
+
+// 唯一修改状态的入口：不在表中的转换直接拒绝，界面就不会出现“不可能的状态”
+function send(event, patch = {}) {
+  const t = TRANSITIONS.find(([from, ev]) => from === job.state && ev === event);
+  if (!t) return false;
+  lastEdge = t;
+  job = { ...job, ...patch, state: t[2] };
+  const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  save(['done', 'failed', 'invalid', 'cancelled'].includes(job.state) ? `${time} ${job.file?.name ?? ''}：${STATES[job.state].label}` : null);
+  render();
+  run();
+  return true;
+}
+
+// ---------- 模拟的后台：校验、上传、分析 ----------
+function run() {
+  clearInterval(timer);
+  if (job.state === 'checking') {
+    setTimeout(() => {
+      const f = job.file;
+      if (!['pdf', 'doc', 'docx'].includes(f.type)) send('invalid', { message: `“${f.name}”不是 PDF 或 Word 文件。请选择简历文件。` });
+      else if (f.size > 10) send('invalid', { message: `“${f.name}”有 ${f.size} MB，超过了 10 MB 的上限。可以压缩后再上传。` });
+      else send('valid', { progress: 0 });
+    }, 300);
+  }
+  if (job.state === 'uploading') {
+    timer = setInterval(() => {
+      job.progress = Math.min(100, job.progress + 10);
+      if (document.getElementById('netfail').checked && job.progress >= 60) {
+        clearInterval(timer);
+        return send('fail', { failedStep: 'upload', message: '上传中断：网络连接不稳定。文件已保留，可以重试。' });
+      }
+      if (job.progress >= 100) { clearInterval(timer); return send('uploaded', { progress: 0 }); }
+      render();
+    }, 150);
+  }
+  if (job.state === 'analyzing') {
+    timer = setInterval(() => {
+      job.progress = Math.min(100, job.progress + 8);
+      save();
+      if (job.progress >= 100) {
+        clearInterval(timer);
+        if (job.file.scanned) return send('fail', { failedStep: 'analysis', message: '无法识别文件中的文字。如果是扫描件，请上传可以选中文字的 PDF。' });
+        return send('analyzed', { message: '分析完成：发现 3 处可以改进的地方，其中 1 处是缺少量化的成果。' });
+      }
+      render();
+    }, 200);
+  }
+}
+
+// ---------- 界面：每个状态说明现在怎样、为什么、下一步能做什么 ----------
+function h(tag, attrs = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k.startsWith('on')) el.addEventListener(k.slice(2), v); else el.setAttribute(k, v);
+  }
+  el.append(...children);
+  return el;
+}
+function choose(file) { send('select', { file, progress: 0, failedStep: null, message: '' }); }
+
+function render() {
+  const busy = ['checking', 'uploading', 'analyzing'].includes(job.state);
+  document.getElementById('files').replaceChildren(...SAMPLES.map(f =>
+    h('button', { type: 'button', class: 'file', onclick: () => choose(f), ...(busy ? { disabled: '' } : {}) }, f.name, h('small', {}, `${f.size} MB`))));
+  document.getElementById('real').disabled = busy;
+
+  const s = document.getElementById('status');
+  const name = job.file ? `“${job.file.name}”` : '';
+  const tone = { done: 'ok', invalid: 'bad', failed: 'bad', checking: 'busy', uploading: 'busy', analyzing: 'busy' }[job.state] || '';
+  s.dataset.tone = tone;
+  const parts = {
+    idle: [h('p', {}, '还没有选择文件。')],
+    checking: [h('p', {}, `正在检查 ${name}…`)],
+    invalid: [h('p', {}, job.message), h('div', { class: 'actions' }, h('span', { class: 'note' }, '请从上方重新选择文件。'))],
+    uploading: [h('p', {}, `正在上传 ${name}：${job.progress}%`), h('div', { class: 'bar' }, h('i', { style: `width:${job.progress}%` })),
+      h('div', { class: 'actions' }, h('button', { type: 'button', onclick: () => send('cancel') }, '取消上传'))],
+    analyzing: [h('p', {}, `正在分析 ${name}，大约还需要 ${Math.ceil((100 - job.progress) / 100 * 60)} 秒。可以离开此页面，完成后会通知你。`),
+      h('div', { class: 'bar' }, h('i', { style: `width:${job.progress}%` })),
+      h('div', { class: 'actions' }, h('button', { type: 'button', onclick: () => send('cancel') }, '取消分析'))],
+    done: [h('p', {}, job.message), h('div', { class: 'actions' }, h('button', { type: 'button', class: 'primary' }, '查看报告'))],
+    failed: [h('p', {}, job.message), h('div', { class: 'actions' },
+      ...(job.failedStep === 'upload' ? [h('button', { type: 'button', class: 'primary', onclick: () => send('retry', { progress: 0, message: '' }) }, '重试')] : []),
+      h('span', { class: 'note' }, '也可以从上方换一个文件。'))],
+    cancelled: [h('p', {}, '已取消，没有保存任何内容。'), h('span', { class: 'note' }, '可以从上方重新选择文件。')]
+  };
+  s.replaceChildren(...parts[job.state]);
+  drawDiagram();
+  document.getElementById('history').replaceChildren(...history().map(line => h('li', {}, line)));
+}
+
+// ---------- 状态图 ----------
+function drawDiagram() {
+  const svg = document.getElementById('diagram');
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text) e.textContent = text; return e; };
+  svg.replaceChildren(el('defs', {}));
+  const marker = el('marker', { id: 'arrow', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' });
+  marker.append(el('path', { d: 'M0 0L10 5L0 10z', fill: '#8a93a3' }));
+  svg.firstChild.append(marker);
+  const W = 72, H = 30;
+  const has = (a, b) => TRANSITIONS.some(([f, , t]) => f === a && t === b);
+  for (const t of TRANSITIONS) {
+    const [from, ev, to] = t;
+    if (ev === 'select' && !['idle', 'invalid'].includes(from)) continue;   // 多个“重新选择”只画两条，保持图清楚
+    const a = STATES[from], b = STATES[to];
+    const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy);
+    const ux = dx / len, uy = dy / len;
+    const cut = Math.min(Math.abs(W / 2 / (ux || 1e-9)), Math.abs(H / 2 / (uy || 1e-9)));
+    const bend = has(to, from) ? 16 : 0;                // 两个方向都有箭头时，各自向一侧弯曲
+    const x1 = a.x + ux * (cut + 2), y1 = a.y + uy * (cut + 2), x2 = b.x - ux * (cut + 4), y2 = b.y - uy * (cut + 4);
+    const cx = (x1 + x2) / 2 - uy * bend * 2, cy = (y1 + y2) / 2 + ux * bend * 2;
+    const taken = lastEdge && lastEdge[0] === from && lastEdge[2] === to;
+    svg.append(el('path', { d: `M${x1} ${y1} Q${cx} ${cy} ${x2} ${y2}`, class: 'edge' + (taken ? ' taken' : '') }));
+    // 标签放在曲线中点，再沿弯曲方向外移一点
+    const px = 0.25 * x1 + 0.5 * cx + 0.25 * x2, py = 0.25 * y1 + 0.5 * cy + 0.25 * y2;
+    const off = bend ? 9 : 6, lx = px - uy * off * Math.sign(bend || 1), ly = py + ux * off * Math.sign(bend || 1);
+    svg.append(el('text', { x: lx, y: ly + 3, class: 'elabel', 'text-anchor': 'middle' }, EDGE_LABEL[ev]));
+  }
+  for (const [id, s] of Object.entries(STATES)) {
+    const g = el('g', { class: 'node' + (id === job.state ? ' current' : '') });
+    g.append(el('rect', { x: s.x - W / 2, y: s.y - H / 2, width: W, height: H, rx: 8 }), el('text', { x: s.x, y: s.y }, s.label));
+    svg.append(g);
+  }
+}
+
+document.getElementById('real').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (f) choose({ name: f.name, size: +(f.size / 1048576).toFixed(1), type: f.name.split('.').pop().toLowerCase() });
+});
+
+// 刷新或重新打开页面时：上传会被中断（需要重试），分析在服务器上继续进行
+if (job.state === 'uploading') { job = { ...job, state: 'failed', failedStep: 'upload', message: '上传在页面关闭时中断了。文件已保留，可以重试。' }; save(); }
+if (job.state === 'checking') job = { ...job, state: 'idle' };
+render();
+run();
+</script>
+</body>
+</html>

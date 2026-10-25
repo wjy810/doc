@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>复杂操作：选择、拖动、吸附、批量编辑与撤销</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 14px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .app { display: grid; grid-template-columns: 1fr 220px; gap: 14px; max-width: 980px; }
+  .toolbar { grid-column: 1 / -1; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .toolbar button { font: inherit; font-size: 13px; padding: 4px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  .toolbar button:disabled { opacity: .45; cursor: default; }
+  .toolbar .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+  .board { position: relative; height: 380px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #fff;
+           background-image: radial-gradient(circle, #d5dae2 1px, transparent 1.2px); background-size: 20px 20px; touch-action: none; user-select: none; }
+  .world { position: absolute; inset: 0; transform-origin: 0 0; }
+  .card { position: absolute; width: 120px; padding: 8px 10px; border-radius: 8px; background: #fff; border: 1.5px solid #c3c9d3;
+          box-shadow: 0 1px 2px rgba(16,24,40,.08); cursor: grab; font-size: 13px; }
+  .card small { display: block; color: var(--muted); font-size: 11px; }
+  .card[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(47,111,219,.25); }
+  .card:focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  .marquee { position: absolute; border: 1px solid var(--accent); background: rgba(47,111,219,.1); pointer-events: none; }
+  .guide { position: absolute; background: #e4572e; pointer-events: none; opacity: .8; }
+  .status { grid-column: 1; font-size: 13px; color: var(--muted); }
+  .status b { color: var(--ink); }
+  aside { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+  aside h2 { font-size: 13px; margin: 0 0 6px; color: var(--muted); font-weight: 400; }
+  aside ol { margin: 0; padding-left: 18px; }
+  aside li.undone { color: #b0b6c0; text-decoration: line-through; }
+  .keys { margin-top: 10px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+  kbd { font: 11px/1 ui-monospace, monospace; border: 1px solid #c3c9d3; border-bottom-width: 2px; border-radius: 4px; padding: 1px 4px; background: #f6f7f9; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="toolbar" role="toolbar" aria-label="画布操作">
+    <button id="undo" type="button">撤销</button><button id="redo" type="button">重做</button><span class="sep"></span>
+    <button id="alignLeft" type="button">左对齐</button><button id="del" type="button">删除</button><span class="sep"></span>
+    <!-- 不拖动也能移动：单指针的替代方式（WCAG 2.5.7） -->
+    <button type="button" data-move="0,-1" aria-label="上移">↑</button><button type="button" data-move="0,1" aria-label="下移">↓</button>
+    <button type="button" data-move="-1,0" aria-label="左移">←</button><button type="button" data-move="1,0" aria-label="右移">→</button><span class="sep"></span>
+    <button id="zoomOut" type="button" aria-label="缩小">－</button><button id="zoomIn" type="button" aria-label="放大">＋</button>
+  </div>
+  <div class="board" id="board" tabindex="-1" aria-label="能力画布"><div class="world" id="world"></div></div>
+  <aside>
+    <h2>操作历史</h2><ol id="history"></ol>
+    <div class="keys"><kbd>Shift</kbd> 加点击：多选<br>在空白处拖动：框选<br>方向键：移动一格<br><kbd>Delete</kbd>：删除<br><kbd>Ctrl</kbd> ＋ <kbd>Z</kbd>：撤销<br><kbd>Ctrl</kbd> ＋ <kbd>Shift</kbd> ＋ <kbd>Z</kbd>：重做<br><kbd>Esc</kbd>：取消选择</div>
+  </aside>
+  <p class="status" id="status" role="status" aria-live="polite"></p>
+</div>
+<script>
+const GRID = 20;
+let items = [
+  { id: 1, title: '沟通表达', kind: '通用能力', x: 40, y: 40 }, { id: 2, title: '项目管理', kind: '通用能力', x: 80, y: 140 },
+  { id: 3, title: '时间管理', kind: '通用能力', x: 60, y: 240 }, { id: 4, title: 'React', kind: '技术', x: 300, y: 60 },
+  { id: 5, title: 'TypeScript', kind: '技术', x: 320, y: 170 }, { id: 6, title: '数据分析', kind: '技术', x: 480, y: 110 },
+  { id: 7, title: '用户研究', kind: '设计', x: 500, y: 260 }
+];
+let selected = new Set(), zoom = 1;
+const done = [], undone = [];                         // 撤销栈与重做栈
+const board = document.getElementById('board'), world = document.getElementById('world');
+
+// ---------- 每个修改都写成一条“命令”：知道怎样执行，也知道怎样撤销 ----------
+function execute(cmd) { cmd.apply(); done.push(cmd); undone.length = 0; render(); }
+function undo() { const c = done.pop(); if (!c) return; c.revert(); undone.push(c); render(`已撤销：${c.label}`); }
+function redo() { const c = undone.pop(); if (!c) return; c.apply(); done.push(c); render(`已重做：${c.label}`); }
+const byId = id => items.find(i => i.id === id);
+function moveCmd(ids, dx, dy) {
+  return { label: `移动 ${ids.length} 项`, apply() { ids.forEach(id => { byId(id).x += dx; byId(id).y += dy; }); },
+           revert() { ids.forEach(id => { byId(id).x -= dx; byId(id).y -= dy; }); } };
+}
+function alignLeftCmd(ids) {
+  const before = ids.map(id => [id, byId(id).x]), left = Math.min(...before.map(b => b[1]));
+  return { label: `左对齐 ${ids.length} 项`, apply() { ids.forEach(id => { byId(id).x = left; }); },
+           revert() { before.forEach(([id, x]) => { byId(id).x = x; }); } };
+}
+function deleteCmd(ids) {
+  const removed = items.filter(i => ids.includes(i.id));
+  return { label: `删除 ${ids.length} 项`, apply() { items = items.filter(i => !ids.includes(i.id)); ids.forEach(id => selected.delete(id)); },
+           revert() { items.push(...removed); } };
+}
+
+// ---------- 绘制 ----------
+function render(message) {
+  world.style.transform = `scale(${zoom})`;
+  world.replaceChildren(...items.map(it => {
+    const el = document.createElement('div');
+    el.className = 'card'; el.tabIndex = 0; el.dataset.id = it.id;
+    el.setAttribute('role', 'button');
+    el.setAttribute('aria-pressed', String(selected.has(it.id)));
+    el.style.left = it.x + 'px'; el.style.top = it.y + 'px';
+    const small = document.createElement('small'); small.textContent = it.kind;
+    el.append(it.title, small);
+    return el;
+  }));
+  document.getElementById('history').replaceChildren(
+    ...done.map(c => Object.assign(document.createElement('li'), { textContent: c.label })),
+    ...undone.slice().reverse().map(c => Object.assign(document.createElement('li'), { textContent: c.label, className: 'undone' })));
+  document.getElementById('undo').disabled = !done.length;
+  document.getElementById('redo').disabled = !undone.length;
+  document.getElementById('alignLeft').disabled = selected.size < 2;
+  document.getElementById('del').disabled = !selected.size;
+  document.querySelectorAll('[data-move]').forEach(b => { b.disabled = !selected.size; });
+  const status = document.getElementById('status');
+  const scope = selected.size ? `已选择 ${selected.size} 项：${[...selected].map(id => byId(id).title).join('、')}` : '未选择';
+  status.replaceChildren(Object.assign(document.createElement('b'), { textContent: scope }),
+    ` · 缩放 ${Math.round(zoom * 100)}%` + (message ? ` · ${message}` : ''));
+}
+
+// ---------- 指针：点击选择、拖动移动（吸附网格）、在空白处框选 ----------
+let drag = null;
+const toWorld = e => { const r = board.getBoundingClientRect(); return { x: (e.clientX - r.left) / zoom, y: (e.clientY - r.top) / zoom }; };
+board.addEventListener('pointerdown', e => {
+  const card = e.target.closest('.card');
+  const p = toWorld(e);
+  board.setPointerCapture(e.pointerId);
+  if (card) {
+    const id = +card.dataset.id;
+    if (e.shiftKey || e.ctrlKey || e.metaKey) { selected.has(id) ? selected.delete(id) : selected.add(id); render(); return; }
+    if (!selected.has(id)) { selected = new Set([id]); render(); }
+    drag = { kind: 'move', start: p, lead: id, origin: new Map([...selected].map(i => [i, { x: byId(i).x, y: byId(i).y }])), dx: 0, dy: 0 };
+  } else {
+    if (!e.shiftKey) selected.clear();
+    drag = { kind: 'marquee', start: p, box: document.createElement('div') };
+    drag.box.className = 'marquee';
+    world.append(drag.box);
+    render();
+    world.append(drag.box);
+  }
+});
+board.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const p = toWorld(e);
+  if (drag.kind === 'move') {
+    const o = drag.origin.get(drag.lead);
+    // 以被拖动的那张卡片为准吸附到网格，其余选中的卡片保持相对位置
+    const sx = Math.round((o.x + p.x - drag.start.x) / GRID) * GRID, sy = Math.round((o.y + p.y - drag.start.y) / GRID) * GRID;
+    drag.dx = sx - o.x; drag.dy = sy - o.y;
+    for (const [id, pos] of drag.origin) { byId(id).x = pos.x + drag.dx; byId(id).y = pos.y + drag.dy; }
+    render(`移动中：吸附到网格 (${sx}, ${sy})`);
+    for (const [cls, style] of [['v', `left:${sx}px;top:0;width:1px;height:100%`], ['h', `top:${sy}px;left:0;height:1px;width:100%`]]) {
+      const g = document.createElement('div'); g.className = 'guide ' + cls; g.style.cssText = style; world.append(g);
+    }
+  } else {
+    const x = Math.min(p.x, drag.start.x), y = Math.min(p.y, drag.start.y), w = Math.abs(p.x - drag.start.x), h = Math.abs(p.y - drag.start.y);
+    Object.assign(drag.box.style, { left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px' });
+    selected = new Set(items.filter(it => it.x < x + w && it.x + 120 > x && it.y < y + h && it.y + 48 > y).map(it => it.id));
+    const box = drag.box; render(); world.append(box);
+  }
+});
+board.addEventListener('pointerup', () => {
+  if (drag?.kind === 'move' && (drag.dx || drag.dy)) {
+    // 拖动过程中已经移动了卡片：先放回原处，再作为一条命令执行，才能撤销
+    for (const [id, pos] of drag.origin) { byId(id).x = pos.x; byId(id).y = pos.y; }
+    execute(moveCmd([...drag.origin.keys()], drag.dx, drag.dy));
+  } else render();
+  drag = null;
+});
+
+// ---------- 键盘：拖动的替代方式，以及常用快捷键 ----------
+board.addEventListener('focusin', e => {
+  const card = e.target.closest('.card');
+  if (card && !selected.has(+card.dataset.id) && !drag) { selected = new Set([+card.dataset.id]); render(); board.querySelector(`[data-id="${card.dataset.id}"]`).focus(); }
+});
+document.addEventListener('keydown', e => {
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if (e.key === 'Escape') { selected.clear(); render(); return; }
+  if (!selected.size) return;
+  const step = { ArrowLeft: [-GRID, 0], ArrowRight: [GRID, 0], ArrowUp: [0, -GRID], ArrowDown: [0, GRID] }[e.key];
+  const focused = document.activeElement?.dataset?.id;
+  if (step) { e.preventDefault(); execute(moveCmd([...selected], ...step)); }
+  if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); execute(deleteCmd([...selected])); board.focus(); return; }
+  if (step && focused) board.querySelector(`[data-id="${focused}"]`)?.focus();
+});
+document.getElementById('undo').addEventListener('click', undo);
+document.getElementById('redo').addEventListener('click', redo);
+document.getElementById('alignLeft').addEventListener('click', () => execute(alignLeftCmd([...selected])));
+document.getElementById('del').addEventListener('click', () => execute(deleteCmd([...selected])));
+document.querySelectorAll('[data-move]').forEach(b => b.addEventListener('click', () => {
+  if (!selected.size) return;
+  const [dx, dy] = b.dataset.move.split(',').map(Number);
+  execute(moveCmd([...selected], dx * GRID, dy * GRID));
+}));
+document.getElementById('zoomIn').addEventListener('click', () => { zoom = Math.min(2, zoom + 0.25); render(); });
+document.getElementById('zoomOut').addEventListener('click', () => { zoom = Math.max(0.5, zoom - 0.25); render(); });
+render();
+</script>
+</body>
+</html>

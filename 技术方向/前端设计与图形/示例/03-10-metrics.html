@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>评价与迭代：少量用户能说明什么</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5.3.0/400.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 Inter, "Noto Sans SC", system-ui, sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; max-width: 1000px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  h2 { font-size: 15px; margin: 0 0 2px; } .sub { color: var(--muted); margin: 0 0 8px; }
+  .ci { display: grid; grid-template-columns: 96px 1fr 128px; gap: 8px; align-items: center; padding: 3px 0; font-variant-numeric: tabular-nums; }
+  .track { position: relative; height: 14px; background: #f0f2f5; border-radius: 7px; }
+  .range { position: absolute; top: 3px; height: 8px; background: rgba(47,111,219,.35); border-radius: 4px; }
+  .dot { position: absolute; top: 1px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--accent); }
+  .axis { display: grid; grid-template-columns: 96px 1fr 128px; gap: 8px; color: var(--muted); font-size: 11px; }
+  .axis div { display: flex; justify-content: space-between; }
+  svg { width: 100%; height: auto; display: block; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  td, th { padding: 3px 8px; border-bottom: 1px solid var(--line); text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 400; }
+  .controls { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; margin: 10px 0 0; }
+  .controls output { flex-basis: 100%; color: var(--accent); }
+  td:last-child, th:last-child { text-align: left; }
+  input[type=number] { font: inherit; width: 64px; padding: 2px 6px; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <section>
+    <h2>任务成功率与 95% 置信区间</h2>
+    <p class="sub">同样是 80% 的成功率，人数越少，真实值可能的范围越宽（调整后的 Wald 区间）</p>
+    <div id="cis"></div>
+    <div class="axis"><span></span><div><span>0%</span><span>50%</span><span>100%</span></div><span></span></div>
+    <div class="controls">自己试试：成功 <input type="number" id="x" min="0" value="3"> 人，共 <input type="number" id="n" min="1" value="4"> 人
+      <output id="mine"></output></div>
+  </section>
+  <section>
+    <h2>测试几个人，能发现多少问题</h2>
+    <p class="sub">发现比例 ＝ 1 −（1 − L）<sup>n</sup>，L 是一个问题被单个用户遇到的概率</p>
+    <svg id="curve" viewBox="0 0 420 210" role="img" aria-label="发现问题的比例随测试人数增加的曲线"></svg>
+  </section>
+  <section>
+    <h2>任务用时：少数很慢的人会拉高平均值</h2>
+    <p class="sub">5 位参与者完成“上传简历”的用时（秒，示意数据）</p>
+    <table id="times"></table>
+  </section>
+</div>
+<script>
+// ---------- 调整后的 Wald 区间：在成功数与总数上各加 z²/2 与 z²，小样本也能给出合理的范围 ----------
+function adjustedWald(x, n, z = 1.96) {
+  const nAdj = n + z * z, p = (x + z * z / 2) / nAdj;
+  const m = z * Math.sqrt(p * (1 - p) / nAdj);
+  return [Math.max(0, p - m), Math.min(1, p + m)];
+}
+function row(label, x, n) {
+  const [lo, hi] = adjustedWald(x, n);
+  const div = document.createElement('div'); div.className = 'ci';
+  const track = document.createElement('div'); track.className = 'track';
+  const range = document.createElement('i'); range.className = 'range'; range.style.left = lo * 100 + '%'; range.style.width = (hi - lo) * 100 + '%';
+  const dot = document.createElement('i'); dot.className = 'dot'; dot.style.left = x / n * 100 + '%';
+  track.append(range, dot);
+  const text = document.createElement('span'); text.textContent = `${Math.round(lo * 100)}%—${Math.round(hi * 100)}%`;
+  div.append(label, track, text);
+  return div;
+}
+document.getElementById('cis').append(row('4／5 人', 4, 5), row('8／10 人', 8, 10), row('16／20 人', 16, 20), row('40／50 人', 40, 50), row('80／100 人', 80, 100));
+function mine() {
+  const x = Math.max(0, +document.getElementById('x').value), n = Math.max(1, +document.getElementById('n').value);
+  if (x > n) { document.getElementById('mine').textContent = '成功人数不能超过总人数'; return; }
+  const [lo, hi] = adjustedWald(x, n);
+  document.getElementById('mine').textContent = `→ 真实成功率大致在 ${Math.round(lo * 100)}%—${Math.round(hi * 100)}%`;
+}
+document.getElementById('x').addEventListener('input', mine);
+document.getElementById('n').addEventListener('input', mine);
+mine();
+
+// ---------- 发现问题的曲线 ----------
+{
+  const svg = document.getElementById('curve'), NS = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text !== undefined) e.textContent = text; svg.append(e); return e; };
+  const X = n => 40 + (n - 1) / 14 * 360, Y = v => 180 - v * 160;
+  for (const t of [0, 0.25, 0.5, 0.75, 1]) { el('line', { x1: 40, x2: 400, y1: Y(t), y2: Y(t), stroke: '#e6e9ee' }); el('text', { x: 34, y: Y(t) + 4, 'text-anchor': 'end', 'font-size': 11, fill: '#5b6475' }, Math.round(t * 100) + '%'); }
+  for (const n of [1, 5, 10, 15]) el('text', { x: X(n), y: 200, 'text-anchor': 'middle', 'font-size': 11, fill: '#5b6475' }, `${n} 人`);
+  for (const [L, color, label] of [[0.31, '#2f6fdb', '常见问题 L ＝ 31%'], [0.1, '#e4572e', '少见问题 L ＝ 10%']]) {
+    const pts = Array.from({ length: 15 }, (_, i) => `${X(i + 1)},${Y(1 - (1 - L) ** (i + 1))}`).join(' ');
+    el('polyline', { points: pts, fill: 'none', stroke: color, 'stroke-width': 2.5 });
+    const v5 = 1 - (1 - L) ** 5;
+    el('circle', { cx: X(5), cy: Y(v5), r: 4, fill: color });
+    el('text', { x: X(5) + 8, y: Y(v5) + (L > 0.2 ? -6 : 14), 'font-size': 11, fill: color }, `${label}：5 人发现 ${Math.round(v5 * 100)}%`);
+  }
+}
+
+// ---------- 用时：算术平均、中位数与几何平均 ----------
+{
+  const times = [32, 38, 41, 45, 120];
+  const mean = times.reduce((a, b) => a + b, 0) / times.length;
+  const median = times.slice().sort((a, b) => a - b)[2];
+  const geo = Math.exp(times.reduce((a, b) => a + Math.log(b), 0) / times.length);
+  const t = document.getElementById('times');
+  const tr = (cells, head) => { const r = document.createElement('tr'); for (const c of cells) { const d = document.createElement(head ? 'th' : 'td'); d.textContent = c; r.append(d); } t.append(r); };
+  tr(['统计量', '数值', '说明'], true);
+  tr(['各人用时', times.join('、'), '最后一位卡在了格式转换上']);
+  tr(['算术平均', mean.toFixed(1), '被一个很慢的人拉高']);
+  tr(['中位数', median.toFixed(1), '不受极端值影响']);
+  tr(['几何平均', geo.toFixed(1), '小样本时更接近典型用时']);
+}
+</script>
+</body>
+</html>

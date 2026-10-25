@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>服务与多端衔接：简历分析的服务蓝图</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.5 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { overflow-x: auto; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 8px; }
+  /* 服务蓝图本质上是一张表：每一行是一条泳道，每一列是服务的一个阶段 */
+  table { border-collapse: separate; border-spacing: 6px; min-width: 900px; width: 100%; table-layout: fixed; }
+  caption { text-align: left; font-weight: 700; font-size: 15px; padding: 4px 6px 2px; }
+  th[scope="col"] { background: #1d2330; color: #fff; border-radius: 6px; padding: 6px 4px; }
+  th[scope="row"] { width: 80px; text-align: left; font-size: 12px; color: var(--muted); }
+  td { border-radius: 6px; padding: 6px 8px; vertical-align: top; height: 58px; }
+  tr.user td { background: #e6eefb; } tr.front td { background: #eaf6ef; } tr.back td { background: #f6efe4; } tr.support td { background: #eeeef3; }
+  tr.line td { height: auto; padding: 0; background: none; border-top: 2px dashed #8a93a3; font-size: 11px; color: var(--muted); text-align: right; }
+  .pain { display: block; margin-top: 4px; color: #a8461a; font-size: 12px; }
+  .pain::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #e4572e; margin-right: 5px; }
+  .legend { margin: 10px 0 0; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+<table>
+  <caption>简历分析的服务蓝图</caption>
+  <thead><tr><td></td><th scope="col">上传简历</th><th scope="col">等待分析</th><th scope="col">收到通知</th><th scope="col">查看报告</th><th scope="col">有疑问求助</th><th scope="col">问题解决</th></tr></thead>
+  <tbody>
+    <tr class="user"><th scope="row">用户行为</th>
+      <td>选择文件并上传</td>
+      <td>离开页面，去做别的事<span class="pain">不知道要等多久</span></td>
+      <td>在邮件或手机上看到通知</td>
+      <td>逐条查看修改建议</td>
+      <td>认为某条建议不对，提交反馈</td>
+      <td>收到回复，重新分析</td></tr>
+    <tr class="line"><td colspan="7">互动线：用户与产品直接接触</td></tr>
+    <tr class="front"><th scope="row">前台触点</th>
+      <td>上传页面、进度条</td>
+      <td>任务页显示“分析中，约 1 分钟”，可以离开</td>
+      <td>邮件与站内通知，带报告链接<span class="pain">邮件可能进入垃圾箱</span></td>
+      <td>报告页，每条建议标出原文位置</td>
+      <td>反馈表单、客服对话</td>
+      <td>回复邮件、报告更新提示</td></tr>
+    <tr class="line"><td colspan="7">可见线：线以下用户看不到</td></tr>
+    <tr class="back"><th scope="row">后台处理</th>
+      <td>校验文件、保存原件</td>
+      <td>文字识别、模型分析</td>
+      <td>通知服务按用户偏好发送</td>
+      <td>生成报告、记录查看时间</td>
+      <td>客服查看原文与分析记录<span class="pain">客服看不到用户看到的报告</span></td>
+      <td>人工更正、重新运行分析</td></tr>
+    <tr class="line"><td colspan="7">内部互动线</td></tr>
+    <tr class="support"><th scope="row">支持流程</th>
+      <td>文件存储、病毒扫描</td>
+      <td>任务队列、AI 推理服务</td>
+      <td>邮件服务、消息推送</td>
+      <td>报告模板</td>
+      <td>工单系统、客服知识库</td>
+      <td>问题记录、模型评估</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="legend"><span class="pain" style="display:inline">痛点</span>：用户或员工在这一步遇到的问题，需要在设计中解决。</p>
+</body>
+</html>
