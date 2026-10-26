@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>时间步长与数值积分：同一个模拟，为什么结果会不同</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; max-width: 1100px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  canvas { width: 100%; height: auto; display: block; background: #f8fafc; border-radius: 8px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; }
+  .legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 4px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+  th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; }
+  th { color: var(--muted); font-weight: 400; }
+  .bad { color: #b42318; font-weight: 700; } .ok { color: #067647; font-weight: 700; }
+  label { display: inline-flex; gap: 6px; align-items: center; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <section>
+    <h2>1 同一个弹簧，三种积分方法（与精确解比较）</h2>
+    <p class="sub">质量 1、刚度 40、没有阻尼，从位移 1 处松开。精确解是余弦曲线；每一步时间 1/30 秒，模拟 10 秒。</p>
+    <canvas id="c1" width="1040" height="420" role="img" aria-label="位移随时间变化：精确解与三种积分方法的曲线，显式欧拉的振幅越来越大"></canvas>
+    <div class="legend" id="lg1"></div>
+    <table id="t1"><tr><th>方法</th><th>10 秒时与精确解的差</th><th>能量变化</th><th>结论</th></tr></table>
+  </section>
+  <section>
+    <h2>2 帧率不同，结果不能不同</h2>
+    <p class="sub">同一个小球以同样的初速度抛出，受重力与空气阻力，分别按每秒 30、60、144 帧运行。记录它落地的位置，以及从抛出到落地真实经过了多少秒。</p>
+    <canvas id="c2" width="1040" height="420" role="img" aria-label="三种写法在三种帧率下的小球轨迹：按帧移动的写法轨迹差别很大，固定步长的写法三条轨迹重合"></canvas>
+    <div class="legend" id="lg2"></div>
+    <table id="t2"><tr><th>写法</th><th>30 帧</th><th>60 帧</th><th>144 帧</th></tr></table>
+  </section>
+  <section style="grid-column: 1 / -1">
+    <h2>3 处理大间隔：页面卡住 0.5 秒之后</h2>
+    <p class="sub">一个较硬的弹簧（刚度 400）正常振动；第 1 秒时页面卡住 0.5 秒（例如切换标签页后回来）。直接用这 0.5 秒做一步，模拟会失控；固定步长并限制每帧最多补算的步数，模拟保持稳定。</p>
+    <canvas id="c3" width="2120" height="380" role="img" aria-label="两条位移曲线：直接用大间隔的写法在 1.5 秒后振幅暴涨，固定步长的写法平稳继续"></canvas>
+    <div class="legend" id="lg3"></div>
+    <p class="sub" id="r3"></p>
+  </section>
+</div>
+<script>
+const COLORS = { exact: '#1d2330', euler: '#e4572e', semi: '#2f6fdb', verlet: '#067647', naive: '#e4572e', dt: '#9a6700', fixed: '#2f6fdb' };
+function legend(id, items) { document.getElementById(id).innerHTML = items.map(([k, label]) => `<span><i style="background:${COLORS[k]}"></i>${label}</span>`).join(''); }
+// 画折线图：series 为 [{ key, pts: [[x, y], …] }]
+function plot(canvas, series, { xMax, yMin, yMax, xLabel, yLabel, marks = [] }) {
+  const g = canvas.getContext('2d'), W = canvas.width, H = canvas.height, L = 70, R = 20, T = 20, B = 50;
+  g.clearRect(0, 0, W, H);
+  const X = x => L + x / xMax * (W - L - R), Y = y => T + (yMax - y) / (yMax - yMin) * (H - T - B);
+  g.strokeStyle = '#c3c9d3'; g.lineWidth = 2; g.beginPath(); g.moveTo(L, T); g.lineTo(L, H - B); g.lineTo(W - R, H - B); g.stroke();
+  if (yMin < 0) { g.setLineDash([6, 6]); g.beginPath(); g.moveTo(L, Y(0)); g.lineTo(W - R, Y(0)); g.stroke(); g.setLineDash([]); }
+  g.fillStyle = '#5b6475'; g.font = '24px "Noto Sans SC", sans-serif';
+  g.fillText(xLabel, W - R - g.measureText(xLabel).width, H - 12); g.fillText(yLabel, 6, T + 14);
+  for (const m of marks) { g.fillStyle = 'rgba(228, 87, 46, .12)'; g.fillRect(X(m[0]), T, X(m[1]) - X(m[0]), H - T - B); }
+  for (const s of series) {
+    g.strokeStyle = COLORS[s.key]; g.lineWidth = s.width || 3; g.setLineDash(s.dash || []);
+    g.beginPath(); let first = true;
+    for (const [x, y] of s.pts) { const yy = Math.max(yMin - 1, Math.min(yMax + 1, y)); first ? g.moveTo(X(x), Y(yy)) : g.lineTo(X(x), Y(yy)); first = false; }
+    g.stroke(); g.setLineDash([]);
+  }
+}
+
+// ---------- 1. 三种积分方法 ----------
+const k = 40, m = 1, w = Math.sqrt(k / m), dt = 1 / 30, T = 10;
+const energy = (x, v) => 0.5 * m * v * v + 0.5 * k * x * x;
+function run(method) {
+  let x = 1, v = 0;
+  const pts = [[0, x]], steps = Math.round(T / dt);
+  for (let i = 1; i <= steps; i++) {
+    const a = -k * x / m;
+    if (method === 'euler') { x += v * dt; v += a * dt; }            // 显式欧拉：用旧速度更新位置
+    else if (method === 'semi') { v += a * dt; x += v * dt; }        // 半隐式欧拉：先更新速度，再用新速度更新位置
+    else { x += v * dt + 0.5 * a * dt * dt; const a2 = -k * x / m; v += 0.5 * (a + a2) * dt; }   // 速度 Verlet：用新旧加速度的平均
+    pts.push([i * dt, x]);
+  }
+  return { pts, x, v };
+}
+const exact = Array.from({ length: 601 }, (_, i) => { const t = i / 60; return [t, Math.cos(w * t)]; });
+const results = { euler: run('euler'), semi: run('semi'), verlet: run('verlet') };
+plot(document.getElementById('c1'), [{ key: 'exact', pts: exact, width: 5 }, { key: 'euler', pts: results.euler.pts }, { key: 'semi', pts: results.semi.pts, dash: [10, 6] }, { key: 'verlet', pts: results.verlet.pts, dash: [3, 5] }],
+  { xMax: T, yMin: -3, yMax: 3, xLabel: '时间（秒）', yLabel: '位移' });
+legend('lg1', [['exact', '精确解'], ['euler', '显式欧拉'], ['semi', '半隐式欧拉'], ['verlet', '速度 Verlet']]);
+const E0 = energy(1, 0), names = { euler: '显式欧拉', semi: '半隐式欧拉', verlet: '速度 Verlet' };
+const table1 = document.getElementById('t1');
+for (const [key, r] of Object.entries(results)) {
+  const err = Math.abs(r.x - Math.cos(w * T)), dE = (energy(r.x, r.v) / E0 - 1) * 100;
+  const tr = table1.insertRow();
+  tr.insertCell().textContent = names[key];
+  tr.insertCell().textContent = err.toFixed(3);
+  tr.insertCell().textContent = dE > 1000 ? `增加到约 ${Math.round(dE / 100 + 1).toLocaleString()} 倍` : `${dE >= 0 ? '＋' : '−'}${Math.abs(dE).toFixed(1)}%`;
+  const verdict = tr.insertCell();
+  verdict.textContent = Math.abs(dE) > 50 ? '能量不断增加，振幅越来越大' : '能量在小范围内波动，长期稳定';
+  verdict.className = Math.abs(dE) > 50 ? 'bad' : 'ok';
+}
+
+// ---------- 2. 不同帧率 ----------
+const G = -9.8, DRAG = 0.3, V0 = [6, 6];
+// 每种写法返回轨迹，以及落地的位置与真实经过的时间（秒）
+// 写法 A：每帧移动固定的量（按 60 帧调好的数值）。轨迹形状不变，但帧率越高，同样的轨迹走得越快
+function naive(fps) { let p = [0, 0], v = [V0[0] / 60, V0[1] / 60], n = 0; const pts = [[0, 0]];
+  while (p[1] >= 0 && n < 5000) { v[1] += G / 3600; v[0] *= 1 - DRAG / 60; v[1] *= 1 - DRAG / 60; p = [p[0] + v[0], p[1] + v[1]]; pts.push([p[0], p[1]]); n++; }
+  return { pts, time: n / fps }; }
+// 写法 B：乘以每帧的时间 dt（显式欧拉）。速度正确了，但步长随帧率变化，轨迹仍有偏差
+function withDt(fps) { const h = 1 / fps; let p = [0, 0], v = [...V0], n = 0; const pts = [[0, 0]];
+  while (p[1] >= 0 && n < 5000) { p = [p[0] + v[0] * h, p[1] + v[1] * h]; v = [v[0] - DRAG * v[0] * h, v[1] + (G - DRAG * v[1]) * h]; pts.push([p[0], p[1]]); n++; }
+  return { pts, time: n * h }; }
+// 写法 C：固定步长（每步 1/120 秒）。按帧累积时间，够一步就算一步，物理计算与帧率无关
+function fixed(fps) { const h = 1 / 120, frame = 1 / fps; let acc = 0, p = [0, 0], v = [...V0], steps = 0; const pts = [[0, 0]];
+  while (p[1] >= 0 && steps < 5000) { acc += frame;
+    while (acc >= h && p[1] >= 0) { v = [v[0] - DRAG * v[0] * h, v[1] + (G - DRAG * v[1]) * h]; p = [p[0] + v[0] * h, p[1] + v[1] * h]; acc -= h; steps++; pts.push([p[0], p[1]]); } }
+  return { pts, time: steps * h }; }
+const landing = ({ pts }) => { const a = pts[pts.length - 2], b = pts[pts.length - 1]; return a[0] + (b[0] - a[0]) * (a[1] / (a[1] - b[1])); };   // 线性插值求 y = 0 时的 x
+const ways = [['naive', '按帧移动', naive], ['dt', '乘以 dt', withDt], ['fixed', '固定步长', fixed]];
+const series2 = [];
+const table2 = document.getElementById('t2');
+for (const [key, label, fn] of ways) {
+  const tr = table2.insertRow(); tr.insertCell().textContent = label;
+  for (const fps of [30, 60, 144]) { const r = fn(fps); tr.insertCell().textContent = `${landing(r).toFixed(2)} 米，${r.time.toFixed(2)} 秒`; series2.push({ key, pts: r.pts, width: fps === 60 ? 4 : 2, dash: fps === 30 ? [8, 6] : fps === 144 ? [2, 4] : [] }); }
+}
+plot(document.getElementById('c2'), series2, { xMax: 14, yMin: 0, yMax: 4, xLabel: '水平距离（米）', yLabel: '高度（米）' });
+legend('lg2', [['naive', '按帧移动'], ['dt', '乘以 dt'], ['fixed', '固定步长']]);
+document.getElementById('lg2').insertAdjacentHTML('beforeend', '<span>虚线 30 帧 · 实线 60 帧 · 点线 144 帧</span>');
+
+// ---------- 3. 大间隔 ----------
+const K3 = 400, frames = [];
+for (let t = 0; t < 3; t += 1 / 60) frames.push(t > 1 && t < 1 + 1 / 60 ? 0.5 : 1 / 60);   // 第 1 秒时有一帧长达 0.5 秒
+// 两种写法都用稳定的半隐式欧拉，唯一的区别是怎样处理这一帧的时间
+function bigGapNaive() { let x = 1, v = 0, t = 0; const pts = [[0, 1]];
+  for (const f of frames) { v += -K3 * x * f; x += v * f; t += f; pts.push([t, x]); } return pts; }   // 直接用这一帧的时间做一步
+function bigGapFixed() { const h = 1 / 240, MAX = 0.1; let x = 1, v = 0, t = 0, acc = 0; const pts = [[0, 1]];
+  for (const f of frames) {
+    acc += Math.min(f, MAX);                                       // 一帧最多补算 0.1 秒，其余时间直接丢弃
+    while (acc >= h) { v += -K3 * x * h; x += v * h; acc -= h; }
+    t += f; pts.push([t, x]); }
+  return pts; }
+const a3 = bigGapNaive(), b3 = bigGapFixed();
+plot(document.getElementById('c3'), [{ key: 'naive', pts: a3 }, { key: 'fixed', pts: b3 }], { xMax: 3.5, yMin: -2, yMax: 2, xLabel: '时间（秒）', yLabel: '位移', marks: [[1, 1.5]] });
+legend('lg3', [['naive', '直接用整段间隔'], ['fixed', '固定步长，最多补算 0.1 秒']]);
+const maxAfter = pts => Math.max(...pts.filter(p => p[0] > 1.5).map(p => Math.abs(p[1])));
+const big = v => v > 1e4 ? `约 ${(v / 1e4).toFixed(1)} 万` : v.toFixed(2);
+document.getElementById('r3').innerHTML = `卡顿之后的最大位移：直接用整段间隔为 <span class="bad">${big(maxAfter(a3))}</span>（失控）；固定步长为 <span class="ok">${maxAfter(b3).toFixed(2)}</span>（与卡顿前相同）。`;
+window.__ts = { results, ways: Object.fromEntries(ways.map(([k, , fn]) => [k, [30, 60, 144].map(f => { const r = fn(f); return [+landing(r).toFixed(3), +r.time.toFixed(3)]; })])), gap: [maxAfter(a3), maxAfter(b3)] };
+</script>
+</body>
+</html>
