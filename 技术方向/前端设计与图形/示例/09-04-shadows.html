@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>光照与阴影：同一场景比较阴影方案</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  figure { margin: 0; display: grid; gap: 2px; }
+  figure canvas { width: 100%; height: auto; display: block; border-radius: 6px; background: #ddd; }
+  figcaption { font-size: 12px; } figcaption b { display: block; font-size: 13px; } figcaption span { color: var(--muted); }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+  button { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; } th { color: var(--muted); font-weight: 400; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section>
+  <h2>同一个场景、同一个相机、同样的资源：六种阴影设置</h2>
+  <p class="sub">场景里有一块很薄的立板（测试薄表面）、一个会移动的球（测试物体运动），可以让相机绕场景转动（测试镜头移动）。上排是三种方案，下排是三种常见的错误设置。</p>
+  <div class="grid" id="grid"></div>
+  <div class="bar">
+    <label><input type="checkbox" id="orbit"> 镜头移动</label>
+    <label><input type="checkbox" id="move" checked> 物体运动</label>
+    <button type="button" id="bench">测量帧时间</button>
+  </div>
+  <table id="t"><tr><th>设置</th><th>阴影贴图</th><th>显存（估计）</th><th>每帧耗时</th><th>观察到的问题</th></tr></table>
+</section>
+<script type="module">
+import * as THREE from 'three';
+const CASES = [
+  { name: 'Basic', type: THREE.BasicShadowMap, size: 1024, bias: -0.0005, note: '边缘硬、有锯齿', label: '每个点只比较一次深度' },
+  { name: 'PCF', type: THREE.PCFShadowMap, size: 1024, bias: -0.0005, note: '边缘较柔和', label: '在周围多次比较取平均' },
+  { name: 'VSM', type: THREE.VSMShadowMap, size: 1024, bias: -0.0005, radius: 6, note: '最柔和；物体重叠处可能漏光', label: '保存深度的均值与方差，可以模糊' },
+  { name: 'PCF · 正面写入、偏移为 0', type: THREE.PCFShadowMap, size: 1024, bias: 0, front: true, note: '受光面出现条纹（阴影痤疮）', label: '常见错误' },
+  { name: 'PCF · 偏移过大', type: THREE.PCFShadowMap, size: 1024, bias: -0.02, note: '阴影与物体脱开，像悬浮（彼得·潘现象）', label: '常见错误' },
+  { name: 'PCF · 256 像素', type: THREE.PCFShadowMap, size: 256, bias: -0.002, note: '阴影模糊成块，薄板的阴影断裂', label: '常见错误' }
+];
+function makeScene(c) {
+  const scene = new THREE.Scene(); scene.background = new THREE.Color('#dfe5ee');
+  scene.add(new THREE.HemisphereLight('#ffffff', '#8a8a8a', 0.8));
+  const sun = new THREE.DirectionalLight('#ffffff', 2.6); sun.position.set(-6, 3.2, 2.5); sun.castShadow = true;   // 光线较低，斜照的表面更容易暴露问题
+  sun.shadow.mapSize.set(c.size, c.size); sun.shadow.bias = c.bias; sun.shadow.normalBias = 0; if (c.radius) sun.shadow.radius = c.radius;
+  Object.assign(sun.shadow.camera, { left: -7, right: 7, top: 7, bottom: -7, near: 0.5, far: 20 });
+  scene.add(sun);
+  // three.js 默认把物体的背面写入阴影贴图，能避免大部分“痤疮”；这个错误示例改为写入正面
+  const mat = color => new THREE.MeshStandardMaterial({ color, roughness: 0.7, shadowSide: c.front ? THREE.FrontSide : null });
+  const add = (geo, color, pos, rot = [0, 0, 0]) => { const m = new THREE.Mesh(geo, mat(color)); m.position.set(...pos); m.rotation.set(...rot); m.castShadow = m.receiveShadow = true; scene.add(m); return m; };
+  add(new THREE.PlaneGeometry(14, 14), '#e8e2d6', [0, 0, 0], [-Math.PI / 2, 0, 0]);
+  add(new THREE.BoxGeometry(1.2, 1.2, 1.2), '#e4572e', [-1.4, 0.6, 0.3], [0, 0.5, 0]);
+  add(new THREE.BoxGeometry(1.6, 1.1, 0.02), '#5b8c7a', [0.6, 0.55, -1.0], [0, -0.4, 0]);      // 很薄的立板：2 厘米
+  add(new THREE.TorusGeometry(0.5, 0.12, 16, 64), '#f3b13b', [1.6, 0.5, 1.1], [Math.PI / 2.3, 0, 0]);
+  const ball = add(new THREE.SphereGeometry(0.45, 32, 16), '#2f6fdb', [0, 0.45, 1.6]);
+  return { scene, ball, sun };
+}
+const views = CASES.map(c => {
+  const fig = document.createElement('figure'), canvas = document.createElement('canvas');
+  canvas.width = 480; canvas.height = 300;
+  fig.append(canvas); fig.insertAdjacentHTML('beforeend', `<figcaption><b>${c.name}</b><span>${c.label}：${c.note}</span></figcaption>`);
+  document.getElementById('grid').append(fig);
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });   // 保留画面，便于截取比较
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = c.type;
+  const camera = new THREE.PerspectiveCamera(42, 480 / 300, 0.1, 50);
+  return { c, renderer, camera, ...makeScene(c) };
+});
+let t = 0, angle = 0.6;
+function render(v) {
+  v.ball.position.set(Math.sin(t * 0.8) * 1.6, 0.45, 1.6);
+  v.camera.position.set(Math.sin(angle) * 4.6 - 0.4, 2.3, Math.cos(angle) * 4.6); v.camera.lookAt(-0.3, 0.45, 0);
+  v.renderer.render(v.scene, v.camera);
+}
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let last = performance.now(), running = true;
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (running && !reduce) { if (document.getElementById('move').checked) t += dt; if (document.getElementById('orbit').checked) angle += dt * 0.3; }
+  views.forEach(render);
+  requestAnimationFrame(loop);
+}
+// 测量：每种设置单独渲染 20 帧，读一个像素等 GPU 完成
+function bench() {
+  const rows = [];
+  for (const v of views) {
+    const gl = v.renderer.getContext(), px = new Uint8Array(4);
+    render(v); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const t0 = performance.now();
+    for (let i = 0; i < 20; i++) { t += 1 / 60; render(v); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); }
+    const ms = (performance.now() - t0) / 20, s = v.c.size;
+    // 显存：深度阴影贴图每像素 4 字节；VSM 还要两张 RGBA 半精度贴图（保存矩并做模糊）
+    const mb = (s * s * 4 + (v.c.type === THREE.VSMShadowMap ? s * s * 8 * 2 : 0)) / 1048576;
+    rows.push({ name: v.c.name, size: s, mb, ms });
+    const tr = document.getElementById('t').insertRow();
+    for (const val of [v.c.name, `${s} × ${s}`, `${mb.toFixed(1)} MB`, `${ms.toFixed(1)} 毫秒`, v.c.note]) tr.insertCell().textContent = val;
+  }
+  return rows;
+}
+document.getElementById('bench').addEventListener('click', bench);
+requestAnimationFrame(loop);
+window.__sh = { bench, freeze: (tt, a) => { running = false; t = tt; angle = a; views.forEach(render); } };
+</script>
+</body>
+</html>

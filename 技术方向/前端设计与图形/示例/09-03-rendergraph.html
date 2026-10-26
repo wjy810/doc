@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>渲染流程与管线组织：一个小型渲染图</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, 1fr); gap: 14px; max-width: 1140px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  #stage { width: 100%; aspect-ratio: 16 / 10; border-radius: 8px; overflow: hidden; background: #000; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+  select { font: inherit; padding: 2px 8px; border: 1px solid #c3c9d3; border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  tr.skip td { color: #9aa3b2; text-decoration: line-through; }
+  code { font-size: 11.5px; background: #f6f7f9; padding: 0 4px; border-radius: 4px; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section>
+    <h2>五个步骤组成一帧；选择要看的结果，只运行需要的步骤</h2>
+    <div id="stage" role="img" aria-label="地面上的几个几何体，带阴影与描边"></div>
+    <div class="bar">
+      <label>显示 <select id="view">
+        <option value="final">最终画面</option><option value="shadowMap">阴影贴图（光源看到的深度）</option>
+        <option value="normals">法线</option><option value="hdr">光照结果（色调映射前）</option><option value="edges">描边</option></select></label>
+      <span class="sub" id="frameInfo" role="status"></span>
+    </div>
+  </section>
+  <section>
+    <h2>本帧的步骤（按依赖自动排序）</h2>
+    <table id="passes"><tr><th>步骤</th><th>读取</th><th>写入</th><th>耗时</th></tr></table>
+    <h2>资源</h2>
+    <table id="res"><tr><th>资源</th><th>尺寸与格式</th><th>显存</th></tr></table>
+    <p class="sub">每个步骤只声明它读什么、写什么；渲染图据此排出顺序，并裁掉对当前输出没有贡献的步骤。加入一个调试视图，就是加一个读取某个资源的步骤。</p>
+  </section>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
+
+// ---------- 渲染图：步骤声明读写的资源，按依赖排序，只运行需要的步骤 ----------
+class RenderGraph {
+  constructor() { this.passes = []; this.resources = new Map(); }
+  resource(name, target, label) { this.resources.set(name, { target, label }); }
+  add(pass) { this.passes.push(pass); }
+  // 从要输出的资源倒推：谁写了它？那个步骤又读了什么？……
+  compile(output) {
+    const need = new Set(), stack = [output];
+    while (stack.length) { const r = stack.pop(); for (const p of this.passes) if (p.writes.includes(r) && !need.has(p)) { need.add(p); stack.push(...p.reads); } }
+    // 拓扑排序：一个步骤要等它读取的资源都被写好之后才能运行
+    const order = [], done = new Set(), visit = p => { if (done.has(p)) return; done.add(p); for (const r of p.reads) for (const q of need) if (q !== p && q.writes.includes(r)) visit(q); order.push(p); };
+    [...need].forEach(visit);
+    return order;
+  }
+  execute(output, renderer) {
+    const order = this.compile(output), gl = renderer.getContext(), px = new Uint8Array(4), times = new Map();
+    for (const p of order) { const t0 = performance.now(); p.run(); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); times.set(p, performance.now() - t0); }   // 等 GPU 完成，测出每一步的时间
+    return { order, times };
+  }
+}
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer();
+renderer.setPixelRatio(1);
+stage.append(renderer.domElement);
+const W = 960, H = 600;
+renderer.setSize(W, H, false);
+
+// ---------- 场景 ----------
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, W / H, 0.1, 50);
+camera.position.set(4.5, 3.6, 6); camera.lookAt(0, 0.6, 0);
+const lightDir = new THREE.Vector3(-0.6, 1, 0.45).normalize();
+const lightCam = new THREE.OrthographicCamera(-5, 5, 5, -5, 0.1, 20);
+lightCam.position.copy(lightDir).multiplyScalar(8); lightCam.lookAt(0, 0, 0); lightCam.updateMatrixWorld(); lightCam.updateProjectionMatrix();
+const lightViewProj = new THREE.Matrix4().multiplyMatrices(lightCam.projectionMatrix, lightCam.matrixWorldInverse);
+
+const RT = (w, h, type = THREE.HalfFloatType) => new THREE.WebGLRenderTarget(w, h, { type, depthBuffer: true });
+const targets = { shadowMap: RT(1024, 1024, THREE.FloatType), normals: RT(W, H), hdr: RT(W, H), edges: RT(W, H) };
+
+// 光照材质：读取阴影贴图（这就是“主渲染”对“阴影步骤”的依赖）
+const lit = color => new THREE.ShaderMaterial({
+  uniforms: { uColor: { value: new THREE.Color(color) }, uLight: { value: lightDir }, uShadow: { value: targets.shadowMap.texture }, uLightVP: { value: lightViewProj } },
+  vertexShader: `varying vec3 vN; varying vec4 vL; uniform mat4 uLightVP;
+    void main() { vec4 w = modelMatrix * vec4(position, 1.0); vN = normalize(mat3(modelMatrix) * normal); vL = uLightVP * w; gl_Position = projectionMatrix * viewMatrix * w; }`,
+  fragmentShader: `uniform vec3 uColor, uLight; uniform sampler2D uShadow; varying vec3 vN; varying vec4 vL;
+    void main() {
+      vec3 p = vL.xyz / vL.w * 0.5 + 0.5;                       // 当前点在光源视角中的位置
+      float lit = 0.0;
+      for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++) lit += p.z - 0.003 > texture2D(uShadow, p.xy + vec2(x, y) / 1024.0).r ? 0.0 : 1.0;
+      lit /= 9.0;                                               // 3 × 3 次比较取平均，边缘柔和一些
+      float d = max(dot(normalize(vN), uLight), 0.0);
+      gl_FragColor = vec4(uColor * (0.18 + 2.6 * d * lit), 1.0); // 线性空间，可以超过 1
+    }`
+});
+const add = (geo, color, pos) => { const m = new THREE.Mesh(geo, lit(color)); m.position.set(...pos); scene.add(m); return m; };
+add(new THREE.PlaneGeometry(12, 12).rotateX(-Math.PI / 2), '#b9b2a3', [0, 0, 0]);
+add(new THREE.BoxGeometry(1.2, 1.2, 1.2), '#e4572e', [-1.3, 0.6, 0.2]);
+add(new THREE.SphereGeometry(0.8, 48, 24), '#2f6fdb', [0.9, 0.8, -0.6]);
+add(new THREE.TorusKnotGeometry(0.45, 0.16, 120, 16), '#f3b13b', [0.6, 0.75, 1.5]);
+add(new THREE.CylinderGeometry(0.15, 0.15, 2.2, 24), '#5b8c7a', [-0.4, 1.1, -1.8]);
+
+const depthMat = new THREE.ShaderMaterial({ vertexShader: `void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`, fragmentShader: `void main() { gl_FragColor = vec4(gl_FragCoord.z, 0.0, 0.0, 1.0); }` });
+const normalMat = new THREE.MeshNormalMaterial();
+const fs = (fragmentShader, uniforms) => new FullScreenQuad(new THREE.ShaderMaterial({ uniforms, vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`, fragmentShader }));
+const edgeQuad = fs(`uniform sampler2D uN; uniform vec2 uTexel; varying vec2 vUv;
+  void main() { vec3 c = texture2D(uN, vUv).rgb; float e = 0.0;
+    e += distance(c, texture2D(uN, vUv + vec2(uTexel.x, 0.0)).rgb) + distance(c, texture2D(uN, vUv + vec2(0.0, uTexel.y)).rgb);
+    gl_FragColor = vec4(vec3(smoothstep(0.15, 0.4, e)), 1.0); }`, { uN: { value: targets.normals.texture }, uTexel: { value: new THREE.Vector2(1 / W, 1 / H) } });
+const finalQuad = fs(`uniform sampler2D uHdr, uEdges; varying vec2 vUv;
+  void main() { vec3 c = texture2D(uHdr, vUv).rgb; c = c / (1.0 + c);       // 色调映射（Reinhard）
+    c *= 1.0 - 0.8 * texture2D(uEdges, vUv).r;                                  // 叠加描边
+    gl_FragColor = linearToOutputTexel(vec4(c, 1.0)); }`, { uHdr: { value: targets.hdr.texture }, uEdges: { value: targets.edges.texture } });
+const debugQuad = fs(`uniform sampler2D uTex; uniform int uMode; varying vec2 vUv;
+  void main() { vec4 t = texture2D(uTex, vUv); vec3 c = t.rgb;
+    if (uMode == 0) c = vec3(clamp((t.r - 0.3) * 4.0, 0.0, 1.0));              // 深度：拉开对比便于观察（近黑远白）
+    if (uMode == 2) c = c / (1.0 + c);
+    gl_FragColor = vec4(c, 1.0); }`, { uTex: { value: null }, uMode: { value: 0 } });
+
+// ---------- 声明步骤 ----------
+const graph = new RenderGraph();
+graph.resource('shadowMap', targets.shadowMap, '1024 × 1024 · 32 位浮点');
+graph.resource('normals', targets.normals, `${W} × ${H} · 16 位浮点`);
+graph.resource('hdr', targets.hdr, `${W} × ${H} · 16 位浮点`);
+graph.resource('edges', targets.edges, `${W} × ${H} · 16 位浮点`);
+const draw = (target, override, cam = camera) => { scene.overrideMaterial = override; renderer.setRenderTarget(target); renderer.setClearColor(override === depthMat ? 0xffffff : 0x0a0d12); renderer.clear(); renderer.render(scene, cam); scene.overrideMaterial = null; renderer.setRenderTarget(null); };
+graph.add({ name: '阴影：从光源渲染深度', reads: [], writes: ['shadowMap'], run: () => draw(targets.shadowMap, depthMat, lightCam) });
+graph.add({ name: '法线：从相机渲染法线', reads: [], writes: ['normals'], run: () => draw(targets.normals, normalMat) });
+graph.add({ name: '主渲染：光照与阴影', reads: ['shadowMap'], writes: ['hdr'], run: () => draw(targets.hdr, null) });
+graph.add({ name: '描边：检测法线突变', reads: ['normals'], writes: ['edges'], run: () => { renderer.setRenderTarget(targets.edges); edgeQuad.render(renderer); renderer.setRenderTarget(null); } });
+graph.add({ name: '合成：色调映射与描边', reads: ['hdr', 'edges'], writes: ['screen'], run: () => finalQuad.render(renderer) });
+const MODES = { shadowMap: 0, normals: 1, hdr: 2, edges: 1 };
+graph.add({ name: '调试视图', reads: ['debugSource'], writes: ['debug'], run: () => debugQuad.render(renderer) });
+
+function frame(view) {
+  let output = 'screen';
+  if (view !== 'final') {   // 调试视图：让调试步骤读取所选的资源
+    graph.passes.at(-1).reads = [view];
+    debugQuad.material.uniforms.uTex.value = targets[view].texture; debugQuad.material.uniforms.uMode.value = MODES[view];
+    output = 'debug';
+  }
+  const { order, times } = graph.execute(output, renderer);
+  const tbody = document.getElementById('passes');
+  tbody.querySelectorAll('tr:not(:first-child)').forEach(r => r.remove());
+  for (const p of graph.passes) {
+    const tr = tbody.insertRow(); if (!order.includes(p)) tr.className = 'skip';
+    for (const v of [p.name, p.reads.join('、') || '—', p.writes.join('、'), order.includes(p) ? `${times.get(p).toFixed(1)} 毫秒` : '跳过']) tr.insertCell().textContent = v;
+  }
+  const total = [...times.values()].reduce((a, b) => a + b, 0);
+  document.getElementById('frameInfo').textContent = `运行 ${order.length} 个步骤，共 ${total.toFixed(1)} 毫秒`;
+  return { order: order.map(p => p.name), total };
+}
+// 资源表：显存 ＝ 宽 × 高 × 每像素字节数（含深度缓冲）
+const resT = document.getElementById('res');
+for (const [name, { target, label }] of graph.resources) {
+  const bpp = target.texture.type === THREE.FloatType ? 16 : 8, mb = target.width * target.height * (bpp + 4) / 1048576;
+  const tr = resT.insertRow(); for (const v of [name, label, `${mb.toFixed(1)} MB`]) tr.insertCell().textContent = v;
+}
+const sel = document.getElementById('view');
+sel.addEventListener('change', () => frame(sel.value));
+frame('final');
+window.__rg = { frame };
+</script>
+</body>
+</html>

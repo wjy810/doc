@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>资源加载与内存：切换场景时的三种策略</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 14px; max-width: 1140px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  #stage { width: 100%; aspect-ratio: 4 / 3; border-radius: 8px; overflow: hidden; background: #20242c; position: relative; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  #loading { position: absolute; inset: auto 0 0 0; padding: 6px 10px; background: rgba(0, 0, 0, .55); color: #fff; font-size: 12px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  select, button { font: inherit; padding: 2px 8px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  #chart { width: 100%; height: auto; display: block; background: #f8fafc; border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; } th { color: var(--muted); font-weight: 400; }
+  .legend { display: flex; gap: 14px; font-size: 12px; } .legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 4px; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section>
+    <h2>三个展厅，每个有自己的贴图和模型</h2>
+    <div id="stage" role="img" aria-label="一个展厅：地面和几件带图案的展品"><div id="loading" role="status"></div></div>
+    <div class="bar">
+      <label>策略 <select id="strategy"><option value="leak">只从场景移除</option><option value="dispose">离开时释放</option><option value="cache" selected>缓存最近两个，并复用共用贴图</option></select></label>
+      <button type="button" data-room="0">展厅一</button><button type="button" data-room="1">展厅二</button><button type="button" data-room="2">展厅三</button>
+      <button type="button" id="lose">模拟图形上下文丢失</button>
+    </div>
+    <p class="sub" id="mem" role="status"></p>
+  </section>
+  <section>
+    <h2>来回切换 30 次：显存怎样变化</h2>
+    <button type="button" id="run">运行三种策略</button>
+    <canvas id="chart" width="1000" height="380" role="img" aria-label="三条折线：只从场景移除的显存持续上升，离开时释放的保持平稳，缓存的稳定在较高但有上限的水平"></canvas>
+    <div class="legend"><span><i style="background:#e4572e"></i>只从场景移除</span><span><i style="background:#2f6fdb"></i>离开时释放</span><span><i style="background:#067647"></i>缓存最近两个</span></div>
+    <table id="t"><tr><th>策略</th><th>30 次后的贴图</th><th>显存（估计）</th><th>切换平均耗时</th><th>回到上一个展厅</th></tr></table>
+    <p class="sub">贴图在第一次被画出来时才上传到 GPU；“切换耗时”包括生成贴图、上传与第一次绘制。共用的地面贴图在三个展厅间复用，只上传一次。</p>
+  </section>
+</div>
+<script type="module">
+import * as THREE from 'three';
+const $ = id => document.getElementById(id);
+const stage = $('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+stage.prepend(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color('#20242c');
+scene.add(new THREE.HemisphereLight('#ffffff', '#444444', 1.5)); const sun = new THREE.DirectionalLight('#ffffff', 2); sun.position.set(2, 4, 3); scene.add(sun);
+const camera = new THREE.PerspectiveCamera(45, 4 / 3, 0.1, 50); camera.position.set(0, 2.2, 5.5); camera.lookAt(0, 0.6, 0);
+function resize() { renderer.setSize(stage.clientWidth, stage.clientHeight, false); }
+new ResizeObserver(resize).observe(stage); resize();
+
+// 每个展厅：一张共用的地面贴图 ＋ 4 件展品各一张 1024 的贴图
+const ROOMS = [
+  { name: '展厅一', hue: 20, shape: 'box' }, { name: '展厅二', hue: 140, shape: 'sphere' }, { name: '展厅三', hue: 220, shape: 'torus' }
+];
+const TEX_MB = 1024 * 1024 * 4 * 4 / 3 / 1048576;   // 1024 × 1024 × 4 字节 × 多级渐远纹理
+function makeTexture(label, hue) {   // 生成一张贴图：真实项目中这里是下载与解码图片
+  const c = document.createElement('canvas'); c.width = c.height = 1024; const g = c.getContext('2d');
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) { g.fillStyle = `hsl(${hue + ((x + y) % 2) * 25}, 50%, ${45 + ((x * 7 + y * 3) % 5) * 6}%)`; g.fillRect(x * 128, y * 128, 128, 128); }
+  g.fillStyle = '#fff'; g.font = '700 120px sans-serif'; g.textAlign = 'center'; g.fillText(label, 512, 560);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const shared = new Map();   // 共用资源缓存：同一个键只创建一次
+const sharedTexture = key => shared.get(key) || shared.set(key, makeTexture('地', 35)).get(key);
+const everything = [];   // 只用于测试结束后的清理：真实项目中，泄漏的资源已经没有引用，找不回来了
+function buildRoom(i, useShared) {
+  const r = ROOMS[i], group = new THREE.Group(); group.userData.owned = []; everything.push(group);
+  const floorTex = useShared ? sharedTexture('floor') : makeTexture('地', 35);
+  if (!useShared) group.userData.owned.push(floorTex);
+  const floorGeo = new THREE.PlaneGeometry(8, 8).rotateX(-Math.PI / 2), floorMat = new THREE.MeshStandardMaterial({ map: floorTex });
+  group.add(new THREE.Mesh(floorGeo, floorMat)); group.userData.owned.push(floorGeo, floorMat);
+  const geo = r.shape === 'box' ? new THREE.BoxGeometry(0.8, 0.8, 0.8) : r.shape === 'sphere' ? new THREE.SphereGeometry(0.45, 48, 24) : new THREE.TorusGeometry(0.35, 0.14, 24, 64);
+  group.userData.owned.push(geo);
+  for (let k = 0; k < 4; k++) {
+    const tex = makeTexture(`${i + 1}-${k + 1}`, r.hue + k * 12), m = new THREE.MeshStandardMaterial({ map: tex });
+    const mesh = new THREE.Mesh(geo, m); mesh.position.set(-2.1 + k * 1.4, 0.6, 0); group.add(mesh);
+    group.userData.owned.push(tex, m);
+  }
+  return group;
+}
+function disposeRoom(group) { for (const o of group.userData.owned) o.dispose(); }   // 释放 GPU 上的贴图、几何体与着色器程序
+
+// 策略
+let current = null, currentIndex = -1;
+const cache = new Map();   // 展厅编号 → 已经建好的场景（最近使用的排在最后）
+function enter(i, strategy) {
+  const t0 = performance.now();
+  if (current) {
+    scene.remove(current);
+    if (strategy === 'dispose') disposeRoom(current);
+    if (strategy === 'cache') { cache.set(currentIndex, current); while (cache.size > 2) { const [k, g] = cache.entries().next().value; cache.delete(k); disposeRoom(g); } }   // 只留最近两个
+  }
+  let group = strategy === 'cache' ? cache.get(i) : null, hit = !!group;
+  if (group) cache.delete(i); else group = buildRoom(i, strategy === 'cache');
+  scene.add(group); current = group; currentIndex = i;
+  renderer.render(scene, camera);
+  const gl = renderer.getContext(), px = new Uint8Array(4); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);   // 等待上传与绘制完成
+  return { ms: performance.now() - t0, hit };
+}
+const memText = () => { const m = renderer.info.memory; return `GPU 上的贴图 ${m.textures} 张（约 ${(m.textures * TEX_MB).toFixed(0)} MB），几何体 ${m.geometries} 个`; };
+function show(i) { const r = enter(i, $('strategy').value); $('loading').textContent = `${ROOMS[i].name}：${r.hit ? '从缓存取出' : '新建'}，用时 ${r.ms.toFixed(0)} 毫秒`; $('mem').textContent = memText(); }
+document.querySelectorAll('[data-room]').forEach(b => b.addEventListener('click', () => show(+b.dataset.room)));
+$('strategy').addEventListener('change', () => { resetAll(); show(0); });
+function resetAll() { if (current) scene.remove(current); for (const g of everything) disposeRoom(g); everything.length = 0; cache.clear(); for (const t of shared.values()) t.dispose(); shared.clear(); current = null; currentIndex = -1; }
+
+// 上下文丢失：浏览器可能因为显存不足等原因回收图形上下文；恢复后要重新上传资源
+let lostAt = 0;
+renderer.domElement.addEventListener('webglcontextlost', e => { e.preventDefault(); lostAt = performance.now(); $('loading').textContent = '图形上下文丢失：暂停绘制，等待恢复…'; });
+renderer.domElement.addEventListener('webglcontextrestored', () => { renderer.render(scene, camera); $('loading').textContent = `上下文已恢复，资源重新上传并绘制完成（${(performance.now() - lostAt).toFixed(0)} 毫秒）`; $('mem').textContent = memText(); });
+$('lose').addEventListener('click', () => { const ext = renderer.getContext().getExtension('WEBGL_lose_context'); ext.loseContext(); setTimeout(() => ext.restoreContext(), 500); });
+
+// 长时间运行：三种策略各切换 30 次
+async function run() {
+  const series = {}, rows = [];
+  for (const s of ['leak', 'dispose', 'cache']) {
+    resetAll(); const pts = [], times = []; let back = null;
+    for (let k = 0; k < 30; k++) { const i = [0, 1, 0, 2][k % 4]; const r = enter(i, s); times.push(r.ms); if (k > 0 && i === 0 && back === null) back = r.ms; pts.push(renderer.info.memory.textures * TEX_MB); await new Promise(r => setTimeout(r, 0)); }
+    series[s] = pts;
+    rows.push({ s, textures: renderer.info.memory.textures, mb: pts.at(-1), avg: times.reduce((a, b) => a + b) / times.length, back });
+  }
+  resetAll(); show(0);
+  const g = $('chart').getContext('2d'), Wc = 1000, Hc = 380, max = Math.max(...Object.values(series).flat()) * 1.1;
+  g.clearRect(0, 0, Wc, Hc); g.strokeStyle = '#c3c9d3'; g.beginPath(); g.moveTo(60, 20); g.lineTo(60, Hc - 40); g.lineTo(Wc - 20, Hc - 40); g.stroke();
+  g.fillStyle = '#5b6475'; g.font = '22px sans-serif'; g.fillText(`${max.toFixed(0)} MB`, 4, 34); g.fillText('切换次数 →', Wc - 150, Hc - 10);
+  for (const [s, color] of [['leak', '#e4572e'], ['dispose', '#2f6fdb'], ['cache', '#067647']]) { g.strokeStyle = color; g.lineWidth = 4; g.beginPath(); series[s].forEach((v, k) => { const x = 60 + k / 29 * (Wc - 90), y = Hc - 40 - v / max * (Hc - 70); k ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke(); }
+  const names = { leak: '只从场景移除', dispose: '离开时释放', cache: '缓存最近两个' };
+  $('t').querySelectorAll('tr:not(:first-child)').forEach(r => r.remove());
+  for (const r of rows) { const tr = $('t').insertRow(); for (const v of [names[r.s], `${r.textures} 张`, `${r.mb.toFixed(0)} MB`, `${r.avg.toFixed(0)} 毫秒`, `${r.back.toFixed(0)} 毫秒`]) tr.insertCell().textContent = v; }
+  return rows;
+}
+$('run').addEventListener('click', run);
+show(0);
+window.__res = { run, lose: () => new Promise(res => { renderer.domElement.addEventListener('webglcontextrestored', () => setTimeout(() => res($('loading').textContent), 50), { once: true }); $('lose').click(); }) };
+</script>
+</body>
+</html>

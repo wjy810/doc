@@ -1,0 +1,19 @@
+{
+  "name": "doc-example-tests",
+  "private": true,
+  "description": "在无头 Chromium 中运行 技术方向/*/示例/ 页面并截图；依赖版本与示例页面里的 jsDelivr 地址一致",
+  "dependencies": {
+    "@fontsource-variable/noto-sans-sc": "5.3.1",
+    "@fontsource/inter": "5.3.0",
+    "@fontsource/jetbrains-mono": "5.3.0",
+    "@fontsource/lxgw-wenkai": "5.3.0",
+    "@fontsource/noto-sans-sc": "5.3.1",
+    "@fontsource/noto-serif-sc": "5.3.1",
+    "@fontsource/source-serif-4": "5.3.1",
+    "d3": "7.9.0",
+    "gsap": "3.15.0",
+    "motion": "14.1.0",
+    "p5": "2.3.4",
+    "three": "0.186.1"
+  }
+}

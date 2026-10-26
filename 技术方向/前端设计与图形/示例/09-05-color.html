@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>材质与颜色管理：颜色流程、色调映射与透明</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  figure { margin: 0; display: grid; gap: 2px; }
+  figure canvas { width: 100%; height: auto; display: block; border-radius: 6px; }
+  figcaption { font-size: 12px; } figcaption b { display: block; font-size: 13px; } figcaption span { color: var(--muted); }
+  .val { font-variant-numeric: tabular-nums; color: var(--muted); }
+</style>
+</head>
+<body>
+<section>
+  <h2>1 颜色流程：同一张贴图、同样的灯光</h2>
+  <p class="sub">贴图左上角的灰块在原图中是 sRGB 中灰（128）。只有流程正确时，屏幕上它才接近 128。错误的流程常被误以为是“灯光太亮或太暗”。</p>
+  <div class="row" id="r1"></div>
+</section>
+<section>
+  <h2>2 色调映射：同一个高亮的场景</h2>
+  <p class="sub">发光体的亮度是 8，远远超过屏幕能显示的 1。色调映射决定怎样把它压缩到屏幕范围内：不映射时高光被直接截断，颜色也随之偏移。</p>
+  <div class="row" id="r2"></div>
+</section>
+<section>
+  <h2>3 透明与体积介质</h2>
+  <p class="sub">两块相交的半透明板。深度缓冲每个像素只记录一个深度，透明物体写入深度时，后画的板在交叉处被挡住；按远近排序、不写深度可以缓解，但相交的物体仍无法完全正确。雾是体积介质最简单的近似：按距离把颜色混向雾色。</p>
+  <div class="row" id="r3"></div>
+</section>
+<script type="module">
+import * as THREE from 'three';
+const W = 480, H = 320;
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(W, H, false);
+// 贴图：已知的 sRGB 颜色块
+function swatch() {
+  const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d');
+  const cols = ['#808080', '#c68d6c', '#5a7fbf', '#5c9b4a', '#d6c43a', '#a33b3b', '#ffffff', '#202020', '#e07a3a'];
+  cols.forEach((col, i) => { g.fillStyle = col; g.fillRect((i % 3) * 85, Math.floor(i / 3) * 85, 85, 85); });
+  return c;
+}
+function scene1(colorSpaceOk) {
+  const scene = new THREE.Scene(); scene.background = new THREE.Color('#2b2f36');
+  const tex = new THREE.CanvasTexture(swatch()); tex.colorSpace = colorSpaceOk ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.4), new THREE.MeshBasicMaterial({ map: tex }));   // 不受光照影响，只看颜色流程
+  scene.add(plane);
+  return scene;
+}
+const camera1 = new THREE.PerspectiveCamera(40, W / H, 0.1, 20); camera1.position.set(0, 0, 4.2);
+function panel(row, title, note, draw) {
+  const fig = document.createElement('figure'), c = document.createElement('canvas'); c.width = W; c.height = H;
+  fig.append(c); fig.insertAdjacentHTML('beforeend', `<figcaption><b>${title}</b><span>${note}</span> <span class="val"></span></figcaption>`);
+  document.getElementById(row).append(fig);
+  draw();
+  c.getContext('2d').drawImage(renderer.domElement, 0, 0);
+  // 读出屏幕上灰块的数值（贴图左上角）
+  const px = c.getContext('2d').getImageData(Math.round(W * 0.37), Math.round(H * 0.24), 1, 1).data;
+  fig.querySelector('.val').textContent = row === 'r1' ? `灰块的屏幕值：${px[0]}` : '';
+  return px[0];
+}
+const reset = () => { renderer.toneMapping = THREE.NoToneMapping; renderer.toneMappingExposure = 1; renderer.outputColorSpace = THREE.SRGBColorSpace; };
+const results = {};
+results.ok = panel('r1', '正确', '贴图标为 sRGB，输出转换为 sRGB', () => { reset(); renderer.render(scene1(true), camera1); });
+results.texWrong = panel('r1', '贴图色彩空间设错', '颜色贴图被当成数据：发白、发灰', () => { reset(); renderer.render(scene1(false), camera1); });
+results.outWrong = panel('r1', '输出没有转换', '线性数值直接送到屏幕：发暗、过饱和', () => { reset(); renderer.outputColorSpace = THREE.LinearSRGBColorSpace; renderer.render(scene1(true), camera1); });
+results.compensate = panel('r1', '用“调暗”来补救', '贴图仍设错，把材质调暗到灰块看起来对：其他颜色仍然不对', () => {
+  reset(); const s = scene1(false); s.traverse(o => { if (o.material) o.material.color.setScalar(0.45); }); renderer.render(s, camera1);
+});
+
+// ---------- 2. 色调映射 ----------
+function scene2() {
+  const scene = new THREE.Scene(); scene.background = new THREE.Color('#101318');
+  scene.add(new THREE.HemisphereLight('#cfe0ff', '#30260f', 1.2));
+  const sun = new THREE.DirectionalLight('#fff3dd', 6); sun.position.set(2, 4, 3); scene.add(sun);
+  const add = (geo, mat, pos) => { const m = new THREE.Mesh(geo, mat); m.position.set(...pos); scene.add(m); };
+  add(new THREE.SphereGeometry(0.6, 48, 24), new THREE.MeshStandardMaterial({ color: '#e4572e', roughness: 0.35 }), [-1.1, 0, 0]);
+  add(new THREE.SphereGeometry(0.6, 48, 24), new THREE.MeshStandardMaterial({ color: '#2f6fdb', roughness: 0.35 }), [0.2, 0, 0]);
+  add(new THREE.TorusGeometry(0.45, 0.12, 24, 64), new THREE.MeshStandardMaterial({ color: '#000', emissive: '#ffb347', emissiveIntensity: 8 }), [1.4, 0, 0]);
+  add(new THREE.PlaneGeometry(8, 8).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#8d8a83' }), [0, -0.6, 0]);
+  return scene;
+}
+const camera2 = new THREE.PerspectiveCamera(40, W / H, 0.1, 20); camera2.position.set(0, 1.3, 4.2); camera2.lookAt(0, -0.1, 0);
+for (const [name, tm, note] of [['不做色调映射', THREE.NoToneMapping, '超过 1 的部分被截断，高光一片死白，橙色发黄'], ['ACES Filmic', THREE.ACESFilmicToneMapping, '电影感，对比强，亮处偏暖'], ['AgX', THREE.AgXToneMapping, '高光逐渐变白，颜色过渡自然'], ['Neutral', THREE.NeutralToneMapping, '尽量保持原来的颜色，适合产品展示']])
+  panel('r2', name, note, () => { reset(); renderer.toneMapping = tm; renderer.render(scene2(), camera2); });
+
+// ---------- 3. 透明与雾 ----------
+function scene3({ depthWrite, sort, fog }) {
+  const scene = new THREE.Scene(); scene.background = new THREE.Color('#dfe5ee');
+  if (fog) scene.fog = new THREE.FogExp2('#dfe5ee', 0.18);
+  scene.add(new THREE.AmbientLight('#ffffff', 2)); const sun = new THREE.DirectionalLight('#ffffff', 2); sun.position.set(2, 4, 3); scene.add(sun);
+  const mat = color => new THREE.MeshStandardMaterial({ color, transparent: !fog, opacity: fog ? 1 : 0.55, depthWrite: fog ? true : depthWrite, side: THREE.DoubleSide });
+  const a = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 1.6), mat('#e4572e')); a.rotation.y = 0.6;
+  const b = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 1.6), mat('#2f6fdb')); b.rotation.y = -0.6;
+  if (!fog) scene.add(a, b);
+  // 雾：两排柱子向远处延伸
+  if (fog) for (let i = 0; i < 8; i++) for (const x of [-0.9, 0.9]) { const m = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.6, 0.35), new THREE.MeshStandardMaterial({ color: '#5b8c7a' })); m.position.set(x, 0, 1.5 - i * 1.6); scene.add(m); }
+  renderer.sortObjects = sort;
+  return scene;
+}
+const camera3 = new THREE.PerspectiveCamera(40, W / H, 0.1, 50); camera3.position.set(0.4, 0.8, 3.6); camera3.lookAt(0, 0, 0);
+panel('r3', '透明 ＋ 写入深度', '交叉处，后画的板被先画的板挡住', () => { reset(); renderer.render(scene3({ depthWrite: true, sort: true }), camera3); });
+panel('r3', '透明 ＋ 不写深度', '两块都能看见，但前后关系在交叉处仍不准确', () => { reset(); renderer.render(scene3({ depthWrite: false, sort: true }), camera3); });
+panel('r3', '透明 ＋ 不排序 ＋ 写入深度', '画的顺序完全取决于加入场景的顺序', () => { reset(); renderer.render(scene3({ depthWrite: true, sort: false }), camera3); });
+panel('r3', '雾：体积介质的最简单近似', '越远的柱子越接近雾的颜色', () => { reset(); renderer.sortObjects = true; renderer.render(scene3({ fog: true }), camera3); });
+window.__color = results;
+</script>
+</body>
+</html>

@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>场景结构与可见性：实例化、裁剪与细节层次</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(300px, 1fr); gap: 14px; max-width: 1140px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  #stage { width: 100%; aspect-ratio: 16 / 10; border-radius: 8px; overflow: hidden; background: #cfd8e3; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+  select, button { font: inherit; padding: 2px 8px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  .stats { font-variant-numeric: tabular-nums; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; } th { color: var(--muted); font-weight: 400; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section>
+    <h2>4096 栋楼：同样的画面，不同的组织方式</h2>
+    <div id="stage" role="img" aria-label="从高处斜看一座由方块楼房组成的城市，近处的楼有屋顶，远处的楼是简单的方块"></div>
+    <div class="bar">
+      <label>组织方式 <select id="mode">
+        <option value="meshes">每栋楼一个物体</option><option value="single">整座城一个实例化物体</option>
+        <option value="chunks" selected>分成 64 块，每块一个实例化物体</option></select></label>
+      <label><input type="checkbox" id="lod" checked> 细节层次（远处用简单模型）</label>
+      <label><input type="checkbox" id="boxes"> 显示包围盒</label>
+    </div>
+    <p class="sub stats" id="stats" role="status"></p>
+  </section>
+  <section>
+    <h2>测量</h2>
+    <button type="button" id="bench">比较三种组织方式</button>
+    <table id="t"><tr><th>组织方式</th><th>绘制调用</th><th>三角形</th><th>每帧</th></tr></table>
+    <h2>细节切换的平滑</h2>
+    <p class="sub">相机在切换距离附近来回移动 5 秒。没有迟滞时，同一块会在两种模型之间反复跳；有迟滞（远离到 46 才换成简单模型、靠近到 40 才换回）时，切换明显减少。</p>
+    <button type="button" id="lodTest">测量切换次数</button>
+    <p class="sub stats" id="lodR"></p>
+  </section>
+</div>
+<script type="module">
+import * as THREE from 'three';
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(1);
+stage.append(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color('#cfd8e3'); scene.fog = new THREE.Fog('#cfd8e3', 60, 150);
+scene.add(new THREE.HemisphereLight('#ffffff', '#7d8796', 1.6));
+const sun = new THREE.DirectionalLight('#ffffff', 2); sun.position.set(-3, 5, 2); scene.add(sun);
+const camera = new THREE.PerspectiveCamera(50, 1.6, 0.5, 200);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#b8b3a7' })); scene.add(ground);
+
+// 两种细节：近处有屋顶（更多三角形），远处只是方块
+const high = (() => { const g = new THREE.BoxGeometry(1, 1, 1, 2, 4, 2).translate(0, 0.5, 0); return g; })();
+const roof = new THREE.ConeGeometry(0.75, 0.5, 4, 1).rotateY(Math.PI / 4).translate(0, 1.25, 0);
+const highGeo = mergeTwo(high, roof), lowGeo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
+function mergeTwo(a, b) {   // 把两个几何体合并成一个（简化版，只合并位置与法线）
+  const ga = a.toNonIndexed(), gb = b.toNonIndexed(), g = new THREE.BufferGeometry();
+  for (const name of ['position', 'normal']) { const x = ga.attributes[name].array, y = gb.attributes[name].array, z = new Float32Array(x.length + y.length); z.set(x); z.set(y, x.length); g.setAttribute(name, new THREE.BufferAttribute(z, 3)); }
+  return g;
+}
+const mat = new THREE.MeshStandardMaterial({ color: '#e9e4da', roughness: 0.8 });
+const N = 64, CH = 8, SP = 2.2, buildings = [];
+let seed = 3; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) buildings.push({ x: (i - N / 2) * SP, z: (j - N / 2) * SP, h: 0.6 + rnd() ** 2 * 4, w: 0.9 + rnd() * 0.6 });
+const matrixOf = b => new THREE.Matrix4().compose(new THREE.Vector3(b.x, 0, b.z), new THREE.Quaternion(), new THREE.Vector3(b.w, b.h, b.w));
+const colorOf = b => new THREE.Color().setHSL(0.08 + b.h * 0.02, 0.2, 0.62 + (b.h % 1) * 0.15);
+
+// 三种组织方式
+const groups = { meshes: new THREE.Group(), single: new THREE.Group(), chunks: new THREE.Group() };
+for (const b of buildings) { const m = new THREE.Mesh(highGeo, mat); m.applyMatrix4(matrixOf(b)); groups.meshes.add(m); }
+function instanced(list, geo) { const im = new THREE.InstancedMesh(geo, mat, list.length); list.forEach((b, k) => { im.setMatrixAt(k, matrixOf(b)); im.setColorAt(k, colorOf(b)); }); im.computeBoundingSphere(); im.computeBoundingBox(); return im; }
+groups.single.add(instanced(buildings, highGeo));
+const chunks = [];
+for (let cj = 0; cj < N / CH; cj++) for (let ci = 0; ci < N / CH; ci++) {
+  const list = buildings.filter((b, k) => Math.floor((k % N) / CH) === ci && Math.floor(Math.floor(k / N) / CH) === cj);
+  const hi = instanced(list, highGeo), lo = instanced(list, lowGeo);
+  const center = new THREE.Vector3(); hi.boundingBox.getCenter(center);
+  const box = new THREE.Box3Helper(hi.boundingBox, '#2f6fdb'); box.visible = false;
+  lo.visible = false;
+  groups.chunks.add(hi, lo, box);
+  chunks.push({ hi, lo, box, center, far: false });
+}
+for (const g of Object.values(groups)) { g.visible = false; scene.add(g); }
+let mode = 'chunks';
+function setMode(m) { mode = m; for (const [k, g] of Object.entries(groups)) g.visible = k === m; }
+
+// 细节层次：按块的中心到相机的距离选择模型；迟滞避免在边界上来回切换
+const NEAR = 40, FAR = 46;
+let switches = 0;
+function updateLod(useLod, hysteresis = true) {
+  for (const c of chunks) {
+    const d = c.center.distanceTo(camera.position);
+    let far = c.far;
+    if (!useLod) far = false;
+    else if (hysteresis) { if (!far && d > FAR) far = true; else if (far && d < NEAR) far = false; }
+    else far = d > (NEAR + FAR) / 2;
+    if (far !== c.far) switches++;
+    c.far = far; c.hi.visible = !far; c.lo.visible = far;
+  }
+}
+// 视锥裁剪的统计：哪些块在画面里
+const frustum = new THREE.Frustum(), pv = new THREE.Matrix4();
+function visibleChunks() { pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); frustum.setFromProjectionMatrix(pv); return chunks.filter(c => frustum.intersectsBox(c.hi.boundingBox)).length; }
+function place(t) { camera.position.set(-55 + Math.sin(t * 0.2) * 6, 26, 55); camera.lookAt(0, 0, 0); camera.updateMatrixWorld(); }
+function resize() { renderer.setSize(stage.clientWidth, stage.clientHeight, false); camera.aspect = stage.clientWidth / stage.clientHeight; camera.updateProjectionMatrix(); }
+new ResizeObserver(resize).observe(stage); resize();
+function render() {
+  updateLod(document.getElementById('lod').checked);
+  for (const c of chunks) { c.box.visible = document.getElementById('boxes').checked; const inView = frustum.intersectsBox(c.hi.boundingBox); c.box.material.color.set(inView ? '#2f6fdb' : '#e4572e'); }
+  renderer.render(scene, camera);
+  const info = renderer.info.render;
+  document.getElementById('stats').textContent = `绘制调用 ${info.calls} · 三角形 ${info.triangles.toLocaleString()}${mode === 'chunks' ? ` · 在画面中的块 ${visibleChunks()}／${chunks.length}` : ''}`;
+}
+let t = 0, last = performance.now();
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+renderer.setAnimationLoop(now => { if (!reduce) t += (now - last) / 1000; last = now; place(t); render(); });
+document.getElementById('mode').addEventListener('change', e => setMode(e.target.value));
+setMode('chunks');
+
+function bench() {
+  const gl = renderer.getContext(), px = new Uint8Array(4), rows = [];
+  renderer.setAnimationLoop(null);
+  for (const [m, label] of [['meshes', '每栋楼一个物体'], ['single', '整座城一个实例化物体'], ['chunks', '64 块 ＋ 裁剪 ＋ 细节层次']]) {
+    setMode(m); place(0); updateLod(m === 'chunks');
+    renderer.render(scene, camera); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const t0 = performance.now();
+    for (let k = 0; k < 10; k++) { renderer.render(scene, camera); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); }
+    const ms = (performance.now() - t0) / 10, info = renderer.info.render;
+    rows.push({ label, calls: info.calls, tris: info.triangles, ms });
+    const tr = document.getElementById('t').insertRow(); for (const v of [label, info.calls, info.triangles.toLocaleString(), `${ms.toFixed(1)} 毫秒`]) tr.insertCell().textContent = v;
+  }
+  setMode(document.getElementById('mode').value);
+  renderer.setAnimationLoop(now => { if (!reduce) t += (now - last) / 1000; last = now; place(t); render(); });
+  return rows;
+}
+document.getElementById('bench').addEventListener('click', bench);
+function lodTest() {
+  const out = {};
+  for (const hyst of [false, true]) {
+    for (const c of chunks) c.far = false;
+    updateLod(true, hyst); switches = 0;
+    // 相机在切换距离附近来回移动：每秒 60 帧，共 5 秒，位置有小幅抖动
+    for (let k = 0; k < 300; k++) { const tt = k / 60; camera.position.set(-38 + Math.sin(tt * 3) * 3 + Math.sin(tt * 23) * 0.6, 20, 38); camera.lookAt(0, 0, 0); updateLod(true, hyst); }
+    out[hyst ? 'with' : 'without'] = switches;
+  }
+  document.getElementById('lodR').textContent = `5 秒内的切换次数：没有迟滞 ${out.without} 次，有迟滞 ${out.with} 次。`;
+  return out;
+}
+document.getElementById('lodTest').addEventListener('click', lodTest);
+window.__vis = { bench, lodTest, freeze: () => { renderer.setAnimationLoop(null); place(0); render(); } };
+</script>
+</body>
+</html>
