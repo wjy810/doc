@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>综合项目：列表到详情的连贯动效</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; --ok: #067647; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 14px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .app { max-width: 560px; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 16px; min-height: 380px; }
+  h1 { font-size: 17px; margin: 0 0 10px; }
+  .list { display: grid; gap: 8px; }
+  .card { display: grid; grid-template-columns: 56px 1fr; gap: 12px; align-items: center; text-align: left; font: inherit; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: #fff; cursor: pointer; }
+  .thumb { width: 56px; height: 56px; border-radius: 8px; background: linear-gradient(135deg, var(--a), var(--b)); }
+  .card b { display: block; } .card small { color: var(--muted); }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  .detail .hero { height: 140px; border-radius: 10px; background: linear-gradient(135deg, var(--a), var(--b)); }
+  .detail h2 { font-size: 20px; margin: 12px 0 2px; } .detail p { margin: 0 0 10px; color: var(--muted); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  button.btn { font: inherit; padding: 6px 14px; border: 1px solid #c3c9d3; border-radius: 8px; background: #fff; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; min-width: 96px; }
+  button.primary[data-state="saved"] { background: var(--ok); border-color: var(--ok); }
+  /* 编辑区展开：把网格行从 0fr 过渡到 1fr，高度随内容变化，不用写死高度 */
+  .editor { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .3s cubic-bezier(.2, .8, .2, 1); }
+  .editor.open { grid-template-rows: 1fr; }
+  .editor > div { overflow: hidden; }
+  .editor label { display: block; font-weight: 700; margin: 10px 0 2px; }
+  .editor input { font: inherit; width: 100%; padding: 6px 10px; border: 1px solid #8a93a3; border-radius: 6px; }
+  .flash { animation: flash 1s ease-out; }
+  @keyframes flash { from { background: #fff3c4; } to { background: transparent; } }
+  ::view-transition-group(*) { animation-duration: 320ms; animation-timing-function: cubic-bezier(.2, .8, .2, 1); }
+  @media (prefers-reduced-motion: reduce) {
+    .editor { transition: none; } .flash { animation: none; }
+    ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="app" id="app" aria-live="polite"></div>
+<script>
+let jobs = [
+  { id: 1, title: '前端开发实习生', org: '星河科技 · 上海', a: '#9db8e8', b: '#f3c98b' },
+  { id: 2, title: '数据分析实习生', org: '远山数据 · 杭州', a: '#a8d8c5', b: '#9db8e8' },
+  { id: 3, title: '测试开发实习生', org: '青石软件 · 北京', a: '#c9c1ee', b: '#a8d8c5' },
+  { id: 4, title: '产品助理', org: '云帆教育 · 深圳', a: '#f3c98b', b: '#e9a3a3' }
+];
+let openId = null, editing = false, saving = false, lastFocus = null, justSaved = null;
+const app = document.getElementById('app');
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function h(tag, attrs = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) { if (k.startsWith('on')) el.addEventListener(k.slice(2), v); else el.setAttribute(k, v); }
+  el.append(...children);
+  return el;
+}
+// 所有界面变化都经过 transition：支持视图过渡时，浏览器在旧画面与新画面之间做连续的变形
+function transition(update) {
+  if (!document.startViewTransition || reduce) { update(); return; }
+  document.startViewTransition(update);
+}
+function render() {
+  if (openId == null) {
+    app.replaceChildren(h('h1', {}, '收藏的岗位'), h('div', { class: 'list' }, ...jobs.map(j =>
+      h('button', { type: 'button', class: 'card' + (j.id === justSaved ? ' flash' : ''), id: 'card-' + j.id, onclick: () => open(j.id) },
+        h('span', { class: 'thumb', style: `--a:${j.a};--b:${j.b};view-transition-name:hero-${j.id}` }),
+        h('span', {}, h('b', { style: `view-transition-name:title-${j.id}` }, j.title), h('small', {}, j.org))))));
+    if (lastFocus) document.getElementById('card-' + lastFocus)?.focus();   // 返回后焦点回到刚才的卡片
+    justSaved = null;
+    return;
+  }
+  const j = jobs.find(x => x.id === openId);
+  const input = h('input', { id: 'title-input', value: j.title });
+  const save = h('button', { type: 'button', class: 'btn primary', id: 'save', 'data-state': 'idle', onclick: () => doSave(j, input, save) }, '保存');
+  app.replaceChildren(h('div', { class: 'detail' },
+    h('div', { class: 'hero', style: `--a:${j.a};--b:${j.b};view-transition-name:hero-${j.id}` }),
+    h('h2', { id: 'detail-title', style: `view-transition-name:title-${j.id}` }, j.title), h('p', {}, j.org),
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', id: 'back', onclick: back }, '← 返回列表'),
+      h('button', { type: 'button', class: 'btn', id: 'edit', 'aria-expanded': String(editing), 'aria-controls': 'editor', onclick: toggleEdit }, editing ? '收起编辑' : '编辑')),
+    h('div', { class: 'editor' + (editing ? ' open' : ''), id: 'editor' }, h('div', {}, h('label', { for: 'title-input' }, '岗位名称'), input,
+      h('div', { class: 'row', style: 'margin-top:10px' }, save)))));
+}
+function open(id) { if (openId === id) return; lastFocus = id; editing = false; transition(() => { openId = id; render(); document.getElementById('back').focus(); }); }
+function back() { if (saving) return; transition(() => { openId = null; editing = false; render(); }); }
+function toggleEdit() {
+  editing = !editing;
+  document.getElementById('editor').classList.toggle('open', editing);   // 只切换类名，让 CSS 过渡展开或收起
+  const b = document.getElementById('edit');
+  b.setAttribute('aria-expanded', String(editing)); b.textContent = editing ? '收起编辑' : '编辑';
+  if (editing) document.getElementById('title-input').focus();
+}
+async function doSave(job, input, btn) {
+  if (saving) return;                                  // 保存过程中忽略重复点击，也不允许返回
+  saving = true;
+  btn.dataset.state = 'saving'; btn.textContent = '正在保存…';
+  await new Promise(r => setTimeout(r, 600));
+  job.title = input.value.trim() || job.title;
+  saving = false;
+  btn.dataset.state = 'saved'; btn.textContent = '已保存 ✓';
+  const t = document.getElementById('detail-title');
+  t.textContent = job.title;
+  t.classList.remove('flash'); void t.offsetWidth; t.classList.add('flash');   // 新标题闪一下，说明改动已经生效
+  justSaved = job.id;
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && openId != null) back(); });
+render();
+</script>
+</body>
+</html>

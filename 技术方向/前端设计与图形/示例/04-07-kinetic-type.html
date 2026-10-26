@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>动态排版：逐词出现、沿路径排字、遮罩揭示与字重变化</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/noto-sans-sc@5.3.1/index.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 14px; max-width: 1000px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  h2 { font-size: 15px; margin: 0 0 2px; } .sub { color: var(--muted); margin: 0 0 8px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .seg { font-size: 13px; margin: 0 0 4px; } .seg span { background: #eef3fb; border-radius: 4px; padding: 0 3px; margin-right: 3px; }
+  .seg.bad span { background: #fdf0ee; }
+  .frames { display: grid; gap: 4px; margin-top: 6px; }
+  .frame { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 8px; }
+  .frame small { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .headline { font-size: 22px; font-weight: 700; line-height: 1.3; }
+  .headline .w { display: inline-block; }      /* 每个词是一个整体：换行只发生在词与词之间 */
+  svg { width: 100%; height: auto; display: block; }
+  .mask { font-size: 26px; font-weight: 700; -webkit-mask-image: linear-gradient(90deg, #000 40%, transparent 60%); mask-image: linear-gradient(90deg, #000 40%, transparent 60%);
+          -webkit-mask-size: 300% 100%; mask-size: 300% 100%; }
+  .wave { font-family: "Noto Sans SC Variable", sans-serif; font-size: 30px; letter-spacing: .02em; }
+  .wave span { display: inline-block; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <section>
+    <h2>逐词出现：先把标题拆成词，再让每个词错开出现</h2>
+    <p class="sub">浏览器自动分词（Intl.Segmenter）与人工指定的分词：</p>
+    <p class="seg bad" id="auto"></p>
+    <p class="seg" id="manual"></p>
+    <h3 class="sr-only">让每一次投递都更有把握</h3>   <!-- 读屏软件读这一行完整的标题 -->
+    <div class="frames" id="reveal" aria-hidden="true"></div>
+  </section>
+  <section>
+    <h2>沿路径排字：文字跟着曲线排列，偏移量随时间变化</h2>
+    <p class="sub">SVG 的 textPath；文字仍是真实文字，可以选择和复制。</p>
+    <svg viewBox="0 0 440 120" role="img" aria-label="沿曲线排列的文字：从简历到面试，一步一步准备">
+      <path id="curve" d="M10 80 C 90 10, 170 10, 220 60 S 350 110, 430 40" fill="none" stroke="#dde1e7" stroke-width="2"/>
+      <text font-size="20" font-weight="700" fill="#2f6fdb"><textPath href="#curve" id="tp" startOffset="4%">从简历到面试，一步一步准备</textPath></text>
+    </svg>
+  </section>
+  <section>
+    <h2>遮罩揭示：移动一道渐变遮罩，文字从左到右显现</h2>
+    <p class="sub">遮罩只影响看到的部分，文字本身一直完整存在。</p>
+    <div class="frames" id="masks" aria-hidden="true"></div>
+  </section>
+  <section>
+    <h2>字重波浪：可变字体在 100—900 之间连续变化</h2>
+    <p class="sub">每个字的字重按正弦曲线错开；同一个字体文件，不需要加载多个字重。</p>
+    <p class="wave" id="wave" aria-label="职业能力画布"></p>
+  </section>
+</div>
+<script>
+const TITLE = '让每一次投递都更有把握';
+const MANUAL = ['让', '每一次', '投递', '都更有', '把握'];               // 人工确认的分词
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const show = (id, words) => document.getElementById(id).replaceChildren(
+  id === 'auto' ? '自动：' : '人工：', ...words.map(w => Object.assign(document.createElement('span'), { textContent: w })));
+show('auto', [...new Intl.Segmenter('zh', { granularity: 'word' }).segment(TITLE)].map(s => s.segment));
+show('manual', MANUAL);
+
+// 把一个动画“定格”在某个时刻，用来画胶片条
+function freeze(anim, t) { anim.pause(); anim.currentTime = t; }
+
+// 逐词出现：每个词延迟 90 毫秒，向上移动并淡入
+const reveal = document.getElementById('reveal');
+for (const t of [0, 150, 300, 450, 750]) {
+  const frame = document.createElement('div'); frame.className = 'frame';
+  const label = document.createElement('small'); label.textContent = `${t} 毫秒`;
+  const line = document.createElement('div'); line.className = 'headline';
+  MANUAL.forEach((w, i) => {
+    const span = Object.assign(document.createElement('span'), { className: 'w', textContent: w });
+    line.append(span);
+    const a = span.animate([{ opacity: 0, transform: 'translateY(.4em)' }, { opacity: 1, transform: 'none' }],
+                           { duration: 360, delay: i * 90, easing: 'cubic-bezier(.2, .8, .2, 1)', fill: 'both' });
+    freeze(a, reduce ? 10000 : t);
+  });
+  frame.append(label, line);
+  reveal.append(frame);
+}
+
+// 沿路径排字：startOffset 从 4% 移到 22%（这里定格在中间；真实页面中用 requestAnimationFrame 更新）
+document.getElementById('tp').setAttribute('startOffset', reduce ? '4%' : '13%');
+
+// 遮罩揭示：遮罩位置从右移到左，文字逐渐显现
+const masks = document.getElementById('masks');
+for (const t of [0, 250, 500, 1000]) {
+  const frame = document.createElement('div'); frame.className = 'frame';
+  const label = document.createElement('small'); label.textContent = `${t} 毫秒`;
+  const text = Object.assign(document.createElement('div'), { className: 'mask', textContent: '找到适合你的第一份实习' });
+  frame.append(label, text);
+  masks.append(frame);
+  freeze(text.animate([{ maskPosition: '100% 0', webkitMaskPosition: '100% 0' }, { maskPosition: '0% 0', webkitMaskPosition: '0% 0' }],
+                      { duration: 1000, easing: 'ease-out', fill: 'both' }), reduce ? 1000 : t);
+}
+
+// 字重波浪：字重 = 500 + 350 × sin(相位 − 序号 × 0.6)
+const wave = document.getElementById('wave');
+const chars = [...'职业能力画布'].map(c => { const s = document.createElement('span'); s.textContent = c; s.setAttribute('aria-hidden', 'true'); wave.append(s); return s; });
+function paint(time) {
+  chars.forEach((s, i) => { s.style.fontWeight = Math.round(500 + 350 * Math.sin(time / 400 - i * 0.6)); });
+  if (!reduce) requestAnimationFrame(paint);
+}
+reduce ? chars.forEach(s => { s.style.fontWeight = 700; }) : requestAnimationFrame(paint);
+</script>
+</body>
+</html>

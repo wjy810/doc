@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>声音与运动配合：提示音、静音与节拍同步</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; --ok: #067647; --bad: #b42318; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 14px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .bar { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; max-width: 940px; margin-bottom: 14px; }
+  button { font: inherit; padding: 6px 14px; border: 1px solid #c3c9d3; border-radius: 8px; background: #fff; cursor: pointer; }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr) 1.3fr; gap: 12px; max-width: 940px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; justify-items: center; gap: 8px; text-align: center; }
+  h2 { font-size: 14px; margin: 0; }
+  .icon { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; font-size: 26px; font-weight: 700; color: #fff; position: relative; }
+  .icon::after { content: ''; position: absolute; inset: 0; border-radius: 50%; border: 3px solid currentColor; opacity: 0; }
+  .icon.ring::after { animation: ring .6s ease-out; }
+  @keyframes ring { from { opacity: .8; transform: scale(1); } to { opacity: 0; transform: scale(1.7); } }
+  .ok { background: var(--ok); color: var(--ok); } .bad { background: var(--bad); color: var(--bad); } .msg { background: var(--accent); color: var(--accent); }
+  .icon span { color: #fff; }
+  .note { font-size: 12px; color: var(--muted); min-height: 38px; }
+  .beats { display: flex; gap: 8px; }
+  .beats i { width: 18px; height: 18px; border-radius: 50%; background: #dde1e7; transition: transform .08s, background .08s; }
+  .beats i.on { background: var(--accent); transform: scale(1.35); }
+  @media (prefers-reduced-motion: reduce) { .icon.ring::after { animation: none; } .beats i { transition: none; } }
+</style>
+</head>
+<body>
+<div class="bar">
+  <button type="button" id="sound" aria-pressed="false">声音：关</button>
+  <label>音量 <input type="range" id="vol" min="0" max="1" step="0.05" value="0.4"></label>
+  <span class="note" style="min-height:0">声音默认关闭；关闭时，画面与文字仍然说明发生了什么。</span>
+</div>
+<div class="grid">
+  <section><h2>完成任务</h2><div class="icon ok" id="i-ok"><span>✓</span></div><button type="button" data-ev="ok">保存简历</button><p class="note" id="n-ok" role="status"></p></section>
+  <section><h2>出错</h2><div class="icon bad" id="i-bad"><span>!</span></div><button type="button" data-ev="bad">上传失败</button><p class="note" id="n-bad" role="status"></p></section>
+  <section><h2>新消息</h2><div class="icon msg" id="i-msg"><span>•</span></div><button type="button" data-ev="msg">收到回复</button><p class="note" id="n-msg" role="status"></p></section>
+  <section><h2>节拍同步（每分钟 100 拍）</h2><div class="beats" id="beats"><i></i><i></i><i></i><i></i></div><button type="button" id="metro" aria-pressed="false">开始</button>
+    <p class="note">声音和画面都按音频时钟安排，不会越走越偏。</p></section>
+</div>
+<script>
+let ctx = null, master = null, soundOn = false;
+// 浏览器要求在用户操作之后才能开始播放声音，所以在第一次打开声音时才创建音频上下文
+function audio() {
+  if (!ctx) {
+    ctx = new AudioContext();
+    master = ctx.createGain();
+    master.gain.value = +document.getElementById('vol').value;
+    master.connect(ctx.destination);
+  }
+  if (ctx.state === 'suspended') ctx.resume();
+  return ctx;
+}
+// 一个音：频率、开始时间、长度；用包络让声音平滑开始和结束，避免“咔哒”声
+function tone(freq, at, len, type = 'sine', peak = 0.6) {
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(0, at);
+  g.gain.linearRampToValueAtTime(peak, at + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.001, at + len);
+  o.connect(g).connect(master);
+  o.start(at); o.stop(at + len + 0.02);
+}
+const SOUNDS = {
+  ok:  t => { tone(660, t, 0.12); tone(880, t + 0.1, 0.22); },          // 上行的两个音：完成
+  bad: t => { tone(220, t, 0.18, 'square', 0.25); tone(196, t + 0.16, 0.22, 'square', 0.25); },  // 低沉、略粗糙：出错
+  msg: t => { tone(1040, t, 0.09, 'triangle', 0.4); }                    // 短促轻快：新消息
+};
+const TEXT = { ok: '已保存，3 秒前', bad: '上传失败：网络中断，请重试', msg: '收到 1 条新回复' };
+document.querySelectorAll('[data-ev]').forEach(b => b.addEventListener('click', () => {
+  const ev = b.dataset.ev, icon = document.getElementById('i-' + ev);
+  icon.classList.remove('ring'); void icon.offsetWidth; icon.classList.add('ring');   // 画面反馈
+  document.getElementById('n-' + ev).textContent = TEXT[ev];                          // 文字反馈
+  if (soundOn) SOUNDS[ev](audio().currentTime + 0.01);                                 // 声音只是补充
+}));
+document.getElementById('sound').addEventListener('click', e => {
+  soundOn = !soundOn;
+  e.currentTarget.setAttribute('aria-pressed', String(soundOn));
+  e.currentTarget.textContent = `声音：${soundOn ? '开' : '关'}`;
+  if (soundOn) audio();
+});
+document.getElementById('vol').addEventListener('input', e => { if (master) master.gain.value = +e.target.value; });
+
+// ---------- 节拍：提前 0.1 秒安排好接下来的拍子，画面在声音响起的时刻点亮 ----------
+const beats = [...document.querySelectorAll('#beats i')];
+let running = false, nextTime = 0, beat = 0, timer = null;
+const interval = 60 / 100;
+function schedule() {
+  const c = ctx;
+  while (nextTime < c.currentTime + 0.1) {
+    const i = beat % 4, at = nextTime;
+    if (soundOn) tone(i === 0 ? 1200 : 800, at, 0.05, 'square', 0.2);
+    // 画面：在音频时钟到达 at 的那一刻点亮对应的点
+    setTimeout(() => { beats.forEach((b, k) => b.classList.toggle('on', k === i)); }, Math.max(0, (at - c.currentTime) * 1000));
+    nextTime += interval; beat++;
+  }
+}
+document.getElementById('metro').addEventListener('click', e => {
+  running = !running;
+  e.currentTarget.setAttribute('aria-pressed', String(running));
+  e.currentTarget.textContent = running ? '停止' : '开始';
+  if (running) { audio(); nextTime = ctx.currentTime + 0.05; beat = 0; timer = setInterval(schedule, 25); }
+  else { clearInterval(timer); beats.forEach(b => b.classList.remove('on')); }
+});
+// 页面隐藏时停止节拍，避免在后台继续发声
+document.addEventListener('visibilitychange', () => { if (document.hidden && running) document.getElementById('metro').click(); });
+</script>
+</body>
+</html>

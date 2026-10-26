@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>工具：同一组动画用 CSS、Motion 与 GSAP 实现</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.3.0/400.css">
+<script src="https://cdn.jsdelivr.net/npm/motion@14.1.0/dist/motion.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"></script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 1040px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 15px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  pre { margin: 0; font: 11px/1.55 "JetBrains Mono", monospace; background: #f6f7f9; border-radius: 6px; padding: 8px; white-space: pre-wrap; min-height: 150px; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; min-height: 30px; }
+  .chips span { padding: 2px 10px; border-radius: 99px; background: #eef3fb; color: #1d4fa8; }
+  .lane { height: 40px; background: #f6f7f9; border-radius: 20px; position: relative; }
+  .box { position: absolute; left: 6px; top: 6px; width: 28px; height: 28px; border-radius: 7px; background: var(--accent); }
+  button { font: inherit; justify-self: start; padding: 3px 12px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  /* CSS 版本：用自定义属性 --i 算出每一项的延迟 */
+  .css-on .chips span { animation: rise .4s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--i) * 60ms); }
+  @keyframes rise { from { opacity: 0; transform: translateY(12px); } }
+  .css-on .box { animation: move .6s both; animation-timing-function: linear(0, 0.21, 0.58, 0.91, 1.11, 1.16, 1.11, 1.05, 1, 0.98, 0.98, 0.99, 1); }
+  @keyframes move { to { transform: translateX(var(--to)); } }
+  @media (prefers-reduced-motion: reduce) { .css-on .chips span, .css-on .box { animation-duration: 1ms; } }
+</style>
+</head>
+<body>
+<div class="grid">
+  <section id="css">
+    <h2>CSS</h2><p class="sub">简单的过渡与进场动画，不需要任何库</p>
+<pre>.chips span {
+  animation: rise .4s both;
+  animation-delay: calc(var(--i) * 60ms);
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(12px); }
+}
+/* 弹簧：用 linear() 写出的回弹曲线（见 05 章） */</pre>
+    <div class="chips"></div><div class="lane"><span class="box"></span></div><button type="button">重播</button>
+  </section>
+  <section id="motion">
+    <h2>Motion</h2><p class="sub">简洁的函数接口，内置弹簧、滚动与进入视口</p>
+<pre>const { animate, stagger } = Motion;
+animate(chips, { opacity: [0, 1], y: [12, 0] },
+        { delay: stagger(0.06), duration: 0.4 });
+animate(box, { x: [0, distance] },
+        { type: 'spring', stiffness: 300, damping: 18 });</pre>
+    <div class="chips"></div><div class="lane"><span class="box"></span></div><button type="button">重播</button>
+  </section>
+  <section id="gsap">
+    <h2>GSAP</h2><p class="sub">时间线编排复杂的先后与重叠，插件丰富</p>
+<pre>gsap.from(chips, { opacity: 0, y: 12,
+                   stagger: 0.06, duration: 0.4 });
+gsap.timeline()
+  .to(box, { x: distance, duration: 0.5,
+             ease: 'back.out(1.7)' })
+  .to(box, { rotation: 90, duration: 0.3 }, '-=0.1');</pre>
+    <div class="chips"></div><div class="lane"><span class="box"></span></div><button type="button">重播</button>
+  </section>
+</div>
+<script>
+const WORDS = ['简历', '面试', '作品集', '实习', '岗位匹配'];
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function fill(section) {
+  const chips = section.querySelector('.chips');
+  chips.replaceChildren(...WORDS.map((w, i) => { const s = document.createElement('span'); s.textContent = w; s.style.setProperty('--i', i); return s; }));
+  return [...chips.children];
+}
+const distance = el => el.closest('.lane').clientWidth - 40;
+const runners = {
+  css(section) {
+    section.classList.remove('css-on'); fill(section);
+    const box = section.querySelector('.box'); box.style.setProperty('--to', distance(box) + 'px');
+    void section.offsetWidth; section.classList.add('css-on');     // 重新添加类名，动画从头播放
+  },
+  motion(section) {
+    const { animate, stagger } = Motion;
+    const chips = fill(section), box = section.querySelector('.box');
+    animate(chips, { opacity: [0, 1], y: [12, 0] }, { delay: stagger(0.06), duration: reduce ? 0 : 0.4 });
+    // 写明起点 [0, 终点]：Motion 会记住上一次的结束位置，只写终点时重播不会再动
+    animate(box, { x: [0, distance(box)] }, reduce ? { duration: 0 } : { type: 'spring', stiffness: 300, damping: 18 });
+  },
+  gsap(section) {
+    const chips = fill(section), box = section.querySelector('.box');
+    gsap.set(box, { x: 0, rotation: 0 });
+    if (reduce) { gsap.set(box, { x: distance(box) }); return; }
+    gsap.from(chips, { opacity: 0, y: 12, stagger: 0.06, duration: 0.4 });
+    gsap.timeline().to(box, { x: distance(box), duration: 0.5, ease: 'back.out(1.7)' }).to(box, { rotation: 90, duration: 0.3 }, '-=0.1');
+  }
+};
+for (const [id, run] of Object.entries(runners)) {
+  const section = document.getElementById(id);
+  section.querySelector('button').addEventListener('click', () => run(section));
+  run(section);
+}
+</script>
+</body>
+</html>

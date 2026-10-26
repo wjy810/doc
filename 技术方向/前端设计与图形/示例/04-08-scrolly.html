@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>滚动叙事：章节、吸顶画面与进度</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 14px/1.7 "Noto Sans SC", system-ui, sans-serif; }
+  .shell { max-width: 900px; background: #fff; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .top { display: flex; gap: 6px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .top b { margin-right: 8px; }
+  .top button { font: inherit; font-size: 12px; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 99px; background: #fff; cursor: pointer; }
+  .top button[aria-current="step"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  .progress { height: 4px; background: #eef1f5; }
+  .progress i { display: block; height: 100%; background: var(--accent); transform-origin: 0 50%; transform: scaleX(0); }
+  /* 支持滚动驱动动画的浏览器：进度条直接由滚动位置驱动，不需要脚本 */
+  @supports (animation-timeline: scroll()) {
+    .shell { timeline-scope: --story; }        /* 时间线默认只对滚动容器内部可见；进度条在容器外，要扩大可见范围 */
+    .scroller { scroll-timeline: --story block; }
+    .progress i { animation: grow linear both; animation-timeline: --story; }
+  }
+  @keyframes grow { to { transform: scaleX(1); } }
+  .scroller { height: 360px; overflow-y: auto; scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { .scroller { scroll-behavior: auto; } .stage * { transition: none !important; } }
+  .story { display: grid; grid-template-columns: 1fr 320px; gap: 24px; padding: 0 20px; }
+  .chapter { min-height: 300px; padding: 40px 0; opacity: .35; transition: opacity .3s; }
+  .chapter.active { opacity: 1; }
+  .chapter h2 { font-size: 18px; margin: 0 0 6px; }
+  .chapter p { margin: 0; color: var(--muted); }
+  .stage { position: sticky; top: 24px; height: 300px; margin-top: 24px; border-radius: 12px; background: #f6f7f9; display: grid; place-items: center; }
+  .resume { width: 210px; background: #fff; border-radius: 8px; box-shadow: 0 6px 18px rgba(16,24,40,.12); padding: 14px; font-size: 12px; transition: transform .45s cubic-bezier(.2, .8, .2, 1); }
+  .resume .row { height: 7px; border-radius: 4px; background: #dde1e7; margin: 6px 0; transition: background .3s, width .45s; }
+  .resume .num { display: inline-block; color: var(--accent); font-weight: 700; opacity: 0; transition: opacity .3s; }
+  .resume .stamp { margin-top: 10px; text-align: center; color: #067647; font-weight: 700; opacity: 0; transform: scale(.8); transition: opacity .3s, transform .3s; }
+  [data-step="2"] .resume .row.fill, [data-step="3"] .resume .row.fill, [data-step="4"] .resume .row.fill { background: #9db8e8; }
+  [data-step="3"] .resume .num, [data-step="4"] .resume .num { opacity: 1; }
+  [data-step="4"] .resume { transform: translateY(-8px) rotate(-2deg); }
+  [data-step="4"] .resume .stamp { opacity: 1; transform: none; }
+  .tail { height: 80px; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <nav class="top" aria-label="章节"><b>写一份好简历</b><button type="button" data-go="1">1 选择模板</button><button type="button" data-go="2">2 填写经历</button><button type="button" data-go="3">3 量化成果</button><button type="button" data-go="4">4 投递</button></nav>
+  <div class="progress" aria-hidden="true"><i id="bar"></i></div>
+  <div class="scroller" id="scroller" tabindex="0" aria-label="简历写作的四个步骤">
+    <div class="story">
+      <div>
+        <section class="chapter" data-step="1" id="c1"><h2>1 选择模板</h2><p>选一个结构清楚的模板：标题、教育、经历、技能。内容比装饰更重要。</p></section>
+        <section class="chapter" data-step="2" id="c2"><h2>2 填写经历</h2><p>按时间倒序写实习与项目，每段说明你负责什么、做了什么。</p></section>
+        <section class="chapter" data-step="3" id="c3"><h2>3 量化成果</h2><p>用数字说明变化：页面加载时间从 4 秒降到 1.5 秒，投递转化提高 18%。</p></section>
+        <section class="chapter" data-step="4" id="c4"><h2>4 投递</h2><p>检查格式与联系方式，导出 PDF，按岗位要求调整措辞后投递。</p></section>
+        <div class="tail"></div>
+      </div>
+      <div class="stage" id="stage" data-step="1" aria-hidden="true">
+        <div class="resume">
+          <b>李明 · 前端开发</b>
+          <div class="row" style="width:90%"></div><div class="row fill" style="width:70%"></div><div class="row fill" style="width:80%"></div>
+          <div>加载时间 <span class="num">−62%</span></div><div>转化率 <span class="num">＋18%</span></div>
+          <div class="row" style="width:60%"></div>
+          <div class="stamp">已投递 ✓</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const scroller = document.getElementById('scroller'), stage = document.getElementById('stage');
+const chapters = [...document.querySelectorAll('.chapter')], buttons = [...document.querySelectorAll('[data-go]')];
+function setStep(step) {
+  stage.dataset.step = step;
+  chapters.forEach(c => c.classList.toggle('active', c.dataset.step === step));
+  buttons.forEach(b => { if (b.dataset.go === step) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current'); });
+}
+// 进入：章节越过容器中线时成为当前章节；画面停留在吸顶区域，直到下一章接替
+const io = new IntersectionObserver(entries => {
+  for (const e of entries) if (e.isIntersecting) setStep(e.target.dataset.step);
+}, { root: scroller, rootMargin: '-50% 0px -50% 0px' });
+chapters.forEach(c => io.observe(c));
+// 不支持滚动驱动动画时，用脚本更新进度条
+if (!CSS.supports('animation-timeline: scroll()')) {
+  scroller.addEventListener('scroll', () => {
+    const p = scroller.scrollTop / (scroller.scrollHeight - scroller.clientHeight);
+    document.getElementById('bar').style.transform = `scaleX(${p})`;
+  }, { passive: true });
+}
+// 章节导航：随时可以跳到任一章节，不必一路滚下去
+buttons.forEach(b => b.addEventListener('click', () => document.getElementById('c' + b.dataset.go).scrollIntoView({ block: 'center' })));
+setStep('1');
+</script>
+</body>
+</html>

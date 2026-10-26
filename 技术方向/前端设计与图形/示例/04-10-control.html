@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>动画状态与运行质量：暂停、反向、打断、队列与清理</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 14px; max-width: 1000px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  h2 { font-size: 15px; margin: 0 0 2px; } .sub { color: var(--muted); margin: 0 0 8px; }
+  .track { position: relative; height: 46px; background: #f6f7f9; border-radius: 23px; margin: 6px 0 10px; }
+  .dot { position: absolute; left: 6px; top: 6px; width: 34px; height: 34px; border-radius: 50%; background: var(--accent); }
+  .btns { display: flex; gap: 6px; flex-wrap: wrap; }
+  button { font: inherit; padding: 3px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  .state { font-variant-numeric: tabular-nums; color: var(--muted); margin: 8px 0 0; min-height: 21px; }
+  .steps { display: flex; gap: 6px; margin: 6px 0 10px; }
+  .steps i { flex: 1; height: 26px; border-radius: 6px; background: #eef1f5; transform-origin: left; }
+  .arena { position: relative; height: 90px; background: #f6f7f9; border-radius: 8px; overflow: hidden; margin: 6px 0 8px; }
+  .arena b { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  td, th { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; } th { color: var(--muted); font-weight: 400; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <section>
+    <h2>控制一段动画：播放、暂停、反向、取消、加速、中途改变目标</h2>
+    <p class="sub">Web Animations API 返回的动画对象可以随时控制；“改变目标”从当前看到的位置出发，不会跳回起点。</p>
+    <div class="track" id="track"><span class="dot" id="dot"></span></div>
+    <div class="btns">
+      <button type="button" id="play">播放</button><button type="button" id="pause">暂停</button><button type="button" id="reverse">反向</button>
+      <button type="button" id="cancel">取消</button><button type="button" id="fast">加速 ×2</button><button type="button" id="retarget">改到中点</button>
+    </div>
+    <p class="state" id="s1" role="status"></p>
+  </section>
+  <section>
+    <h2>队列：三步依次进行，一次取消整个队列</h2>
+    <p class="sub">每一步等上一步结束（await finished）；AbortController 让取消能传到还没开始的步骤。</p>
+    <div class="steps" id="steps"><i></i><i></i><i></i></div>
+    <div class="btns"><button type="button" id="qstart">开始队列</button><button type="button" id="qcancel">取消队列</button></div>
+    <p class="state" id="s2" role="status"></p>
+  </section>
+  <section>
+    <h2>清理与页面隐藏</h2>
+    <p class="sub">离开页面或组件销毁时，取消动画、移除事件；页面隐藏时暂停持续运行的动画。</p>
+    <p class="state" id="s3" style="color:var(--ink)"></p>
+    <p class="state" id="s4"></p>
+  </section>
+  <section>
+    <h2>200 个点同时运动：transform 与 left／top 的帧时间</h2>
+    <p class="sub">改变 left／top 每一帧都要重新布局；改变 transform 通常只需要合成。</p>
+    <div class="arena" id="arena" aria-hidden="true"></div>
+    <div class="btns"><button type="button" id="bench">测量 2 秒</button></div>
+    <table id="bres"><tr><th>写法</th><th>平均帧时间</th><th>超过 20 毫秒的帧</th></tr></table>
+  </section>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+// ---------- 1. 一段可以控制的动画 ----------
+let anim = null;
+const dist = () => $('track').clientWidth - 46;
+function start(from, to, duration = 2000) {
+  anim?.cancel();
+  anim = $('dot').animate([{ transform: `translateX(${from}px)` }, { transform: `translateX(${to}px)` }],
+                          { duration: reduce ? 0 : duration, easing: 'ease-in-out', fill: 'forwards' });
+}
+const current = () => new DOMMatrix(getComputedStyle($('dot')).transform).m41;   // 当前看到的位置
+$('play').addEventListener('click', () => { if (anim && anim.playState === 'paused') anim.play(); else start(0, dist()); });
+$('pause').addEventListener('click', () => anim?.pause());
+$('reverse').addEventListener('click', () => anim?.reverse());
+$('cancel').addEventListener('click', () => anim?.cancel());
+$('fast').addEventListener('click', () => anim && anim.updatePlaybackRate(anim.playbackRate * 2));
+$('retarget').addEventListener('click', () => { const x = current(); start(x, dist() / 2, 600); });
+setInterval(() => {
+  const s = anim ? `${{ idle: '已取消', running: '运行中', paused: '已暂停', finished: '已结束' }[anim.playState]} · 进度 ${anim.currentTime == null ? 0 : Math.round(Math.min(1, anim.currentTime / anim.effect.getTiming().duration) * 100)}% · 速度 ×${anim.playbackRate}` : '尚未开始';
+  $('s1').textContent = s;
+  $('s3').textContent = `页面上活动的动画：${document.getAnimations().length} 个`;
+}, 100);
+
+// ---------- 2. 队列 ----------
+let queue = null;
+$('qstart').addEventListener('click', async () => {
+  queue?.abort();
+  queue = new AbortController();
+  const { signal } = queue;
+  const bars = [...$('steps').children];
+  bars.forEach(b => b.getAnimations().forEach(a => a.cancel()));
+  try {
+    for (const [i, bar] of bars.entries()) {
+      if (signal.aborted) throw new DOMException('已取消', 'AbortError');
+      $('s2').textContent = `第 ${i + 1} 步进行中`;
+      const a = bar.animate([{ background: '#eef1f5' }, { background: '#2f6fdb' }], { duration: reduce ? 0 : 700, fill: 'forwards' });
+      signal.addEventListener('abort', () => a.cancel(), { once: true });   // 取消时，正在进行的一步也停下
+      await a.finished;                                                       // 被取消时这里会抛出 AbortError
+    }
+    $('s2').textContent = '三步全部完成';
+  } catch (e) {
+    if (e.name === 'AbortError') { $('s2').textContent = '队列已取消，后面的步骤不会再开始'; bars.forEach(b => b.getAnimations().forEach(a => a.cancel())); }
+    else throw e;
+  }
+});
+$('qcancel').addEventListener('click', () => queue?.abort());
+
+// ---------- 3. 页面隐藏时暂停 ----------
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { document.getAnimations().forEach(a => a.playState === 'running' && a.pause()); $('s4').textContent = '页面已隐藏：动画已暂停'; }
+  else $('s4').textContent = '页面回到前台：点击“播放”继续';
+});
+
+// ---------- 4. transform 与 left／top 的比较 ----------
+const arena = $('arena');
+const dots = Array.from({ length: 200 }, (_, i) => { const b = document.createElement('b'); b.style.left = (i * 37 % 400) + 'px'; b.style.top = (i * 53 % 80) + 'px'; arena.append(b); return b; });
+function measure(mode) {
+  return new Promise(resolve => {
+    const frames = [], t0 = performance.now();
+    let last = t0;
+    function tick(now) {
+      frames.push(now - last); last = now;
+      const t = (now - t0) / 1000;
+      dots.forEach((b, i) => {
+        const x = (i * 37 % 400) + Math.sin(t * 3 + i) * 20, y = (i * 53 % 80) + Math.cos(t * 3 + i) * 6;
+        if (mode === 'transform') { b.style.transform = `translate(${x - (i * 37 % 400)}px, ${y - (i * 53 % 80)}px)`; }
+        else { b.style.left = x + 'px'; b.style.top = y + 'px'; b.offsetWidth; }   // 读一次布局，模拟常见的写法
+      });
+      if (now - t0 < 2000) requestAnimationFrame(tick);
+      else { dots.forEach((b, i) => { b.style.transform = ''; b.style.left = (i * 37 % 400) + 'px'; b.style.top = (i * 53 % 80) + 'px'; });
+             const f = frames.slice(1); resolve({ avg: f.reduce((a, b) => a + b, 0) / f.length, slow: f.filter(x => x > 20).length, n: f.length }); }
+    }
+    requestAnimationFrame(tick);
+  });
+}
+$('bench').addEventListener('click', async () => {
+  for (const mode of ['left／top（每次修改后读取布局）', 'transform']) {
+    const r = await measure(mode === 'transform' ? 'transform' : 'layout');
+    const tr = document.createElement('tr');
+    for (const v of [mode, `${r.avg.toFixed(1)} 毫秒`, `${r.slow}／${r.n}`]) { const td = document.createElement('td'); td.textContent = v; tr.append(td); }
+    $('bres').append(tr);
+  }
+});
+</script>
+</body>
+</html>
