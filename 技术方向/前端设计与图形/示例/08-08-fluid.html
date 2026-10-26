@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>流体：稳定流体方法与它的近似</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, 1fr); gap: 14px; max-width: 1120px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  canvas { width: 100%; height: auto; display: block; border-radius: 8px; background: #0b0e14; touch-action: none; cursor: crosshair; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+  .bar label { display: inline-flex; gap: 6px; align-items: center; }
+  button { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  output, table { font-variant-numeric: tabular-nums; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section>
+    <h2>两股烟从底部喷出，向上翻卷</h2>
+    <p class="sub">在画面上拖动，可以搅动流体。128 × 128 的格子，每个格子记录速度和两种颜色的“烟”的浓度。</p>
+    <canvas id="c" width="512" height="512" role="img" aria-label="深色背景上，橙色和蓝色的烟从底部两侧喷出，向上弯曲翻卷"></canvas>
+    <div class="bar">
+      <label>压力求解迭代 <input type="range" id="iter" min="1" max="60" value="20"><output id="itero"></output></label>
+      <button type="button" id="pause" aria-pressed="false">暂停</button><button type="button" id="reset">重置</button>
+    </div>
+  </section>
+  <section>
+    <h2>每一步做什么</h2>
+    <table>
+      <tr><th>步骤</th><th>做法</th><th>近似了什么</th></tr>
+      <tr><td>加入外力与烟</td><td>喷口处加速度与浓度</td><td>—</td></tr>
+      <tr><td>平流</td><td>每个格子沿速度倒着追溯，取那里的值（半拉格朗日）</td><td>无条件稳定，但每一步都会把细节抹平一点（数值耗散）</td></tr>
+      <tr><td>投影</td><td>迭代求解压力，减去压力的梯度，让流体“不可压缩”</td><td>迭代次数有限，散度不会完全为 0</td></tr>
+      <tr><td>边界</td><td>四周是墙，速度不能穿过墙</td><td>墙是方格的边，没有斜面</td></tr>
+    </table>
+    <h2>迭代次数：精度与成本</h2>
+    <button type="button" id="bench">测量</button>
+    <table id="benchT"><tr><th>压力迭代</th><th>剩余散度（越小越接近不可压缩）</th><th>每步耗时</th></tr></table>
+    <p class="sub">这是给眼睛看的模拟：它稳定、好看，但没有和实验或解析解比较过精度。用于工程或科学时，必须先验证。</p>
+  </section>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const N = 128, SIZE = (N + 2) * (N + 2), IX = (i, j) => i + (N + 2) * j;
+let u, v, u0, v0, dr, db, dr0, db0;
+function reset() { [u, v, u0, v0, dr, db, dr0, db0] = Array.from({ length: 8 }, () => new Float32Array(SIZE)); }
+// 边界：b = 1 时水平速度在左右墙反向，b = 2 时竖直速度在上下墙反向
+function setBnd(b, x) {
+  for (let i = 1; i <= N; i++) {
+    x[IX(0, i)] = b === 1 ? -x[IX(1, i)] : x[IX(1, i)]; x[IX(N + 1, i)] = b === 1 ? -x[IX(N, i)] : x[IX(N, i)];
+    x[IX(i, 0)] = b === 2 ? -x[IX(i, 1)] : x[IX(i, 1)]; x[IX(i, N + 1)] = b === 2 ? -x[IX(i, N)] : x[IX(i, N)];
+  }
+  x[IX(0, 0)] = 0.5 * (x[IX(1, 0)] + x[IX(0, 1)]); x[IX(0, N + 1)] = 0.5 * (x[IX(1, N + 1)] + x[IX(0, N)]);
+  x[IX(N + 1, 0)] = 0.5 * (x[IX(N, 0)] + x[IX(N + 1, 1)]); x[IX(N + 1, N + 1)] = 0.5 * (x[IX(N, N + 1)] + x[IX(N + 1, N)]);
+}
+function linSolve(b, x, x0, a, c, iters) {   // 高斯－赛德尔迭代
+  for (let k = 0; k < iters; k++) {
+    for (let j = 1; j <= N; j++) for (let i = 1; i <= N; i++) x[IX(i, j)] = (x0[IX(i, j)] + a * (x[IX(i - 1, j)] + x[IX(i + 1, j)] + x[IX(i, j - 1)] + x[IX(i, j + 1)])) / c;
+    setBnd(b, x);
+  }
+}
+function advect(b, d, d0, uu, vv, dt) {      // 平流：从当前格子沿速度倒推 dt 时间，在那里插值取值
+  const dt0 = dt * N;
+  for (let j = 1; j <= N; j++) for (let i = 1; i <= N; i++) {
+    let x = i - dt0 * uu[IX(i, j)], y = j - dt0 * vv[IX(i, j)];
+    x = Math.max(0.5, Math.min(N + 0.5, x)); y = Math.max(0.5, Math.min(N + 0.5, y));
+    const i0 = Math.floor(x), j0 = Math.floor(y), s1 = x - i0, t1 = y - j0;
+    d[IX(i, j)] = (1 - s1) * ((1 - t1) * d0[IX(i0, j0)] + t1 * d0[IX(i0, j0 + 1)]) + s1 * ((1 - t1) * d0[IX(i0 + 1, j0)] + t1 * d0[IX(i0 + 1, j0 + 1)]);
+  }
+  setBnd(b, d);
+}
+function project(uu, vv, p, div, iters) {    // 投影：去掉速度场中“会压缩”的部分
+  const h = 1 / N;
+  for (let j = 1; j <= N; j++) for (let i = 1; i <= N; i++) { div[IX(i, j)] = -0.5 * h * (uu[IX(i + 1, j)] - uu[IX(i - 1, j)] + vv[IX(i, j + 1)] - vv[IX(i, j - 1)]); p[IX(i, j)] = 0; }
+  setBnd(0, div); setBnd(0, p);
+  linSolve(0, p, div, 1, 4, iters);
+  for (let j = 1; j <= N; j++) for (let i = 1; i <= N; i++) { uu[IX(i, j)] -= 0.5 * (p[IX(i + 1, j)] - p[IX(i - 1, j)]) / h; vv[IX(i, j)] -= 0.5 * (p[IX(i, j + 1)] - p[IX(i, j - 1)]) / h; }
+  setBnd(1, uu); setBnd(2, vv);
+}
+function divergence() { let s = 0; for (let j = 1; j <= N; j++) for (let i = 1; i <= N; i++) s += Math.abs(u[IX(i + 1, j)] - u[IX(i - 1, j)] + v[IX(i, j + 1)] - v[IX(i, j - 1)]) * 0.5; return s / (N * N); }
+let t = 0;
+function step(dt, iters) {
+  t += dt;
+  // 喷口：底部两侧向上、向中间喷，方向随时间轻微摆动
+  const sway = Math.sin(t * 1.3) * 0.3;
+  for (let j = 4; j <= 9; j++) for (let i = 18; i <= 24; i++) { v[IX(i, j)] += 2.2 * dt * 60 * 0.02; u[IX(i, j)] += (0.9 + sway) * dt * 60 * 0.012; dr[IX(i, j)] = 1; }
+  for (let j = 4; j <= 9; j++) for (let i = N - 24; i <= N - 18; i++) { v[IX(i, j)] += 2.2 * dt * 60 * 0.02; u[IX(i, j)] -= (0.9 - sway) * dt * 60 * 0.012; db[IX(i, j)] = 1; }
+  // 速度：先投影，再平流，再投影
+  project(u, v, u0, v0, iters);
+  u0.set(u); v0.set(v);
+  advect(1, u, u0, u0, v0, dt); advect(2, v, v0, u0, v0, dt);
+  project(u, v, u0, v0, iters);
+  // 烟：随速度平流，并缓慢消散
+  dr0.set(dr); db0.set(db);
+  advect(0, dr, dr0, u, v, dt); advect(0, db, db0, u, v, dt);
+  for (let k = 0; k < SIZE; k++) { dr[k] *= 0.996; db[k] *= 0.996; }
+}
+function draw() {
+  const g = $('c').getContext('2d'), img = g.createImageData(N, N);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const a = Math.min(1, dr[IX(i + 1, N - j)]), b = Math.min(1, db[IX(i + 1, N - j)]), k = (j * N + i) * 4;   // 第 j 行在画布上从上往下，模拟中 y 向上
+    img.data[k] = 11 + 240 * a + 40 * b; img.data[k + 1] = 14 + 120 * a + 140 * b; img.data[k + 2] = 20 + 40 * a + 235 * b; img.data[k + 3] = 255;
+  }
+  const off = new OffscreenCanvas(N, N); off.getContext('2d').putImageData(img, 0, 0);
+  g.imageSmoothingEnabled = true; g.drawImage(off, 0, 0, 512, 512);
+}
+// 拖动：把指针的移动速度加进流体
+let drag = null;
+$('c').addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY }; $('c').setPointerCapture?.(e.pointerId); });
+$('c').addEventListener('pointermove', e => {
+  if (!drag) return;
+  const r = $('c').getBoundingClientRect(), i = Math.floor((e.clientX - r.left) / r.width * N) + 1, j = N - Math.floor((e.clientY - r.top) / r.height * N);
+  if (i > 2 && i < N - 1 && j > 2 && j < N - 1) for (let dj = -2; dj <= 2; dj++) for (let di = -2; di <= 2; di++) { u[IX(i + di, j + dj)] += (e.clientX - drag.x) / r.width * 3; v[IX(i + di, j + dj)] -= (e.clientY - drag.y) / r.height * 3; }
+  drag = { x: e.clientX, y: e.clientY };
+});
+addEventListener('pointerup', () => { drag = null; });
+let paused = matchMedia('(prefers-reduced-motion: reduce)').matches, acc = 0, last = performance.now();
+function loop(now) { const dt = Math.min(0.1, (now - last) / 1000); last = now; if (!paused) { acc += dt; while (acc >= 1 / 60) { step(1 / 60, +$('iter').value); acc -= 1 / 60; } } draw(); requestAnimationFrame(loop); }
+const showIter = () => $('itero').textContent = $('iter').value; $('iter').addEventListener('input', showIter); showIter();
+$('pause').addEventListener('click', e => { paused = !paused; e.currentTarget.setAttribute('aria-pressed', String(paused)); e.currentTarget.textContent = paused ? '继续' : '暂停'; });
+$('reset').addEventListener('click', () => { reset(); t = 0; });
+function bench() {
+  const rows = [];
+  for (const iters of [4, 20, 60]) {
+    reset(); t = 0;
+    for (let k = 0; k < 120; k++) step(1 / 60, iters);   // 先运行 2 秒，形成流动
+    let ms = 0, div = 0;
+    for (let k = 0; k < 30; k++) { const t0 = performance.now(); step(1 / 60, iters); ms += performance.now() - t0; div += divergence(); }
+    rows.push({ iters, div: div / 30, ms: ms / 30 });
+    const tr = $('benchT').insertRow();
+    for (const val of [iters, (div / 30).toExponential(2), `${(ms / 30).toFixed(1)} 毫秒`]) tr.insertCell().textContent = val;
+  }
+  reset(); t = 0;
+  return rows;
+}
+$('bench').addEventListener('click', bench);
+reset(); requestAnimationFrame(loop);
+window.__fluid = { bench, run: sec => { paused = true; for (let k = 0; k < sec * 60; k++) step(1 / 60, 20); draw(); } };
+</script>
+</body>
+</html>

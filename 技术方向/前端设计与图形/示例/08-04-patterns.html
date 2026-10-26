@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>几何与图案生成：分形、铺砌、对称与曲面</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.3.0/400.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; max-width: 1100px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 6px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  canvas { width: 100%; height: auto; display: block; border-radius: 8px; background: #f8f6f1; }
+  .bar { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+  .bar label { display: inline-flex; gap: 6px; align-items: center; }
+  .bar input[type="range"] { width: 110px; }
+  output { font-variant-numeric: tabular-nums; min-width: 2.5em; }
+  code { font: 11px "JetBrains Mono", monospace; background: #f6f7f9; padding: 1px 4px; border-radius: 4px; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <section>
+    <h2>1 分形：L 系统</h2>
+    <p class="sub">从一个字母出发，每一代按规则替换，再把字符串当作画笔的指令。规则：<code>X → F+[[X]-X]-F[-FX]+X</code>，<code>F → FF</code>。</p>
+    <canvas id="ls" width="960" height="680" role="img" aria-label="用 L 系统画出的一株分枝植物"></canvas>
+    <div class="bar">
+      <label>代数 <input type="range" id="lsN" min="1" max="6" value="5"><output id="lsNo"></output></label>
+      <label>分枝角度 <input type="range" id="lsA" min="10" max="40" value="25"><output id="lsAo"></output></label>
+      <span class="sub" id="lsInfo"></span>
+    </div>
+  </section>
+  <section>
+    <h2>2 铺砌：Truchet 拼贴</h2>
+    <p class="sub">每块只有两种朝向，相邻的弧线连成曲线；同一条曲线用同一种颜色。点击任意一块把它翻转：一块的变化会把曲线切断或接上，影响整体。</p>
+    <canvas id="tr" width="960" height="680" role="img" aria-label="由四分之一圆弧拼成的图案，连成许多条彩色曲线"></canvas>
+    <div class="bar"><button type="button" id="trSeed">换一个种子</button><span class="sub" id="trInfo" role="status"></span></div>
+  </section>
+  <section>
+    <h2>3 对称及其扰动</h2>
+    <p class="sub">在一个扇形里生成图形，再旋转复制、镜像。加入扰动后，每一份略有不同：完全对称显得机械，少量扰动显得像手工。</p>
+    <canvas id="sym" width="960" height="680" role="img" aria-label="旋转对称的花样图案"></canvas>
+    <div class="bar">
+      <label>对称份数 <input type="range" id="symN" min="3" max="12" value="8"><output id="symNo"></output></label>
+      <label><input type="checkbox" id="symM" checked> 镜像</label>
+      <label>扰动 <input type="range" id="symP" min="0" max="1" step="0.05" value="0.15"><output id="symPo"></output></label>
+    </div>
+  </section>
+  <section>
+    <h2>4 曲面：参数方程生成的贝壳</h2>
+    <p class="sub">曲面上每一点由两个参数 u、v 决定。改变圈数和扩张速度，形状连续变化；扰动让表面出现生长纹。</p>
+    <canvas id="sf" width="960" height="680" role="img" aria-label="螺旋形的贝壳曲面，表面有明暗"></canvas>
+    <div class="bar">
+      <label>圈数 <input type="range" id="sfN" min="1" max="4" step="0.25" value="2.5"><output id="sfNo"></output></label>
+      <label>扰动 <input type="range" id="sfP" min="0" max="0.2" step="0.01" value="0.05"><output id="sfPo"></output></label>
+    </div>
+  </section>
+</div>
+<script>
+function mulberry32(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const $ = id => document.getElementById(id);
+const bindOut = (id, fmt = v => v) => { $(id + 'o').textContent = fmt($(id).value); };
+
+// ---------- 1. L 系统 ----------
+function lsystem() {
+  const n = +$('lsN').value, angle = +$('lsA').value * Math.PI / 180;
+  bindOut('lsN'); bindOut('lsA', v => v + '°');
+  const RULES = { X: 'F+[[X]-X]-F[-FX]+X', F: 'FF' };
+  let s = 'X';
+  for (let i = 0; i < n; i++) s = [...s].map(c => RULES[c] ?? c).join('');   // 每一代：逐字替换
+  // 第一遍只计算范围，第二遍按范围缩放后真正绘制
+  const walk = draw => {
+    let x = 0, y = 0, a = -Math.PI / 2; const stack = [], box = [0, 0, 0, 0];
+    for (const c of s) {
+      if (c === 'F') { const nx = x + Math.cos(a), ny = y + Math.sin(a); draw?.(x, y, nx, ny, stack.length); x = nx; y = ny; box[0] = Math.min(box[0], x); box[1] = Math.max(box[1], x); box[2] = Math.min(box[2], y); box[3] = Math.max(box[3], y); }
+      else if (c === '+') a += angle; else if (c === '-') a -= angle;
+      else if (c === '[') stack.push([x, y, a]); else if (c === ']') [x, y, a] = stack.pop();
+    }
+    return box;
+  };
+  const [x0, x1, y0, y1] = walk(), c = $('ls'), g = c.getContext('2d');
+  const k = Math.min((c.width - 40) / (x1 - x0 || 1), (c.height - 40) / (y1 - y0 || 1));
+  g.fillStyle = '#f8f6f1'; g.fillRect(0, 0, c.width, c.height);
+  g.lineCap = 'round';
+  const ox = (c.width - (x1 - x0) * k) / 2, oy = 20;               // 水平居中
+  walk((ax, ay, bx, by, depth) => {
+    g.strokeStyle = `hsl(${100 + depth * 8}, 45%, ${22 + depth * 5}%)`; g.lineWidth = Math.max(0.8, 4 - depth * 0.5);
+    g.beginPath(); g.moveTo(ox + (ax - x0) * k, oy + (ay - y0) * k); g.lineTo(ox + (bx - x0) * k, oy + (by - y0) * k); g.stroke();
+  });
+  $('lsInfo').textContent = `第 ${n} 代：指令 ${s.length.toLocaleString()} 个`;
+}
+['lsN', 'lsA'].forEach(id => $(id).addEventListener('input', lsystem));
+
+// ---------- 2. Truchet 拼贴：用并查集找出连成一条的弧线 ----------
+const COLS = 12, ROWS = 9, S = 80;
+let trSeed = 3, tiles = [];
+function makeTiles() { const r = mulberry32(trSeed); tiles = Array.from({ length: COLS * ROWS }, () => r() < 0.5 ? 0 : 1); }
+// 每条边的中点有一个编号：水平边 (行, 列) 与竖直边 (行, 列) 分开编号
+const hEdge = (row, col) => row * COLS + col;                         // 第 row 条水平线上，第 col 格的中点（row: 0…ROWS）
+const vEdge = (row, col) => (ROWS + 1) * COLS + row * (COLS + 1) + col;  // 第 col 条竖直线上，第 row 格的中点
+function truchet() {
+  const parent = new Map(), find = a => { while (parent.get(a) !== a) { parent.set(a, parent.get(parent.get(a))); a = parent.get(a); } return a; };
+  const add = a => { if (!parent.has(a)) parent.set(a, a); }, union = (a, b) => { add(a); add(b); parent.set(find(a), find(b)); };
+  const arcs = [];
+  for (let row = 0; row < ROWS; row++) for (let col = 0; col < COLS; col++) {
+    const top = hEdge(row, col), bottom = hEdge(row + 1, col), left = vEdge(row, col), right = vEdge(row, col + 1);
+    // 朝向 0：上—左、下—右；朝向 1：上—右、下—左
+    const pairs = tiles[row * COLS + col] === 0 ? [[top, left, 0], [bottom, right, 2]] : [[top, right, 1], [bottom, left, 3]];
+    for (const [a, b, corner] of pairs) { union(a, b); arcs.push({ row, col, corner, a }); }
+  }
+  const size = new Map(); for (const arc of arcs) { const k = find(arc.a); size.set(k, (size.get(k) || 0) + 1); }
+  const longest = Math.max(...size.values());
+  const ids = [...size.keys()], hue = id => (ids.indexOf(id) * 47) % 360;
+  const c = $('tr'), g = c.getContext('2d');
+  g.fillStyle = '#f8f6f1'; g.fillRect(0, 0, c.width, c.height);
+  g.lineWidth = 10; g.lineCap = 'butt';
+  for (const { row, col, corner, a } of arcs) {
+    const id = find(a), x = col * S, y = row * S;
+    g.strokeStyle = size.get(id) === longest ? '#1d2330' : `hsl(${hue(id)}, 55%, 62%)`;
+    // 四个角：0 左上，1 右上，2 右下，3 左下；以角为圆心画四分之一圆
+    const [cx, cy, a0] = [[x, y, 0], [x + S, y, Math.PI / 2], [x + S, y + S, Math.PI], [x, y + S, -Math.PI / 2]][corner];
+    g.beginPath(); g.arc(cx, cy, S / 2, a0, a0 + Math.PI / 2); g.stroke();
+  }
+  $('trInfo').textContent = `种子 ${trSeed}：共 ${size.size} 条曲线，最长的一条（黑色）由 ${longest} 段弧组成`;
+  return { curves: size.size, longest };
+}
+$('tr').addEventListener('click', e => {
+  const r = e.currentTarget.getBoundingClientRect(), col = Math.floor((e.clientX - r.left) / r.width * COLS), row = Math.floor((e.clientY - r.top) / r.height * ROWS);
+  tiles[row * COLS + col] ^= 1; truchet();
+});
+$('trSeed').addEventListener('click', () => { trSeed++; makeTiles(); truchet(); });
+
+// ---------- 3. 对称及其扰动 ----------
+function symmetry() {
+  const n = +$('symN').value, mirror = $('symM').checked, p = +$('symP').value;
+  bindOut('symN', v => v + ' 份'); bindOut('symP');
+  const c = $('sym'), g = c.getContext('2d'), cx = c.width / 2, cy = c.height / 2, R = 300;
+  g.fillStyle = '#1d2330'; g.fillRect(0, 0, c.width, c.height);
+  const base = mulberry32(11), motif = Array.from({ length: 9 }, () => ({ r: 40 + base() * (R - 60), a: base() * 0.5, s: 8 + base() * 34, hue: [18, 42, 205, 350][Math.floor(base() * 4)] }));
+  const jitter = mulberry32(99);
+  for (let k = 0; k < n; k++) for (const m of [false, true]) {
+    if (m && !mirror) continue;
+    g.save(); g.translate(cx, cy); g.rotate(k * 2 * Math.PI / n); if (m) g.scale(1, -1);
+    for (const e of motif) {
+      // 扰动：每一份的每个元素都偏移一点、大小变一点
+      const dr = (jitter() - 0.5) * 60 * p, da = (jitter() - 0.5) * 0.4 * p, ds = 1 + (jitter() - 0.5) * p;
+      const ang = e.a * Math.PI / n + da, rr = e.r + dr;
+      g.fillStyle = `hsla(${e.hue}, 70%, 62%, .8)`;
+      g.beginPath(); g.ellipse(Math.cos(ang) * rr, Math.sin(ang) * rr, e.s * ds, e.s * 0.45 * ds, ang, 0, Math.PI * 2); g.fill();
+    }
+    g.restore();
+  }
+}
+['symN', 'symM', 'symP'].forEach(id => $(id).addEventListener('input', symmetry));
+
+// ---------- 4. 参数曲面：贝壳 ----------
+function surface() {
+  const turns = +$('sfN').value, p = +$('sfP').value;
+  bindOut('sfN', v => v + ' 圈'); bindOut('sfP');
+  const U = 36, V = 140, pts = [];
+  // 参数方程：v 沿螺旋前进，u 绕截面一圈；越往外截面越大
+  const P = (u, v) => {
+    const t = v / (2 * Math.PI), shrink = 1 - t, bump = 1 + p * Math.sin(v * 40) * Math.sin(u * 3);   // 扰动：沿生长方向的细纹
+    return [(shrink * (1 + Math.cos(u)) * bump + 0.2) * Math.cos(turns * v), (shrink * (1 + Math.cos(u)) * bump + 0.2) * Math.sin(turns * v), 2.6 * t + shrink * Math.sin(u) * bump];
+  };
+  for (let j = 0; j <= V; j++) for (let i = 0; i <= U; i++) pts.push(P(i / U * 2 * Math.PI, j / V * 2 * Math.PI));
+  // 旋转到一个好看的角度，再做简单的透视投影
+  const rx = -1.05, rz = 0.6, cr = Math.cos(rx), sr = Math.sin(rx), cz = Math.cos(rz), sz = Math.sin(rz);
+  const proj = pts.map(([x, y, z]) => { const x1 = x * cz - y * sz, y1 = x * sz + y * cz; const y2 = y1 * cr - z * sr, z2 = y1 * sr + z * cr; const f = 7 / (7 + y2); return [x1 * f, z2 * f, y2]; });
+  const quads = [];
+  for (let j = 0; j < V; j++) for (let i = 0; i < U; i++) {
+    const a = j * (U + 1) + i, idx = [a, a + 1, a + U + 2, a + U + 1];
+    const q = idx.map(k => pts[k]);
+    const e1 = q[1].map((v, d) => v - q[0][d]), e2 = q[3].map((v, d) => v - q[0][d]);
+    const nrm = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]], len = Math.hypot(...nrm) || 1;
+    const light = Math.abs((nrm[0] * 0.3 + nrm[1] * -0.5 + nrm[2] * 0.8) / len);   // 双面光照
+    quads.push({ idx, depth: idx.reduce((s, k) => s + proj[k][2], 0) / 4, light, j });
+  }
+  quads.sort((a, b) => b.depth - a.depth);                                         // 画家算法：先画远的
+  const c = $('sf'), g = c.getContext('2d'), k = 125, ox = c.width / 2, oy = c.height / 2 + 40;
+  g.fillStyle = '#f8f6f1'; g.fillRect(0, 0, c.width, c.height);
+  for (const q of quads) {
+    g.fillStyle = `hsl(${28 + q.j / V * 20}, ${45 + q.j / V * 20}%, ${30 + q.light * 52}%)`;
+    g.beginPath(); q.idx.forEach((kk, n) => { const [x, y] = proj[kk]; n ? g.lineTo(ox + x * k, oy - y * k) : g.moveTo(ox + x * k, oy - y * k); }); g.closePath(); g.fill();
+    g.strokeStyle = g.fillStyle; g.lineWidth = 0.6; g.stroke();
+  }
+}
+['sfN', 'sfP'].forEach(id => $(id).addEventListener('input', surface));
+
+makeTiles(); lsystem(); truchet(); symmetry(); surface();
+window.__pat = { truchet, flip: (row, col) => { tiles[row * COLS + col] ^= 1; return truchet(); } };
+</script>
+</body>
+</html>

@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>布料与软体：约束、碰撞与迭代次数</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; max-width: 1120px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  canvas { width: 100%; height: auto; display: block; border-radius: 8px; background: #f7f4ec; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+  .bar label { display: inline-flex; gap: 6px; align-items: center; }
+  button { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  output, .status, table { font-variant-numeric: tabular-nums; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; } th { color: var(--muted); font-weight: 400; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <section>
+    <h2>布料：点、约束与碰撞</h2>
+    <p class="sub">布料由 40 × 26 个点组成，相邻两点之间有一条“距离约束”：两点之间要保持原来的长度。顶边挂在 5 个钉子上，一个圆球从左往右扫过。颜色表示拉伸：越红拉得越长。</p>
+    <canvas id="cloth" width="1040" height="760" role="img" aria-label="挂在顶边的一块布被一个圆球顶起，布面上被拉伸的地方偏红"></canvas>
+    <div class="bar">
+      <label>约束迭代次数 <input type="range" id="iter" min="1" max="30" value="8"><output id="itero"></output></label>
+      <label>风 <input type="range" id="wind" min="0" max="400" step="20" value="120"><output id="windo"></output></label>
+      <button type="button" id="clothReset">重置</button><button type="button" id="bench">测量迭代次数的影响</button>
+    </div>
+    <p class="sub status" id="clothS" role="status"></p>
+    <table id="benchT"><tr><th>迭代次数</th><th>平均拉伸误差</th><th>最大拉伸</th><th>每步耗时</th></tr></table>
+  </section>
+  <section>
+    <h2>软体：边上的弹簧 ＋ 内部的压力</h2>
+    <p class="sub">一圈 32 个点用弹簧连成环；内部的“压力”在面积变小时把环向外撑开，所以它落地时被压扁，随后又恢复圆形。</p>
+    <canvas id="soft" width="1040" height="760" role="img" aria-label="一个圆形软体落到地面，被压扁后恢复，旁边的曲线记录面积的变化"></canvas>
+    <div class="bar">
+      <label>压力 <input type="range" id="press" min="0" max="3" step="0.1" value="1.2"><output id="presso"></output></label>
+      <button type="button" id="softReset">再落一次</button>
+    </div>
+    <p class="sub status" id="softS" role="status"></p>
+  </section>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const H_STEP = 1 / 120;
+
+// ---------- 布料：Verlet 积分（只记录当前与上一步的位置，速度隐含在两者之差中） ----------
+const CW = 40, CH = 26, REST = 12, OX = 26, OY = 30;
+let cloth;
+function makeCloth() {
+  const pts = [], links = [];
+  for (let j = 0; j < CH; j++) for (let i = 0; i < CW; i++) {
+    const pinned = j === 0 && (i % 10 === 0 || i === CW - 1);        // 顶边 5 个钉子
+    pts.push({ x: OX + i * REST, y: OY + j * REST, px: OX + i * REST, py: OY + j * REST, pinned });
+  }
+  for (let j = 0; j < CH; j++) for (let i = 0; i < CW; i++) {
+    if (i < CW - 1) links.push([j * CW + i, j * CW + i + 1]);
+    if (j < CH - 1) links.push([j * CW + i, (j + 1) * CW + i]);
+  }
+  return { pts, links, t: 0, ball: { x: -60, y: 260, r: 60 } };
+}
+function clothStep(c, h, iters, wind) {
+  c.t += h;
+  c.ball.x = -60 + ((c.t * 90) % 640);                                 // 圆球从左往右扫过
+  for (const p of c.pts) {
+    if (p.pinned) continue;
+    const vx = (p.x - p.px) * 0.995, vy = (p.y - p.py) * 0.995;      // 速度 ＝ 本步位置 − 上步位置（再乘一点阻尼）
+    p.px = p.x; p.py = p.y;
+    const gust = wind * (0.6 + 0.4 * Math.sin(c.t * 2 + p.y * 0.02));
+    p.x += vx + gust * h * h; p.y += vy + 600 * h * h;               // 加速度：风与重力
+  }
+  for (let k = 0; k < iters; k++) {                                   // 反复修正：每条约束把两端拉回原长
+    for (const [a, b] of c.links) {
+      const p = c.pts[a], q = c.pts[b], dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy) || 1e-6, diff = (d - REST) / d;
+      const wa = p.pinned ? 0 : q.pinned ? 1 : 0.5, wb = q.pinned ? 0 : p.pinned ? 1 : 0.5;
+      p.x += dx * diff * wa; p.y += dy * diff * wa; q.x -= dx * diff * wb; q.y -= dy * diff * wb;
+    }
+    for (const p of c.pts) {                                          // 碰撞：在圆球里的点推到球面上
+      const dx = p.x - c.ball.x, dy = p.y - c.ball.y, d = Math.hypot(dx, dy);
+      if (d < c.ball.r && !p.pinned) { p.x = c.ball.x + dx / d * c.ball.r; p.y = c.ball.y + dy / d * c.ball.r; }
+    }
+  }
+}
+function clothError(c) { let sum = 0, max = 0; for (const [a, b] of c.links) { const p = c.pts[a], q = c.pts[b], e = Math.abs(Math.hypot(q.x - p.x, q.y - p.y) - REST) / REST; sum += e; max = Math.max(max, e); } return { mean: sum / c.links.length, max }; }
+function drawCloth() {
+  const g = $('cloth').getContext('2d'), s = 2;
+  g.fillStyle = '#f7f4ec'; g.fillRect(0, 0, 1040, 760);
+  g.fillStyle = '#c9ced6'; g.beginPath(); g.arc(cloth.ball.x * s, cloth.ball.y * s, cloth.ball.r * s - 4, 0, Math.PI * 2); g.fill();
+  for (let j = 0; j < CH - 1; j++) for (let i = 0; i < CW - 1; i++) {
+    const a = cloth.pts[j * CW + i], b = cloth.pts[j * CW + i + 1], c = cloth.pts[(j + 1) * CW + i + 1], d = cloth.pts[(j + 1) * CW + i];
+    const stretch = Math.max(0, (Math.hypot(b.x - a.x, b.y - a.y) + Math.hypot(d.x - a.x, d.y - a.y)) / (2 * REST) - 1);
+    g.fillStyle = `hsl(${210 - Math.min(1, stretch * 4) * 210}, 55%, ${62 - (j % 2) * 3}%)`;
+    g.beginPath(); g.moveTo(a.x * s, a.y * s); g.lineTo(b.x * s, b.y * s); g.lineTo(c.x * s, c.y * s); g.lineTo(d.x * s, d.y * s); g.closePath(); g.fill();
+  }
+  g.fillStyle = '#1d2330'; for (const p of cloth.pts) if (p.pinned) { g.beginPath(); g.arc(p.x * s, p.y * s, 6, 0, Math.PI * 2); g.fill(); }
+  const e = clothError(cloth);
+  $('clothS').textContent = `平均拉伸误差 ${(e.mean * 100).toFixed(2)}% · 最大拉伸 ${(e.max * 100).toFixed(1)}%`;
+}
+function bench() {
+  const rows = [];
+  for (const iters of [1, 3, 10, 30]) {
+    const c = makeCloth(); let t0 = 0, n = 0, mean = 0, max = 0;
+    for (let i = 0; i < 480; i++) {                                   // 模拟 4 秒，后 2 秒计时并统计误差
+      const s0 = performance.now(); clothStep(c, H_STEP, iters, 120);
+      if (i >= 240) { t0 += performance.now() - s0; n++; const e = clothError(c); mean += e.mean; max = Math.max(max, e.max); }
+    }
+    rows.push({ iters, mean: mean / n, max, ms: t0 / n });
+    const tr = $('benchT').insertRow();
+    for (const v of [iters, `${(mean / n * 100).toFixed(2)}%`, `${(max * 100).toFixed(1)}%`, `${(t0 / n).toFixed(2)} 毫秒`]) tr.insertCell().textContent = v;
+  }
+  return rows;
+}
+
+// ---------- 软体：Verlet ＋ 边弹簧 ＋ 压力 ----------
+const SN = 32, SR = 70, GROUND = 360;
+let soft, areaLog = [];
+function makeSoft() { const pts = []; for (let i = 0; i < SN; i++) { const a = i / SN * Math.PI * 2; const x = 260 + Math.cos(a) * SR, y = 100 + Math.sin(a) * SR; pts.push({ x, y, px: x, py: y }); } areaLog = []; return { pts, A0: Math.PI * SR * SR * 0.99, L0: 2 * Math.PI * SR / SN, t: 0 }; }
+const area = pts => { let s = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; s += p.x * q.y - q.x * p.y; } return s / 2; };
+function softStep(b, h, pressure) {
+  b.t += h;
+  for (const p of b.pts) { const vx = (p.x - p.px) * 0.998, vy = (p.y - p.py) * 0.998; p.px = p.x; p.py = p.y; p.x += vx; p.y += vy + 600 * h * h; }
+  for (let k = 0; k < 6; k++) {
+    // 压力：面积小于原面积时，每个点沿外法线方向被推出去
+    const A = area(b.pts), push = pressure * (b.A0 - A) / b.A0 * 2;
+    b.pts.forEach((p, i) => { const prev = b.pts[(i - 1 + SN) % SN], next = b.pts[(i + 1) % SN], nx = next.y - prev.y, ny = -(next.x - prev.x), l = Math.hypot(nx, ny) || 1; p.x += nx / l * push; p.y += ny / l * push; });
+    // 边弹簧（距离约束）：相邻两点保持原长，稍软一点
+    for (let i = 0; i < SN; i++) { const p = b.pts[i], q = b.pts[(i + 1) % SN], dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy) || 1e-6, diff = (d - b.L0) / d * 0.25; p.x += dx * diff; p.y += dy * diff; q.x -= dx * diff; q.y -= dy * diff; }
+    for (const p of b.pts) {
+      if (p.y > GROUND) { p.y = GROUND; p.px = p.x - (p.x - p.px) * 0.6; }   // 地面：不能穿过，并有摩擦
+      p.x = Math.max(10, Math.min(510, p.x));                                  // 左右两面墙
+    }
+  }
+}
+function drawSoft() {
+  const g = $('soft').getContext('2d'), s = 2;
+  g.fillStyle = '#f7f4ec'; g.fillRect(0, 0, 1040, 760);
+  g.fillStyle = '#c3c9d3'; g.fillRect(0, GROUND * s, 1040, 760 - GROUND * s);
+  g.fillStyle = 'rgba(228, 87, 46, .85)'; g.beginPath(); soft.pts.forEach((p, i) => i ? g.lineTo(p.x * s, p.y * s) : g.moveTo(p.x * s, p.y * s)); g.closePath(); g.fill();
+  g.strokeStyle = '#7a2a12'; g.lineWidth = 3; g.stroke();
+  // 面积曲线：右上角记录最近 4 秒的面积比
+  const ratio = area(soft.pts) / soft.A0; areaLog.push(ratio); if (areaLog.length > 480) areaLog.shift();
+  g.strokeStyle = '#2f6fdb'; g.lineWidth = 3; g.beginPath(); areaLog.forEach((r, i) => { const x = 620 + i * 0.8, y = 60 + (1.1 - r) * 400; i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
+  g.strokeStyle = '#9aa3b2'; g.setLineDash([6, 6]); g.beginPath(); g.moveTo(620, 100); g.lineTo(1010, 100); g.stroke(); g.setLineDash([]);
+  g.fillStyle = '#5b6475'; g.font = '22px "Noto Sans SC", sans-serif'; g.fillText('面积 ÷ 原面积（虚线为 1）', 620, 40);
+  const minR = Math.min(...areaLog);
+  $('softS').textContent = `当前面积是原来的 ${(ratio * 100).toFixed(0)}% · 最近被压到 ${(minR * 100).toFixed(0)}%`;
+}
+
+// ---------- 循环 ----------
+let accC = 0, last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (!reduce) { accC += dt; while (accC >= H_STEP) { clothStep(cloth, H_STEP, +$('iter').value, +$('wind').value); softStep(soft, H_STEP, +$('press').value); accC -= H_STEP; } }
+  drawCloth(); drawSoft(); requestAnimationFrame(loop);
+}
+for (const id of ['iter', 'wind', 'press']) { const show = () => $(id + 'o').textContent = $(id).value; $(id).addEventListener('input', show); show(); }
+$('clothReset').addEventListener('click', () => { cloth = makeCloth(); });
+$('softReset').addEventListener('click', () => { soft = makeSoft(); });
+$('bench').addEventListener('click', bench);
+cloth = makeCloth(); soft = makeSoft();
+if (reduce) { for (let i = 0; i < 300; i++) { clothStep(cloth, H_STEP, 8, 120); softStep(soft, H_STEP, 1.2); } }   // 减少动态效果：显示静止后的结果
+requestAnimationFrame(loop);
+window.__cloth = { bench, advance: (sec, iters = 8) => { reduceLoop = true; for (let i = 0; i < sec * 120; i++) { clothStep(cloth, H_STEP, iters, +$('wind').value); softStep(soft, H_STEP, +$('press').value); if (i % 2 === 0) drawSoft(); } drawCloth(); drawSoft(); },
+  softTest: pressure => { const b = makeSoft(); let min = 1; const log = []; for (let i = 0; i < 480; i++) { softStep(b, H_STEP, pressure); const r = area(b.pts) / b.A0; min = Math.min(min, r); if (i % 60 === 59) log.push(+r.toFixed(2)); } return { min: +min.toFixed(2), log }; } };
+let reduceLoop = false;
+</script>
+</body>
+</html>

@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>粒子与力场：吸引、排斥、弹簧、阻尼与风</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr); gap: 14px; max-width: 1120px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  canvas { width: 100%; height: auto; display: block; border-radius: 8px; background: #10141c; }
+  .param { display: grid; grid-template-columns: 5em 1fr 3.5em; gap: 6px; align-items: center; }
+  output, .status { font-variant-numeric: tabular-nums; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+  button { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  .bad { color: #b42318; font-weight: 700; } .ok { color: #067647; font-weight: 700; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section>
+    <h2>500 个粒子、两个吸引点、一个排斥点、一根弹簧绳</h2>
+    <p class="sub">点击画面添加吸引点，按住 Shift 点击添加排斥点。粒子的颜色表示速度。</p>
+    <canvas id="c" width="1200" height="800" role="img" aria-label="深色背景中的粒子绕着两个吸引点旋转，避开一个排斥点；左上方挂着一根随风摆动的绳子"></canvas>
+    <div class="bar">
+      <label><input type="checkbox" id="fixed" checked> 固定步长（每步 1/120 秒，每帧最多补算 0.1 秒）</label>
+      <button type="button" id="hiccup">模拟页面卡顿 0.5 秒</button>
+      <button type="button" id="pause" aria-pressed="false">暂停</button><button type="button" id="reset">重置</button>
+    </div>
+    <p class="sub status" id="status" role="status"></p>
+  </section>
+  <section>
+    <h2>力</h2>
+    <div class="param"><label for="attract">吸引</label><input type="range" id="attract" min="0" max="8000" step="200" value="4000"><output id="o-attract"></output></div>
+    <div class="param"><label for="drag">阻尼</label><input type="range" id="drag" min="0" max="2" step="0.05" value="0.4"><output id="o-drag"></output></div>
+    <div class="param"><label for="wind">风</label><input type="range" id="wind" min="0" max="200" step="10" value="60"><output id="o-wind"></output></div>
+    <table>
+      <tr><th>力</th><th>写法</th><th>效果</th></tr>
+      <tr><td>吸引</td><td>大小 ∝ 1 ÷（距离² ＋ 软化²）</td><td>绕着吸引点转；软化项避免距离接近 0 时力变得无穷大</td></tr>
+      <tr><td>排斥</td><td>与吸引相同，方向相反</td><td>粒子绕开，留出空洞</td></tr>
+      <tr><td>弹簧</td><td>−刚度 ×（长度 − 原长）</td><td>绳子的每一节都想保持原长</td></tr>
+      <tr><td>阻尼</td><td>−阻尼系数 × 速度</td><td>速度越快阻力越大，系统最终平静下来</td></tr>
+      <tr><td>风（噪声场）</td><td>方向由二维噪声决定，随时间缓慢变化</td><td>相邻粒子被推向相近的方向，形成流动的纹理</td></tr>
+    </table>
+    <p class="sub">每一步：把所有的力加起来得到加速度，加速度改变速度，速度改变位置（半隐式欧拉）。</p>
+  </section>
+</div>
+<script>
+function mulberry32(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const $ = id => document.getElementById(id);
+const W = 600, H = 400, SOFT = 20, H_STEP = 1 / 120, MAX_CATCHUP = 0.1;
+// 值噪声：用于风的方向
+const NG = 16, ngrid = Array.from({ length: NG * NG }, mulberry32(3));
+function noise(x, y) { const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi, s = t => t * t * (3 - 2 * t), at = (i, j) => ngrid[((j % NG + NG) % NG) * NG + ((i % NG + NG) % NG)];
+  const a = at(xi, yi) + (at(xi + 1, yi) - at(xi, yi)) * s(fx), b = at(xi, yi + 1) + (at(xi + 1, yi + 1) - at(xi, yi + 1)) * s(fx); return a + (b - a) * s(fy); }
+
+let world;
+function makeWorld() {
+  const r = mulberry32(7);
+  return {
+    t: 0,
+    wells: [{ x: 360, y: 150, s: 1 }, { x: 470, y: 290, s: 1 }, { x: 250, y: 300, s: -1.5 }],
+    parts: Array.from({ length: 500 }, () => ({ x: r() * W, y: r() * H, vx: (r() - 0.5) * 40, vy: (r() - 0.5) * 40 })),
+    rope: Array.from({ length: 16 }, (_, i) => ({ x: 80 + i * 10, y: 60, vx: 0, vy: 0 }))    // 第 0 节固定在空中
+  };
+}
+const P = () => ({ G: +$('attract').value, c: +$('drag').value, wind: +$('wind').value });
+function step(w, h) {
+  const { G, c, wind } = P();
+  w.t += h;
+  for (const p of w.parts) {
+    let ax = 0, ay = 0;
+    for (const k of w.wells) {                                   // 吸引与排斥
+      const dx = k.x - p.x, dy = k.y - p.y, d2 = dx * dx + dy * dy + SOFT * SOFT, f = G * k.s / (d2 * Math.sqrt(d2)) * 60;
+      ax += dx * f; ay += dy * f;
+    }
+    const ang = noise(p.x * 0.01, p.y * 0.01 + w.t * 0.05) * Math.PI * 4;   // 风：噪声决定方向
+    ax += Math.cos(ang) * wind; ay += Math.sin(ang) * wind;
+    ax -= c * p.vx; ay -= c * p.vy;                              // 阻尼
+    p.vx += ax * h; p.vy += ay * h; p.x += p.vx * h; p.y += p.vy * h;
+    if (p.x < 0) p.x += W; if (p.x > W) p.x -= W; if (p.y < 0) p.y += H; if (p.y > H) p.y -= H;   // 从另一边出来
+  }
+  // 绳子：重力 ＋ 相邻两节之间的弹簧 ＋ 阻尼 ＋ 风
+  const K = 300, L = 10, rope = w.rope, acc = rope.map(() => [0, 120]);
+  for (let i = 0; i < rope.length - 1; i++) {
+    const a = rope[i], b = rope[i + 1], dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1e-6, f = K * (d - L);
+    acc[i][0] += dx / d * f; acc[i][1] += dy / d * f; acc[i + 1][0] -= dx / d * f; acc[i + 1][1] -= dy / d * f;
+  }
+  rope.forEach((n, i) => {
+    if (i === 0) return;                                         // 第 0 节固定
+    const ang = noise(n.x * 0.01, n.y * 0.01 + w.t * 0.05) * Math.PI * 4;
+    n.vx += (acc[i][0] + Math.cos(ang) * wind * 0.5 - c * n.vx) * h; n.vy += (acc[i][1] + Math.sin(ang) * wind * 0.5 - c * n.vy) * h;
+    n.x += n.vx * h; n.y += n.vy * h;
+  });
+}
+// 推进一帧：固定步长时按小步累积；否则直接用这一帧的时间
+let acc = 0;
+function advance(w, frameDt, fixed) {
+  if (!fixed) { step(w, frameDt); return 1; }
+  acc += Math.min(frameDt, MAX_CATCHUP);                         // 超过 0.1 秒的部分直接丢弃：画面慢一点，但不会失控
+  let n = 0; while (acc >= H_STEP) { step(w, H_STEP); acc -= H_STEP; n++; }
+  return n;
+}
+function ropeSpeed(w) { return Math.max(...w.rope.map(n => Math.hypot(n.vx, n.vy))); }
+function draw() {
+  const g = $('c').getContext('2d'), s = 2;
+  g.fillStyle = 'rgba(16, 20, 28, .35)'; g.fillRect(0, 0, W * s, H * s);   // 半透明覆盖，留下拖尾
+  for (const p of world.parts) { const v = Math.min(1, Math.hypot(p.vx, p.vy) / 250); g.fillStyle = `hsl(${200 - v * 170}, 80%, ${55 + v * 15}%)`; g.fillRect(p.x * s - 2, p.y * s - 2, 4, 4); }
+  for (const k of world.wells) { g.strokeStyle = k.s > 0 ? '#f3c98b' : '#e4572e'; g.lineWidth = 3; g.beginPath(); g.arc(k.x * s, k.y * s, 12, 0, Math.PI * 2); g.stroke(); }
+  g.strokeStyle = '#d6dde8'; g.lineWidth = 3; g.beginPath(); world.rope.forEach((n, i) => i ? g.lineTo(n.x * s, n.y * s) : g.moveTo(n.x * s, n.y * s)); g.stroke();
+  g.fillStyle = '#ffffff'; for (const n of world.rope) { g.beginPath(); g.arc(n.x * s, n.y * s, 4, 0, Math.PI * 2); g.fill(); }
+}
+let paused = false, last = performance.now(), note = '';
+function loop(now) {
+  const dt = (now - last) / 1000; last = now;
+  if (!paused) { advance(world, dt, $('fixed').checked); const v = ropeSpeed(world); $('status').innerHTML = `绳子最快一节的速度：${Number.isFinite(v) && v < 1e5 ? v.toFixed(0) : '<span class="bad">失控</span>'} ${note}`; }
+  draw(); requestAnimationFrame(loop);
+}
+for (const id of ['attract', 'drag', 'wind']) { const show = () => $('o-' + id).textContent = $(id).value; $(id).addEventListener('input', show); show(); }
+$('c').addEventListener('click', e => { const r = e.currentTarget.getBoundingClientRect(); world.wells.push({ x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H, s: e.shiftKey ? -1.5 : 1 }); });
+$('hiccup').addEventListener('click', () => { const t0 = performance.now(); while (performance.now() - t0 < 500) {} note = '（刚刚卡顿了 0.5 秒）'; });   // 故意让主线程忙 0.5 秒
+$('pause').addEventListener('click', e => { paused = !paused; e.currentTarget.setAttribute('aria-pressed', String(paused)); e.currentTarget.textContent = paused ? '继续' : '暂停'; });
+$('reset').addEventListener('click', () => { world = makeWorld(); acc = 0; note = ''; });
+world = makeWorld(); requestAnimationFrame(loop);
+// 测试用：从同样的初始状态出发，60 帧正常，1 帧 0.5 秒，再 60 帧
+window.__forces = {
+  hiccupTest: fixed => {
+    const w = makeWorld(); acc = 0;
+    const stretch = () => Math.max(...w.rope.slice(1).map((n, i) => Math.hypot(n.x - w.rope[i].x, n.y - w.rope[i].y))) / 10;   // 最长一节是原长的几倍
+    const fastest = () => Math.max(...w.parts.map(p => Math.hypot(p.vx, p.vy)));
+    for (let i = 0; i < 60; i++) advance(w, 1 / 60, fixed);
+    const before = { stretch: stretch(), fastest: fastest() };
+    advance(w, 0.5, fixed);
+    const after = { stretch: stretch(), fastest: fastest() };
+    acc = 0;
+    return { before, after };
+  },
+  warm: seconds => { paused = true; for (let i = 0; i < seconds * 60; i++) { advance(world, 1 / 60, true); if (i % 2 === 0) draw(); } draw(); }
+};
+</script>
+</body>
+</html>

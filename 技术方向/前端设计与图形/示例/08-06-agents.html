@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>群体与智能体：人群疏散与邻域查询</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr); gap: 14px; max-width: 1120px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  canvas { width: 100%; height: auto; display: block; border-radius: 8px; background: #f7f4ec; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+  .bar label { display: inline-flex; gap: 6px; align-items: center; }
+  button { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  output, .status { font-variant-numeric: tabular-nums; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+  th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; } th { color: var(--muted); font-weight: 400; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section>
+    <h2>人群疏散：每个人只看自己周围</h2>
+    <p class="sub">每个人遵守三条规则：朝出口走（目标）；和身边的人保持距离（邻居）；避开墙和柱子（环境）。没有人指挥，出口前却自然形成拱形的拥堵。颜色表示速度：蓝色走得快，红色几乎停住。</p>
+    <canvas id="c" width="1200" height="800" role="img" aria-label="房间里的人群向右侧的出口移动，在出口前挤成拱形"></canvas>
+    <div class="bar">
+      <label>人数 <input type="range" id="n" min="50" max="600" step="50" value="300"><output id="no"></output></label>
+      <label>出口宽度 <input type="range" id="exit" min="20" max="120" step="10" value="50"><output id="exito"></output></label>
+      <button type="button" id="pause" aria-pressed="false">暂停</button><button type="button" id="reset">重置</button>
+    </div>
+    <p class="sub status" id="status" role="status"></p>
+  </section>
+  <section>
+    <h2>规模变大以后：怎样找到“周围的人”</h2>
+    <p class="sub">逐个比较：每个人和所有人算距离，次数随人数的平方增长。网格：先按位置把人放进格子，只和相邻 9 个格子里的人比较。</p>
+    <button type="button" id="bench">测量</button>
+    <table id="benchT"><tr><th>人数</th><th>逐个比较</th><th>网格</th><th>比较次数（逐个／网格）</th></tr></table>
+    <p class="sub" id="benchNote"></p>
+  </section>
+</div>
+<script>
+function mulberry32(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const $ = id => document.getElementById(id);
+const W = 600, H = 400, R = 4, NEAR = 14, SPEED = 60;                       // 房间尺寸、人的半径、邻居范围、步行速度（单位/秒）
+const PILLARS = [{ x: 360, y: 130, r: 22 }, { x: 360, y: 270, r: 22 }, { x: 240, y: 200, r: 30 }];
+let agents = [], out = 0, time = 0, exitW = 50, paused = false, firstOut = null;
+function reset() {
+  const r = mulberry32(17), n = +$('n').value;
+  agents = []; out = 0; time = 0; firstOut = null; exitW = +$('exit').value;
+  while (agents.length < n) {
+    const x = 20 + r() * 300, y = 20 + r() * (H - 40);
+    if (PILLARS.some(p => Math.hypot(x - p.x, y - p.y) < p.r + R + 2)) continue;
+    agents.push({ x, y, vx: 0, vy: 0, speed: SPEED * (0.8 + r() * 0.4) });   // 每个人的步速略有不同
+  }
+  $('no').textContent = n + ' 人'; $('exito').textContent = exitW;
+}
+// 网格：把每个人放进边长为 NEAR 的格子，查询时只看周围 9 格
+function buildGrid(list) {
+  const cols = Math.ceil(W / NEAR) + 2, rows = Math.ceil(H / NEAR) + 2, cells = new Map();
+  list.forEach((a, i) => { const k = (Math.floor(a.y / NEAR) + 1) * cols + Math.floor(a.x / NEAR) + 1; (cells.get(k) || cells.set(k, []).get(k)).push(i); });
+  return { cols, cells };
+}
+function neighborsGrid(grid, list, i, visit) {
+  const a = list[i], cx = Math.floor(a.x / NEAR) + 1, cy = Math.floor(a.y / NEAR) + 1;
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const cell = grid.cells.get((cy + dy) * grid.cols + cx + dx); if (cell) for (const j of cell) if (j !== i) visit(j); }
+}
+function neighborsNaive(list, i, visit) { for (let j = 0; j < list.length; j++) if (j !== i) visit(j); }
+function step(dt, list = agents, useGrid = true, stats = { checks: 0 }) {
+  const grid = useGrid ? buildGrid(list) : null, ex = W, ey = H / 2;
+  for (let i = 0; i < list.length; i++) {
+    const a = list[i];
+    // 1. 目标：朝出口中心走；已经对准出口时，直接向右走出去
+    let gx = ex + 10 - a.x, gy = (Math.abs(a.y - ey) < exitW / 2 - R && a.x > W - 40 ? 0 : ey - a.y);
+    const gl = Math.hypot(gx, gy) || 1;
+    let fx = (gx / gl * a.speed - a.vx) * 2, fy = (gy / gl * a.speed - a.vy) * 2;   // 向期望速度靠近
+    // 2. 邻居：太近就互相推开，越近推力越大
+    const visit = j => { stats.checks++; const b = list[j], dx = a.x - b.x, dy = a.y - b.y, d = Math.hypot(dx, dy); if (d < NEAR && d > 0.01) { const push = (NEAR - d) / NEAR * 400; fx += dx / d * push; fy += dy / d * push; } };
+    useGrid ? neighborsGrid(grid, list, i, visit) : neighborsNaive(list, i, visit);
+    // 3. 环境：柱子与墙的推力
+    for (const p of PILLARS) { const dx = a.x - p.x, dy = a.y - p.y, d = Math.hypot(dx, dy) - p.r; if (d < 16) { const push = (16 - Math.max(d, 0.5)) * 60; fx += dx / (d + p.r) * push; fy += dy / (d + p.r) * push; } }
+    if (a.y < 12) fy += (12 - a.y) * 60; if (a.y > H - 12) fy -= (a.y - H + 12) * 60; if (a.x < 12) fx += (12 - a.x) * 60;
+    const inExit = Math.abs(a.y - ey) < exitW / 2 - R;
+    if (!inExit && a.x > W - 12) fx -= (a.x - W + 12) * 60;     // 出口以外的右墙
+    a.vx += fx * dt; a.vy += fy * dt;
+    const v = Math.hypot(a.vx, a.vy), vmax = a.speed * 1.3; if (v > vmax) { a.vx *= vmax / v; a.vy *= vmax / v; }   // 限制最快速度
+  }
+  for (const a of list) { a.x += a.vx * dt; a.y += a.vy * dt; }
+  return stats;
+}
+function draw() {
+  const g = $('c').getContext('2d'), s = 2;
+  g.fillStyle = '#f7f4ec'; g.fillRect(0, 0, W * s, H * s);
+  g.fillStyle = '#5b6475';
+  g.fillRect(W * s - 8, 0, 8, (H / 2 - exitW / 2) * s); g.fillRect(W * s - 8, (H / 2 + exitW / 2) * s, 8, (H / 2 - exitW / 2) * s);   // 右墙与出口
+  for (const p of PILLARS) { g.beginPath(); g.arc(p.x * s, p.y * s, p.r * s, 0, Math.PI * 2); g.fill(); }
+  for (const a of agents) {
+    const v = Math.hypot(a.vx, a.vy) / SPEED;                     // 颜色表示速度：越慢越红，看出哪里拥堵
+    g.fillStyle = `hsl(${Math.min(1, v) * 200}, 70%, 48%)`;
+    g.beginPath(); g.arc(a.x * s, a.y * s, R * s, 0, Math.PI * 2); g.fill();
+  }
+  // 出口的标记画在右上角，箭头指向开口，不挡住人群
+  g.fillStyle = '#067647'; g.font = '700 26px "Noto Sans SC", sans-serif'; g.fillText('出口 ↓', W * s - 110, 40);
+  g.fillRect(W * s - 14, (H / 2 - exitW / 2) * s, 6, exitW * s);
+}
+function update(dt) {
+  for (let k = 0; k < 4; k++) step(dt / 4);                      // 每帧分 4 小步，推力较大时也稳定
+  const before = agents.length;
+  agents = agents.filter(a => a.x < W + 6);
+  out += before - agents.length; time += dt;
+  if (out && firstOut === null) firstOut = time;
+  const n = +$('n').value;
+  $('status').textContent = `已离开 ${out}／${n} 人 · 用时 ${time.toFixed(1)} 秒${agents.length === 0 ? ' · 全部离开' : ''}`;
+}
+let last = performance.now();
+function loop(now) { const dt = Math.min(0.05, (now - last) / 1000); last = now; if (!paused && agents.length) update(dt); draw(); requestAnimationFrame(loop); }
+$('pause').addEventListener('click', e => { paused = !paused; e.currentTarget.setAttribute('aria-pressed', String(paused)); e.currentTarget.textContent = paused ? '继续' : '暂停'; });
+$('reset').addEventListener('click', reset);
+['n', 'exit'].forEach(id => $(id).addEventListener('input', reset));
+
+// ---------- 邻域查询的测量 ----------
+function bench() {
+  const rows = [];
+  for (const n of [500, 1000, 2000, 4000]) {
+    const make = () => { const r = mulberry32(n); return Array.from({ length: n }, () => ({ x: 20 + r() * (W - 40), y: 20 + r() * (H - 40), vx: 0, vy: 0, speed: SPEED })); };
+    const res = {};
+    for (const useGrid of [false, true]) {
+      const list = make(), stats = { checks: 0 }, t0 = performance.now();
+      for (let k = 0; k < 5; k++) step(1 / 240, list, useGrid, stats);
+      res[useGrid ? 'grid' : 'naive'] = { ms: (performance.now() - t0) / 5, checks: stats.checks / 5 };
+    }
+    rows.push({ n, ...res });
+    const tr = $('benchT').insertRow();
+    for (const v of [n, `${res.naive.ms.toFixed(1)} 毫秒`, `${res.grid.ms.toFixed(1)} 毫秒`, `${(res.naive.checks / 1e6).toFixed(2)} 百万／${(res.grid.checks / 1e3).toFixed(0)} 千`]) tr.insertCell().textContent = v;
+  }
+  const last = rows.at(-1);
+  $('benchNote').textContent = `${last.n} 人时，网格比逐个比较快约 ${Math.round(last.naive.ms / last.grid.ms)} 倍。人数翻倍，逐个比较的时间约变为 4 倍，网格约变为 2 倍。`;
+  return rows;
+}
+$('bench').addEventListener('click', bench);
+reset(); requestAnimationFrame(loop);
+window.__agents = { bench, run: seconds => { paused = true; for (let t = 0; t < seconds && agents.length; t += 1 / 60) update(1 / 60); draw(); return { out, time: +time.toFixed(2), firstOut, left: agents.length }; }, reset, setExit: v => { $('exit').value = v; reset(); } };
+</script>
+</body>
+</html>
