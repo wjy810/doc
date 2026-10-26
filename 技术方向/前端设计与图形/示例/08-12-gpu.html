@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>把模拟搬到 GPU：六万个粒子的流场</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(290px, 1fr); gap: 14px; max-width: 1120px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  #stage { width: 100%; aspect-ratio: 3 / 2; border-radius: 8px; overflow: hidden; background: #05070b; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+  select, button { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section>
+    <h2>每个粒子的位置和速度存在一张浮点贴图的一个像素里</h2>
+    <div id="stage" role="img" aria-label="黑色背景上数万个暖色光点沿着流场流动，形成丝绸般的条纹"></div>
+    <div class="bar">
+      <label>粒子数 <select id="size"><option value="64">64 × 64 ＝ 4096</option><option value="128">128 × 128 ＝ 16384</option><option value="256" selected>256 × 256 ＝ 65536</option></select></label>
+      <button type="button" id="pause" aria-pressed="false">暂停</button>
+      <button type="button" id="bench">比较 CPU 与 GPU</button>
+    </div>
+    <p class="sub" id="status" role="status"></p>
+  </section>
+  <section>
+    <h2>两张贴图，两个着色器</h2>
+    <table>
+      <tr><th>贴图</th><th>每个像素存什么</th><th>着色器做什么</th></tr>
+      <tr><td>速度</td><td>粒子的速度 (vx, vy)</td><td>读出位置，按噪声流场与阻尼算出新速度</td></tr>
+      <tr><td>位置</td><td>粒子的位置 (x, y)</td><td>读出速度，位置 ＋＝ 速度 × 时间</td></tr>
+    </table>
+    <p class="sub">每一帧，GPU 对每个像素各运行一次这两个着色器，所有粒子同时更新；结果写进另一张贴图，下一帧交换（与《技术美术与实时效果》11 章的扰动场相同）。绘制时，每个光点从位置贴图里读出自己的坐标。</p>
+    <h2>CPU 与 GPU</h2>
+    <table id="benchT"><tr><th>粒子数</th><th>CPU（JavaScript）每步</th><th>GPU 每步</th></tr></table>
+    <p class="sub" id="benchNote"></p>
+  </section>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { GPUComputationRenderer } from 'three/addons/misc/GPUComputationRenderer.js';
+
+const $ = id => document.getElementById(id);
+const stage = $('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+stage.append(renderer.domElement);
+const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1.5, 1.5, 1, -1, 0, 1);
+
+// 噪声流场：GPU 与 CPU 版本使用同样的公式
+const NOISE_GLSL = /* glsl */`
+  float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float noise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y); }`;
+const VEL = /* glsl */`
+  uniform float uTime, uDt;
+  ${NOISE_GLSL}
+  void main() {
+    vec2 uv = gl_FragCoord.xy / resolution.xy;
+    vec2 pos = texture2D(texturePosition, uv).xy, vel = texture2D(textureVelocity, uv).xy;
+    float a = noise(pos * 2.2 + vec2(0.0, uTime * 0.15)) * 12.566;     // 流场的方向
+    vel += vec2(cos(a), sin(a)) * 0.9 * uDt;                            // 风推动粒子
+    vel -= vel * 1.5 * uDt;                                             // 阻尼
+    gl_FragColor = vec4(vel, 0.0, 1.0);
+  }`;
+const POS = /* glsl */`
+  uniform float uDt;
+  void main() {
+    vec2 uv = gl_FragCoord.xy / resolution.xy;
+    vec2 pos = texture2D(texturePosition, uv).xy + texture2D(textureVelocity, uv).xy * uDt;
+    pos = mod(pos + vec2(1.5, 1.0), vec2(3.0, 2.0)) - vec2(1.5, 1.0);   // 从另一边出来
+    gl_FragColor = vec4(pos, 0.0, 1.0);
+  }`;
+
+let gpu, posVar, velVar, points, size = 256;
+function build(n) {
+  if (points) { scene.remove(points); points.geometry.dispose(); points.material.dispose(); gpu.dispose(); }   // 换粒子数前释放旧的资源
+  size = n;
+  gpu = new GPUComputationRenderer(n, n, renderer);
+  const p0 = gpu.createTexture(), v0 = gpu.createTexture();
+  let s = 1; const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < n * n; i++) { p0.image.data[i * 4] = rnd() * 3 - 1.5; p0.image.data[i * 4 + 1] = rnd() * 2 - 1; p0.image.data[i * 4 + 3] = 1; v0.image.data[i * 4 + 3] = 1; }
+  velVar = gpu.addVariable('textureVelocity', VEL, v0);
+  posVar = gpu.addVariable('texturePosition', POS, p0);
+  gpu.setVariableDependencies(velVar, [velVar, posVar]);
+  gpu.setVariableDependencies(posVar, [velVar, posVar]);
+  velVar.material.uniforms.uTime = { value: 0 }; velVar.material.uniforms.uDt = { value: 1 / 60 }; posVar.material.uniforms.uDt = { value: 1 / 60 };
+  const err = gpu.init();
+  if (err) { $('status').textContent = '这个浏览器不支持浮点贴图，无法在 GPU 上计算：' + err; return; }
+  // 绘制：每个顶点只带一个“在贴图中的坐标”
+  const geo = new THREE.BufferGeometry(), ref = new Float32Array(n * n * 2);
+  for (let i = 0; i < n * n; i++) { ref[i * 2] = (i % n + 0.5) / n; ref[i * 2 + 1] = (Math.floor(i / n) + 0.5) / n; }
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * n * 3), 3));
+  geo.setAttribute('ref', new THREE.BufferAttribute(ref, 2));
+  points = new THREE.Points(geo, new THREE.ShaderMaterial({
+    uniforms: { uPos: { value: null }, uVel: { value: null }, uSize: { value: 1.5 * renderer.getPixelRatio() } },
+    vertexShader: `uniform sampler2D uPos, uVel; uniform float uSize; attribute vec2 ref; varying float vS;
+      void main() { vec2 p = texture2D(uPos, ref).xy; vS = length(texture2D(uVel, ref).xy); gl_PointSize = uSize; gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 0.0, 1.0); }`,
+    fragmentShader: `varying float vS; void main() { gl_FragColor = vec4(mix(vec3(0.35, 0.18, 0.08), vec3(1.0, 0.75, 0.4), clamp(vS * 2.5, 0.0, 1.0)) * 0.55, 1.0); }`,
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+  }));
+  points.frustumCulled = false;
+  scene.add(points);
+  $('status').textContent = `GPU 每一步同时更新 ${(n * n).toLocaleString()} 个粒子`;
+}
+function gpuStep(dt) {
+  velVar.material.uniforms.uTime.value += dt; velVar.material.uniforms.uDt.value = dt; posVar.material.uniforms.uDt.value = dt;
+  gpu.compute();
+  points.material.uniforms.uPos.value = gpu.getCurrentRenderTarget(posVar).texture;
+  points.material.uniforms.uVel.value = gpu.getCurrentRenderTarget(velVar).texture;
+}
+function resize() { renderer.setSize(stage.clientWidth, stage.clientHeight, false); }
+new ResizeObserver(resize).observe(stage); resize();
+build(256);
+// 预热 3 秒，让粒子先排成流动的条纹
+for (let i = 0; i < 180; i++) gpuStep(1 / 60);
+let paused = matchMedia('(prefers-reduced-motion: reduce)').matches, last = performance.now();
+renderer.setAnimationLoop(now => { const dt = Math.min(0.05, (now - last) / 1000); last = now; if (!paused) gpuStep(dt); renderer.render(scene, camera); });
+$('pause').addEventListener('click', e => { paused = !paused; e.currentTarget.setAttribute('aria-pressed', String(paused)); e.currentTarget.textContent = paused ? '继续' : '暂停'; });
+$('size').addEventListener('change', e => { build(+e.target.value); for (let i = 0; i < 180; i++) gpuStep(1 / 60); });
+
+// ---------- CPU 版本：同样的公式，用 JavaScript 逐个计算 ----------
+function cpuStep(P, V, n, t, dt) {
+  const hash = (x, y) => { const v = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return v - Math.floor(v); };
+  const noise = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y); let fx = x - xi, fy = y - yi; fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+    const a = hash(xi, yi) + (hash(xi + 1, yi) - hash(xi, yi)) * fx, b = hash(xi, yi + 1) + (hash(xi + 1, yi + 1) - hash(xi, yi + 1)) * fx; return a + (b - a) * fy; };
+  for (let i = 0; i < n; i++) {
+    const a = noise(P[i * 2] * 2.2, P[i * 2 + 1] * 2.2 + t * 0.15) * 12.566;
+    V[i * 2] += Math.cos(a) * 0.9 * dt - V[i * 2] * 1.5 * dt; V[i * 2 + 1] += Math.sin(a) * 0.9 * dt - V[i * 2 + 1] * 1.5 * dt;
+    P[i * 2] = ((P[i * 2] + V[i * 2] * dt + 1.5) % 3 + 3) % 3 - 1.5; P[i * 2 + 1] = ((P[i * 2 + 1] + V[i * 2 + 1] * dt + 1) % 2 + 2) % 2 - 1;
+  }
+}
+function bench() {
+  const gl = renderer.getContext(), px = new Uint8Array(4), rows = [];
+  for (const n of [64, 128, 256]) {
+    const N = n * n, P = new Float32Array(N * 2).map(() => Math.random() * 2 - 1), V = new Float32Array(N * 2);
+    let t0 = performance.now(); for (let k = 0; k < 20; k++) cpuStep(P, V, N, k / 60, 1 / 60); const cpu = (performance.now() - t0) / 20;
+    build(n); gpuStep(1 / 60); renderer.render(scene, camera); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);   // 预热
+    t0 = performance.now(); for (let k = 0; k < 20; k++) { gpuStep(1 / 60); renderer.render(scene, camera); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); } const gpuMs = (performance.now() - t0) / 20;
+    rows.push({ n: N, cpu, gpu: gpuMs });
+    const tr = $('benchT').insertRow(); for (const v of [N.toLocaleString(), `${cpu.toFixed(2)} 毫秒`, `${gpuMs.toFixed(2)} 毫秒（含绘制）`]) tr.insertCell().textContent = v;
+  }
+  build(+$('size').value); for (let i = 0; i < 180; i++) gpuStep(1 / 60);
+  $('benchNote').textContent = 'CPU 一栏只有计算，不含绘制；GPU 一栏包含计算、绘制与等待 GPU 完成的时间。有显卡的设备上，粒子越多，GPU 通常越占优势；用软件模拟 GPU 的环境中，GPU 一栏反而更慢。结果因设备而异，请在目标设备上测量。';
+  return rows;
+}
+$('bench').addEventListener('click', bench);
+window.__gpu = { bench, freeze: () => { paused = true; } };
+</script>
+</body>
+</html>

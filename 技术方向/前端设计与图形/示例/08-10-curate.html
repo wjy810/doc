@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>生成系统的策展：比较、选择、编排与记录</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(250px, 0.9fr); gap: 12px; max-width: 1160px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .map { display: grid; grid-template-columns: auto repeat(5, minmax(0, 1fr)); gap: 3px; align-items: center; font-size: 10.5px; color: var(--muted); }
+  .map button, .sheet button.pick { padding: 0; border: 2px solid transparent; border-radius: 4px; background: none; cursor: pointer; line-height: 0; }
+  .map button[aria-pressed="true"] { border-color: #e4572e; }
+  canvas { width: 100%; height: auto; display: block; border-radius: 3px; }
+  .sheet { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .sheet figure { margin: 0; display: grid; gap: 2px; font-size: 11px; color: var(--muted); }
+  .sheet figure.fav { outline: 3px solid #f3b13b; outline-offset: 1px; border-radius: 4px; }
+  .sheet .row { display: flex; justify-content: space-between; align-items: center; }
+  .star { font: inherit; border: 0; background: none; cursor: pointer; font-size: 15px; color: #9aa3b2; padding: 0 2px; }
+  .star[aria-pressed="true"] { color: #e8a317; }
+  ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+  ol li { display: flex; gap: 6px; align-items: center; }
+  ol canvas { width: 44px; }
+  input[type="text"], textarea { font: inherit; width: 100%; padding: 4px 6px; border: 1px solid #c3c9d3; border-radius: 6px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  button.plain, .file { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; position: relative; }
+  .file input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .file:focus-within, :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  #verify { font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section>
+    <h2>1 参数区域：先看全貌</h2>
+    <p class="sub">横向是噪声尺度，纵向是线条密度，种子固定。点一格，选定这一片参数区域。</p>
+    <div class="map" id="map"></div>
+  </section>
+  <section>
+    <h2>2 同一组参数，12 个种子</h2>
+    <p class="sub" id="sheetInfo"></p>
+    <div class="sheet" id="sheet"></div>
+    <div class="bar"><button type="button" class="plain" id="more">再看 12 个</button></div>
+  </section>
+  <section>
+    <h2>3 系列：选择、编排、解释</h2>
+    <label>系列名称<input type="text" id="title" value="风的地形"></label>
+    <label>说明<textarea id="desc" rows="3">同一个噪声场，四种密度的风。按从疏到密排列。</textarea></label>
+    <ol id="series"></ol>
+    <div class="bar">
+      <button type="button" class="plain" id="export" disabled>导出清单（JSON）</button>
+      <label class="file">从清单重现…<input type="file" id="import" accept=".json"></label>
+    </div>
+    <p class="sub" id="verify" role="status"></p>
+  </section>
+</div>
+<script>
+const GENERATOR = { name: '风的地形', version: '1.0.0' };
+function mulberry32(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const $ = id => document.getElementById(id);
+const SCALES = [0.003, 0.006, 0.012, 0.024, 0.048], DENSITIES = [40, 90, 160, 260, 400];
+const PALETTE = ['#2f4b7c', '#e4572e', '#f3b13b', '#5b8c7a'];
+// 生成器：流场中的线条。输入只有种子和两个参数，输出是确定的图像
+function generate(canvas, seed, scale, density) {
+  const W = 240, H = 300, g = canvas.getContext('2d'), k = canvas.width / W;
+  const r = mulberry32(seed), N = 12, grid = Array.from({ length: (N + 1) ** 2 }, r);
+  const noise = (x, y) => { x = ((x % N) + N) % N; y = ((y % N) + N) % N; const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi, s = t => t * t * (3 - 2 * t), at = (i, j) => grid[(j % (N + 1)) * (N + 1) + (i % (N + 1))];
+    const a = at(xi, yi) + (at(xi + 1, yi) - at(xi, yi)) * s(fx), b = at(xi, yi + 1) + (at(xi + 1, yi + 1) - at(xi, yi + 1)) * s(fx); return a + (b - a) * s(fy); };
+  g.setTransform(k, 0, 0, k, 0, 0);
+  g.fillStyle = '#f6f2e8'; g.fillRect(0, 0, W, H);
+  g.lineCap = 'round';
+  for (let i = 0; i < density; i++) {
+    let x = r() * W, y = r() * H;
+    g.strokeStyle = PALETTE[r() < 0.55 ? 0 : r() < 0.6 ? 1 : r() < 0.7 ? 2 : 3]; g.globalAlpha = 0.75; g.lineWidth = 0.6 + r() * 1.6;
+    g.beginPath(); g.moveTo(x, y);
+    for (let s = 0; s < 40; s++) { const a = noise(x * scale * 10, y * scale * 10) * Math.PI * 4; x += Math.cos(a) * 3; y += Math.sin(a) * 3; g.lineTo(x, y); }
+    g.stroke();
+  }
+  g.globalAlpha = 1; g.setTransform(1, 0, 0, 1, 0, 0);
+}
+const thumb = (seed, scale, density, w = 120) => { const c = document.createElement('canvas'); c.width = w; c.height = w * 1.25; generate(c, seed, scale, density); return c; };
+
+// ---------- 1. 参数区域地图 ----------
+let pick = { scale: SCALES[2], density: DENSITIES[2] }, base = 1;
+const map = $('map');
+map.append(document.createElement('span'));
+SCALES.forEach(s => map.append(Object.assign(document.createElement('span'), { textContent: `尺度 ${s}` })));
+DENSITIES.forEach(d => {
+  map.append(Object.assign(document.createElement('span'), { textContent: `${d} 条` }));
+  SCALES.forEach(s => {
+    const b = document.createElement('button'); b.type = 'button'; b.setAttribute('aria-label', `噪声尺度 ${s}，${d} 条线`);
+    b.setAttribute('aria-pressed', String(s === pick.scale && d === pick.density));
+    b.append(thumb(7, s, d, 80));
+    b.addEventListener('click', () => { pick = { scale: s, density: d }; map.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); base = 1; sheet(); });
+    map.append(b);
+  });
+});
+
+// ---------- 2. 多个种子的对照表 ----------
+let favorites = [];   // { seed, scale, density }
+function sheet() {
+  $('sheetInfo').textContent = `噪声尺度 ${pick.scale}，${pick.density} 条线，种子 ${base}—${base + 11}。点 ☆ 加入系列。`;
+  $('sheet').replaceChildren(...Array.from({ length: 12 }, (_, i) => {
+    const seed = base + i, fig = document.createElement('figure'), on = favorites.some(f => f.seed === seed && f.scale === pick.scale && f.density === pick.density);
+    fig.className = on ? 'fav' : '';
+    const star = Object.assign(document.createElement('button'), { type: 'button', className: 'star', textContent: on ? '★' : '☆' });
+    star.setAttribute('aria-pressed', String(on)); star.setAttribute('aria-label', `把种子 ${seed} 加入系列`);
+    star.addEventListener('click', () => toggleFav({ seed, ...pick }));
+    const row = document.createElement('div'); row.className = 'row'; row.append(`种子 ${seed}`, star);
+    fig.append(thumb(seed, pick.scale, pick.density, 160), row);
+    return fig;
+  }));
+}
+function toggleFav(item) {
+  const i = favorites.findIndex(f => f.seed === item.seed && f.scale === item.scale && f.density === item.density);
+  if (i >= 0) favorites.splice(i, 1); else favorites.push(item);
+  sheet(); series();
+}
+$('more').addEventListener('click', () => { base += 12; sheet(); });
+
+// ---------- 3. 系列：编排顺序、导出清单、从清单重现 ----------
+function series() {
+  $('series').replaceChildren(...favorites.map((f, i) => {
+    const li = document.createElement('li');
+    const up = Object.assign(document.createElement('button'), { type: 'button', className: 'plain', textContent: '↑' }); up.setAttribute('aria-label', `把种子 ${f.seed} 上移`);
+    up.disabled = i === 0; up.addEventListener('click', () => { [favorites[i - 1], favorites[i]] = [favorites[i], favorites[i - 1]]; series(); });
+    li.append(thumb(f.seed, f.scale, f.density, 44), `种子 ${f.seed} · 尺度 ${f.scale} · ${f.density} 条`, up);
+    return li;
+  }));
+  $('export').disabled = true;
+  prepare();
+}
+// 清单在系列变化后先在后台算好（包括图像哈希），点击导出时立即下载
+let ready = null, version = 0;
+async function prepare() {
+  const v = ++version; ready = null;
+  if (!favorites.length) return;
+  const m = await manifest();
+  if (v === version) { ready = m; $('export').disabled = false; }
+}
+async function sha256(text) { const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)); return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join(''); }
+const fullImage = f => { const c = document.createElement('canvas'); c.width = 480; c.height = 600; generate(c, f.seed, f.scale, f.density); return c.toDataURL('image/png'); };
+async function manifest() {
+  return { generator: GENERATOR, title: $('title').value, description: $('desc').value, createdAt: new Date().toISOString(),
+           works: await Promise.all(favorites.map(async (f, i) => ({ order: i + 1, seed: f.seed, params: { scale: f.scale, density: f.density }, size: [480, 600], imageSha256: await sha256(fullImage(f)) }))) };
+}
+$('export').addEventListener('click', () => {
+  if (!ready) return;
+  ready.title = $('title').value; ready.description = $('desc').value;   // 名称与说明以点击时为准
+  const url = URL.createObjectURL(new Blob([JSON.stringify(ready, null, 2)], { type: 'application/json' }));
+  Object.assign(document.createElement('a'), { href: url, download: 'series-manifest.json' }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+async function reproduce(data) {
+  if (data.generator?.name !== GENERATOR.name) return '这份清单不是本生成器的。';
+  let same = 0;
+  for (const w of data.works) if (await sha256(fullImage({ seed: w.seed, ...w.params })) === w.imageSha256) same++;
+  favorites = data.works.sort((a, b) => a.order - b.order).map(w => ({ seed: w.seed, ...w.params }));
+  $('title').value = data.title; $('desc').value = data.description; series(); sheet();
+  const versionNote = data.generator.version === GENERATOR.version ? '' : `（清单来自 ${data.generator.version} 版，当前是 ${GENERATOR.version} 版）`;
+  return `重新生成 ${data.works.length} 张，其中 ${same} 张与记录的图像完全一致${versionNote}。`;
+}
+$('import').addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return;
+  e.target.value = '';                                  // 清空选择，同一个文件改过之后可以再次导入
+  try { $('verify').textContent = await reproduce(JSON.parse(await f.text())); } catch (err) { $('verify').textContent = '无法读取清单：' + err.message; }
+});
+sheet(); series();
+window.__curate = { toggleFav, manifest, reproduce, setPick: (s, d) => { pick = { scale: s, density: d }; sheet(); } };
+</script>
+</body>
+</html>

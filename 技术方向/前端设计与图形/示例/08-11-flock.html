@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>综合项目：可调的群体运动</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(290px, 1fr); gap: 14px; max-width: 1160px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .views { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .views figure { margin: 0; display: grid; gap: 2px; }
+  .views figcaption { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 38px; }
+  canvas { width: 100%; height: auto; display: block; border-radius: 8px; background: #0f1724; }
+  .param { display: grid; grid-template-columns: 5em 1fr 3.6em; gap: 0 6px; align-items: center; }
+  .param small { grid-column: 1 / -1; color: var(--muted); font-size: 11.5px; margin-bottom: 2px; }
+  output { font-variant-numeric: tabular-nums; text-align: right; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  button { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; } th { color: var(--muted); font-weight: 400; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section>
+    <h2>同样的初始条件，两组参数</h2>
+    <p class="sub">A 使用右侧的参数；B 是你保存的对照。点击“重置”，两边从同一个种子、同样的位置和速度重新开始。</p>
+    <div class="views">
+      <figure><canvas id="ca" width="600" height="440" role="img" aria-label="A：使用当前参数的鸟群"></canvas><figcaption id="sa"></figcaption></figure>
+      <figure><canvas id="cb" width="600" height="440" role="img" aria-label="B：对照参数的鸟群"></canvas><figcaption id="sb"></figcaption></figure>
+    </div>
+    <div class="bar">
+      <button type="button" id="pause" aria-pressed="false">暂停</button><button type="button" id="reset">重置（种子 <span id="seedV">1</span>）</button>
+      <button type="button" id="newSeed">换一个种子</button><button type="button" id="setB">把当前参数设为对照 B</button>
+      <button type="button" id="record">记录这一组</button>
+    </div>
+    <table id="log"><tr><th>记录</th><th>参数（个体／半径／聚集／对齐／分离）</th><th>有序度</th><th>群数</th><th>平均邻居</th><th>最近距离</th><th>每步耗时</th></tr></table>
+  </section>
+  <section>
+    <h2>参数（A）</h2>
+    <div class="param"><label for="n">个体数</label><input type="range" id="n" min="50" max="1500" step="50" value="200"><output id="o-n"></output><small>更多个体会形成更大的群，计算也更多。改变后从当前种子重新开始。</small></div>
+    <div class="param"><label for="r">邻域半径</label><input type="range" id="r" min="10" max="80" value="30"><output id="o-r"></output><small>每个个体能“看见”多远。越大越容易连成一大群；太小则各自为政。</small></div>
+    <div class="param"><label for="coh">聚集</label><input type="range" id="coh" min="0" max="3" step="0.1" value="1"><output id="o-coh"></output><small>朝邻居的中心靠拢。越大越抱团。</small></div>
+    <div class="param"><label for="ali">对齐</label><input type="range" id="ali" min="0" max="3" step="0.1" value="1"><output id="o-ali"></output><small>和邻居朝同一个方向飞。越大，整群的方向越一致（有序度越高）。</small></div>
+    <div class="param"><label for="sep">分离强度</label><input type="range" id="sep" min="0" max="5" step="0.1" value="1.5"><output id="o-sep"></output><small>离得太近就互相推开。太小会挤成一团，太大会散成均匀的点。</small></div>
+    <h2>指标</h2>
+    <p class="sub"><b>有序度</b>：所有个体方向的平均，1 表示完全同向，接近 0 表示方向杂乱。<b>群数</b>：互相在邻域半径以内、连成一片的个体算一群（只计 3 个以上的群）。<b>最近距离</b>：每个个体到最近邻居的平均距离，分离越强越大。<b>每步耗时</b>：更新一步所用的时间，用来比较成本。</p>
+  </section>
+</div>
+<script>
+function mulberry32(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const $ = id => document.getElementById(id);
+const W = 400, H = 293, MAXV = 70, MINV = 25;          // 世界大小（上下左右相连）与速度范围
+let seed = 1;
+const readParams = () => ({ n: +$('n').value, r: +$('r').value, coh: +$('coh').value, ali: +$('ali').value, sep: +$('sep').value });
+function makeFlock(params) {
+  const rnd = mulberry32(seed);   // 同一个种子：同样的初始位置与速度
+  return { params: { ...params }, t: 0, cost: 0, steps: 0,
+    birds: Array.from({ length: params.n }, () => { const a = rnd() * Math.PI * 2, s = MINV + rnd() * (MAXV - MINV); return { x: rnd() * W, y: rnd() * H, vx: Math.cos(a) * s, vy: Math.sin(a) * s }; }) };
+}
+// 上下左右相连的世界：两点的最短差值
+const wrapD = (d, L) => d > L / 2 ? d - L : d < -L / 2 ? d + L : d;
+function grid(birds, cell) {
+  const cols = Math.ceil(W / cell), rows = Math.ceil(H / cell), cells = Array.from({ length: cols * rows }, () => []);
+  birds.forEach((b, i) => cells[Math.min(rows - 1, Math.floor(b.y / cell)) * cols + Math.min(cols - 1, Math.floor(b.x / cell))].push(i));
+  return { cols, rows, cells, cell };
+}
+function eachNeighbor(g, birds, i, fn) {
+  const b = birds[i], cx = Math.min(g.cols - 1, Math.floor(b.x / g.cell)), cy = Math.min(g.rows - 1, Math.floor(b.y / g.cell));
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const list = g.cells[((cy + dy + g.rows) % g.rows) * g.cols + (cx + dx + g.cols) % g.cols];
+    for (const j of list) if (j !== i) fn(j);
+  }
+}
+function step(f, h) {
+  const t0 = performance.now(), { r, coh, ali, sep } = f.params, birds = f.birds, g = grid(birds, r), R2 = r * r, S2 = (r * 0.35) ** 2;
+  const acc = birds.map(() => [0, 0]);
+  birds.forEach((b, i) => {
+    let n = 0, cx = 0, cy = 0, avx = 0, avy = 0, sx = 0, sy = 0;
+    eachNeighbor(g, birds, i, j => {
+      const o = birds[j], dx = wrapD(o.x - b.x, W), dy = wrapD(o.y - b.y, H), d2 = dx * dx + dy * dy;
+      if (d2 > R2) return;
+      n++; cx += dx; cy += dy; avx += o.vx; avy += o.vy;                                 // 聚集与对齐：统计邻居的位置与速度
+      if (d2 < S2 && d2 > 0) { sx -= dx / d2; sy -= dy / d2; }                           // 分离：越近推得越强
+    });
+    if (n) {
+      acc[i][0] += coh * cx / n * 1.2 + ali * (avx / n - b.vx) * 1.5 + sep * sx * 900;
+      acc[i][1] += coh * cy / n * 1.2 + ali * (avy / n - b.vy) * 1.5 + sep * sy * 900;
+    }
+  });
+  birds.forEach((b, i) => {
+    b.vx += acc[i][0] * h; b.vy += acc[i][1] * h;
+    const s = Math.hypot(b.vx, b.vy), k = s > MAXV ? MAXV / s : s < MINV ? MINV / (s || 1) : 1;   // 限制速度范围
+    b.vx *= k; b.vy *= k;
+    b.x = (b.x + b.vx * h + W) % W; b.y = (b.y + b.vy * h + H) % H;
+  });
+  f.t += h; f.cost += performance.now() - t0; f.steps++;
+}
+function metrics(f) {
+  const birds = f.birds, n = birds.length; let sx = 0, sy = 0;
+  for (const b of birds) { const s = Math.hypot(b.vx, b.vy) || 1; sx += b.vx / s; sy += b.vy / s; }
+  // 群：用并查集把邻域内的个体连起来
+  const parent = birds.map((_, i) => i), find = a => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+  const g = grid(birds, f.params.r), R2 = f.params.r ** 2; let neigh = 0, nearSum = 0;
+  birds.forEach((b, i) => {
+    let near = Infinity;
+    eachNeighbor(g, birds, i, j => { const o = birds[j], dx = wrapD(o.x - b.x, W), dy = wrapD(o.y - b.y, H), d2 = dx * dx + dy * dy; near = Math.min(near, d2); if (d2 <= R2) { neigh++; parent[find(i)] = find(j); } });
+    nearSum += Math.min(Math.sqrt(near), f.params.r * 1.5);    // 最近的邻居有多远（找不到时按 1.5 倍半径计）
+  });
+  const sizes = new Map(); birds.forEach((_, i) => { const k = find(i); sizes.set(k, (sizes.get(k) || 0) + 1); });
+  return { order: Math.hypot(sx, sy) / n, groups: [...sizes.values()].filter(s => s >= 3).length, neigh: neigh / n, near: nearSum / n, ms: f.steps ? f.cost / f.steps : 0 };
+}
+function draw(f, canvas) {
+  const g = canvas.getContext('2d'), s = canvas.width / W;
+  g.fillStyle = '#0f1724'; g.fillRect(0, 0, canvas.width, canvas.height);
+  for (const b of f.birds) {
+    const a = Math.atan2(b.vy, b.vx), hue = (a / Math.PI * 180 + 360) % 360;              // 颜色表示飞行方向：同色说明同向
+    g.save(); g.translate(b.x * s, b.y * s); g.rotate(a);
+    g.fillStyle = `hsl(${hue}, 70%, 65%)`; g.beginPath(); g.moveTo(7, 0); g.lineTo(-4, 3.5); g.lineTo(-4, -3.5); g.closePath(); g.fill();
+    g.restore();
+  }
+}
+const fmt = p => `${p.n}／${p.r}／${p.coh}／${p.ali}／${p.sep}`;
+let A, B, bParams = { ...readParams(), ali: 0 }, paused = false;
+function caption(f, id, label) { const m = metrics(f); $(id).textContent = `${label} ${fmt(f.params)} · ${f.t.toFixed(1)} 秒 · 有序度 ${m.order.toFixed(2)} · ${m.groups} 群 · 平均邻居 ${m.neigh.toFixed(1)} · 最近距离 ${m.near.toFixed(1)} · 每步 ${m.ms.toFixed(2)} 毫秒`; return m; }
+function reset() { A = makeFlock(readParams()); B = makeFlock(bParams); $('seedV').textContent = seed; }
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let last = performance.now(), frame = 0;
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (!paused && !reduce) { step(A, dt); step(B, dt); }
+  draw(A, $('ca')); draw(B, $('cb'));
+  if (frame++ % 10 === 0) { caption(A, 'sa', 'A'); caption(B, 'sb', 'B'); }
+  requestAnimationFrame(loop);
+}
+for (const id of ['n', 'r', 'coh', 'ali', 'sep']) {
+  const show = () => $('o-' + id).textContent = $(id).value; show();
+  $(id).addEventListener('input', () => { show(); if (id === 'n') A = makeFlock(readParams()); else A.params = { ...A.params, [id]: +$(id).value }; });   // 个体数改变需要重新生成，其他参数实时生效
+}
+$('pause').addEventListener('click', e => { paused = !paused; e.currentTarget.setAttribute('aria-pressed', String(paused)); e.currentTarget.textContent = paused ? '继续' : '暂停'; });
+$('reset').addEventListener('click', reset);
+$('newSeed').addEventListener('click', () => { seed++; reset(); });
+$('setB').addEventListener('click', () => { bParams = readParams(); B = makeFlock(bParams); A = makeFlock(readParams()); });
+function record(label) {
+  for (const [name, f] of [['A', A], ['B', B]]) {
+    const m = metrics(f), tr = $('log').insertRow();
+    for (const v of [`${label ?? $('log').rows.length}${name} · ${f.t.toFixed(0)} 秒`, fmt(f.params), m.order.toFixed(2), m.groups, m.neigh.toFixed(1), m.near.toFixed(1), `${m.ms.toFixed(2)} 毫秒`]) tr.insertCell().textContent = v;
+  }
+}
+$('record').addEventListener('click', () => record());
+reset(); requestAnimationFrame(loop);
+// 测试用：不依赖帧率，按固定步长推进
+window.__flock = {
+  run: (sec, h = 1 / 60) => { paused = true; for (let t = 0; t < sec; t += h) { step(A, h); step(B, h); } draw(A, $('ca')); draw(B, $('cb')); return [caption(A, 'sa', 'A'), caption(B, 'sb', 'B')]; },
+  setA: p => { for (const [k, v] of Object.entries(p)) $(k).value = v; for (const id of ['n', 'r', 'coh', 'ali', 'sep']) $('o-' + id).textContent = $(id).value; },
+  setB: p => { bParams = { ...readParams(), ...p }; }, reset, record, same: () => A.birds.every((b, i) => b.x === B.birds[i].x && b.y === B.birds[i].y),
+  cost: n => { const f = makeFlock({ ...readParams(), n }); for (let k = 0; k < 120; k++) step(f, 1 / 60); return f.cost / f.steps; },
+  get paused() { return paused; }
+};
+</script>
+</body>
+</html>
