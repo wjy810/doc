@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>着色器编程：顶点位移、光照、纹理与调试视图</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.3.0/400.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; max-width: 1080px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  #stage { position: relative; width: 100%; aspect-ratio: 3 / 2; border-radius: 8px; overflow: hidden; background: #11151c; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  .labels { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr); pointer-events: none; }
+  .labels span { align-self: start; justify-self: start; margin: 6px; padding: 0 6px; border-radius: 4px; background: rgba(17, 21, 28, .7); color: #fff; font-size: 12px; }
+  .labels.single span:not(:first-child) { display: none; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .bar label { display: inline-flex; gap: 4px; align-items: center; }
+  .bar input[type="range"] { width: 110px; }
+  button, select { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  pre { margin: 0; font: 10.5px/1.5 "JetBrains Mono", monospace; background: #f6f7f9; border-radius: 6px; padding: 8px; white-space: pre-wrap; }
+  .err { color: #b42318; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section>
+    <h2>同一块“布”的六种视图</h2>
+    <p class="sub">布面由顶点着色器按正弦波起伏；片元着色器计算光照、采样纹理。调试视图把中间结果直接显示成颜色，是检查着色器最常用的方法。</p>
+    <div id="stage" role="img" aria-label="一块随波起伏的布，分成六个画面：最终效果、UV、法线、光照、纹理、世界坐标高度">
+      <div class="labels" id="labels"><span>最终效果</span><span>UV</span><span>法线</span><span>光照</span><span>纹理</span><span>高度</span></div>
+    </div>
+    <div class="bar">
+      <label>视图 <select id="view">
+        <option value="-1">六种同时显示</option><option value="0">最终效果</option><option value="1">UV</option><option value="2">法线</option>
+        <option value="3">光照</option><option value="4">纹理</option><option value="5">高度</option></select></label>
+      <label>波幅 <input type="range" id="amp" min="0" max="0.3" step="0.01" value="0.12"></label>
+      <label>频率 <input type="range" id="freq" min="1" max="12" step="0.5" value="5"></label>
+      <button type="button" id="pause" aria-pressed="false">暂停</button>
+    </div>
+    <p class="sub err" id="err" role="alert"></p>
+  </section>
+  <section>
+    <h2>着色器代码（GLSL）</h2>
+<pre>// 顶点着色器：每个顶点运行一次，改变位置并算出法线
+uniform float uTime, uAmp, uFreq;
+varying vec2 vUv;  varying vec3 vNormal;  varying float vHeight;
+void main() {
+  vec3 p = position;
+  float phase = p.x * uFreq + uTime;
+  p.z += uAmp * sin(phase);                  // 顶点位移
+  float slope = uAmp * uFreq * cos(phase);   // 斜率 dz/dx
+  vNormal = normalize(normalMatrix * vec3(-slope, 0.0, 1.0));
+  vUv = uv;  vHeight = p.z;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+}
+
+// 片元着色器：每个像素运行一次，算出颜色
+uniform sampler2D uMap;  uniform vec3 uLightDir;  uniform int uView;
+void main() {
+  vec3 n = normalize(vNormal);   // 插值后长度会变，重新归一化
+  float light = 0.25 + 0.75 * max(dot(n, uLightDir), 0.0);
+  vec3 tex = texture2D(uMap, vUv * 2.0).rgb;   // 采样，重复两次
+  vec3 color = tex * light;                    // 最终效果
+  if (uView == 1) color = vec3(vUv, 0.0);      // UV
+  if (uView == 2) color = n * 0.5 + 0.5;       // 法线：−1…1 → 0…1
+  if (uView == 3) color = vec3(light);         // 光照
+  if (uView == 4) color = tex;                 // 纹理
+  if (uView == 5) color = vec3(vHeight / uAmp * 0.5 + 0.5);  // 高度
+  gl_FragColor = vec4(color, 1.0);
+  // 颜色从线性空间转换成屏幕的 sRGB；数据视图直接显示数值
+  if (uView == 0 || uView == 4) gl_FragColor = linearToOutputTexel(gl_FragColor);
+}</pre>
+  </section>
+</div>
+<script type="module">
+import * as THREE from 'three';
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+stage.prepend(renderer.domElement);
+// 着色器编译出错时，把错误显示在页面上
+renderer.debug.onShaderError = (gl, program, vs, fs) => {
+  document.getElementById('err').textContent = '着色器编译失败：' + (gl.getShaderInfoLog(fs) || gl.getShaderInfoLog(vs) || gl.getProgramInfoLog(program));
+};
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, 1.5, 0.1, 50);
+camera.position.set(0, -1.6, 2.6);
+camera.lookAt(0, 0, 0);
+
+// 用二维画布生成一张纹理：格子与文字，便于看出 UV 的方向和拉伸
+function makeTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) { g.fillStyle = (x + y) % 2 ? '#f3c98b' : '#9db8e8'; g.fillRect(x * 32, y * 32, 32, 32); }
+  g.fillStyle = '#1d2330'; g.font = 'bold 56px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('布 UV', 128, 132);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 4;
+  return t;
+}
+
+const material = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0 }, uAmp: { value: 0.12 }, uFreq: { value: 5 },
+    uMap: { value: makeTexture() }, uLightDir: { value: new THREE.Vector3() }, uView: { value: 0 }
+  },
+  vertexShader: /* glsl */`
+    uniform float uTime, uAmp, uFreq;
+    varying vec2 vUv; varying vec3 vNormal; varying float vHeight;
+    void main() {
+      vec3 p = position;
+      float phase = p.x * uFreq + uTime;
+      p.z += uAmp * sin(phase);
+      float slope = uAmp * uFreq * cos(phase);
+      vNormal = normalize(normalMatrix * vec3(-slope, 0.0, 1.0));
+      vUv = uv; vHeight = p.z;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+    }`,
+  fragmentShader: /* glsl */`
+    uniform sampler2D uMap; uniform vec3 uLightDir; uniform int uView; uniform float uAmp;
+    varying vec2 vUv; varying vec3 vNormal; varying float vHeight;
+    void main() {
+      vec3 n = normalize(vNormal);
+      float light = 0.25 + 0.75 * max(dot(n, uLightDir), 0.0);
+      vec3 tex = texture2D(uMap, vUv * 2.0).rgb;
+      vec3 color = tex * light;
+      if (uView == 1) color = vec3(vUv, 0.0);
+      if (uView == 2) color = n * 0.5 + 0.5;
+      if (uView == 3) color = vec3(light);
+      if (uView == 4) color = tex;
+      if (uView == 5) color = vec3(vHeight / max(uAmp, 1e-4) * 0.5 + 0.5);
+      gl_FragColor = vec4(color, 1.0);
+      if (uView == 0 || uView == 4) gl_FragColor = linearToOutputTexel(gl_FragColor);
+    }`,
+  side: THREE.DoubleSide
+});
+// 细分足够多的平面：顶点越多，起伏越平滑
+const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.6, 160, 100), material);
+mesh.rotation.x = -0.35;
+scene.add(mesh);
+
+// 光照方向在观察空间中给出，与 normalMatrix 变换后的法线在同一个坐标空间里
+const lightView = new THREE.Vector3(0.85, 0.25, 0.45).normalize();   // 从右侧照来，起伏更明显
+material.uniforms.uLightDir.value.copy(lightView);
+
+let view = -1, paused = false, time = 0, last = performance.now();
+const labels = document.getElementById('labels');
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h, false);
+}
+new ResizeObserver(resize).observe(stage);
+resize();
+
+function render() {
+  const size = renderer.getSize(new THREE.Vector2());
+  if (view >= 0) {
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, size.x, size.y);
+    camera.aspect = size.x / size.y; camera.updateProjectionMatrix();
+    material.uniforms.uView.value = view;
+    renderer.render(scene, camera);
+    return;
+  }
+  // 六种视图：同一个场景渲染六次，每次只画画布的一格
+  renderer.setScissorTest(true);
+  const cw = size.x / 3, ch = size.y / 2;
+  camera.aspect = cw / ch; camera.updateProjectionMatrix();
+  for (let i = 0; i < 6; i++) {
+    const x = (i % 3) * cw, y = (1 - Math.floor(i / 3)) * ch;   // 视口的原点在左下角
+    renderer.setViewport(x, y, cw, ch); renderer.setScissor(x, y, cw, ch);
+    material.uniforms.uView.value = i;
+    renderer.render(scene, camera);
+  }
+}
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function loop(now) {
+  if (!paused && !reduce) time += (now - last) / 1000;
+  last = now;
+  material.uniforms.uTime.value = time;
+  render();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+document.getElementById('view').addEventListener('change', e => {
+  view = +e.target.value;
+  labels.classList.toggle('single', view >= 0);
+  if (view >= 0) labels.firstElementChild.textContent = e.target.selectedOptions[0].textContent;
+  else labels.firstElementChild.textContent = '最终效果';
+});
+document.getElementById('amp').addEventListener('input', e => { material.uniforms.uAmp.value = +e.target.value; });
+document.getElementById('freq').addEventListener('input', e => { material.uniforms.uFreq.value = +e.target.value; });
+document.getElementById('pause').addEventListener('click', e => {
+  paused = !paused;
+  e.currentTarget.setAttribute('aria-pressed', String(paused));
+  e.currentTarget.textContent = paused ? '继续' : '暂停';
+});
+window.__shader = { material, renderer, setTime: t => { time = t; } };   // 供测试脚本使用
+</script>
+</body>
+</html>

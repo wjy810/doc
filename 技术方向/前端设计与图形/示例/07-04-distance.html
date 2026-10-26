@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>程序化材质的两个难题：镜头距离与重复规律</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; max-width: 1080px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .view { position: relative; width: 100%; aspect-ratio: 16 / 10; border-radius: 8px; overflow: hidden; background: #cfd8e3; }
+  .view canvas { display: block; width: 100%; height: 100%; }
+  .tags { position: absolute; inset: 6px 6px auto; display: flex; justify-content: space-between; pointer-events: none; }
+  .tags span { padding: 0 6px; border-radius: 4px; background: rgba(17, 21, 28, .72); color: #fff; font-size: 12px; }
+  .split::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; border-left: 2px solid #fff; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <section>
+    <h2>镜头距离：远处的格子开始闪烁和出现摩尔纹</h2>
+    <p class="sub">左：直接用 step 判断黑白。右：用 fwidth 估计一个像素覆盖了多少格子，在过渡带内取平均。贴图有多级渐远纹理自动处理这个问题，程序化图案要自己处理。</p>
+    <div class="view split" id="v1" role="img" aria-label="向远处延伸的黑白格地面：左半边远处出现杂乱的摩尔纹，右半边远处平滑地过渡为灰色"><div class="tags"><span>直接判断</span><span>按像素宽度过滤</span></div></div>
+  </section>
+  <section>
+    <h2>重复规律：平铺的贴图一眼就能看出格子</h2>
+    <p class="sub">左：同一张贴图平铺 14 × 14 次，深色斑排成整齐的斜线。右：换一个尺度和角度再采样一次，用噪声混合，再叠加一层低频的明暗起伏，重复感明显减弱。</p>
+    <div class="view split" id="v2" role="img" aria-label="铺满石子的地面：左半边能看出规则重复的图案，右半边明暗起伏、看不出重复"><div class="tags"><span>直接平铺</span><span>打破重复</span></div></div>
+  </section>
+</div>
+<script type="module">
+import * as THREE from 'three';
+
+function setup(el) {
+  const renderer = new THREE.WebGLRenderer({ antialias: false });   // 关闭多重采样，问题看得更清楚
+  renderer.setPixelRatio(1);
+  el.prepend(renderer.domElement);
+  const resize = () => renderer.setSize(el.clientWidth, el.clientHeight, false);
+  new ResizeObserver(resize).observe(el); resize();
+  return renderer;
+}
+// 左右两半用不同的 uMode 各渲染一次
+function renderSplit(renderer, scene, camera, uniforms) {
+  const s = renderer.getSize(new THREE.Vector2());
+  camera.aspect = s.x / s.y; camera.updateProjectionMatrix();
+  renderer.setScissorTest(true);
+  for (const mode of [0, 1]) {
+    renderer.setScissor(mode * s.x / 2, 0, s.x / 2, s.y);
+    uniforms.uMode.value = mode;
+    renderer.render(scene, camera);
+  }
+}
+
+// ---------- 1. 格子地面 ----------
+{
+  const renderer = setup(document.getElementById('v1'));
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color('#cfd8e3');
+  const camera = new THREE.PerspectiveCamera(50, 1.6, 0.1, 400);
+  camera.position.set(0, 1.2, 4); camera.lookAt(0, 0.6, -10);
+  const uniforms = { uMode: { value: 0 } };
+  const mat = new THREE.ShaderMaterial({
+    uniforms,
+    vertexShader: `varying vec2 vP; void main() { vP = (modelMatrix * vec4(position, 1.0)).xz; gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `
+      uniform int uMode; varying vec2 vP;
+      float naive(vec2 p) { vec2 c = floor(p); return mod(c.x + c.y, 2.0); }          // 直接判断：非黑即白
+      float filtered(vec2 p) {                                                         // 过滤：按一个像素覆盖的宽度取平均
+        vec2 w = fwidth(p) + 1e-4;
+        vec2 i = 2.0 * (abs(fract((p - 0.5 * w) * 0.5) - 0.5) - abs(fract((p + 0.5 * w) * 0.5) - 0.5)) / w;
+        return 0.5 - 0.5 * i.x * i.y;
+      }
+      void main() {
+        vec2 p = vP * 1.0;
+        float c = uMode == 0 ? naive(p) : filtered(p);
+        gl_FragColor = vec4(vec3(mix(0.12, 0.92, c)), 1.0);
+        #include <colorspace_fragment>
+      }`
+  });
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), mat);
+  ground.rotation.x = -Math.PI / 2;
+  scene.add(ground);
+  renderSplit(renderer, scene, camera, uniforms);
+  window.__v1 = () => renderSplit(renderer, scene, camera, uniforms);
+}
+
+// ---------- 2. 石子地面 ----------
+{
+  const renderer = setup(document.getElementById('v2'));
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color('#cfd8e3');
+  const camera = new THREE.PerspectiveCamera(45, 1.6, 0.1, 100);
+  camera.position.set(0, 12, 5); camera.lookAt(0, 0, -1);
+  // 用二维画布画一张可以无缝平铺的石子贴图：靠近边缘的石子在对边再画一次
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#9a8d7a'; g.fillRect(0, 0, 256, 256);
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < 70; i++) {
+    const x = rnd() * 256, y = rnd() * 256, r = 6 + rnd() * 16, shade = 120 + rnd() * 90 | 0;
+    for (const dx of [-256, 0, 256]) for (const dy of [-256, 0, 256]) {
+      g.fillStyle = `rgb(${shade}, ${shade * 0.94 | 0}, ${shade * 0.86 | 0})`;
+      g.beginPath(); g.ellipse(x + dx, y + dy, r, r * (0.6 + rnd() * 0.3), rnd() * 3, 0, 7); g.fill();
+    }
+  }
+  g.fillStyle = 'rgba(60, 45, 30, .7)'; g.beginPath(); g.ellipse(70, 180, 34, 20, 0.4, 0, 7); g.fill();   // 一块显眼的深色斑：重复时最容易被认出来
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.anisotropy = 8;
+  const uniforms = { uMode: { value: 0 }, uMap: { value: tex } };
+  const mat = new THREE.ShaderMaterial({
+    uniforms,
+    vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `
+      uniform int uMode; uniform sampler2D uMap; varying vec2 vUv;
+      float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float noise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y); }
+      void main() {
+        vec2 uv = vUv * 14.0;
+        vec3 col = texture2D(uMap, uv).rgb;
+        if (uMode == 1) {
+          // 第二次采样：缩放 0.83 倍并旋转约 37 度，石子大小相近，但格子与第一次不对齐
+          mat2 r = mat2(0.8, -0.6, 0.6, 0.8);
+          vec3 col2 = texture2D(uMap, r * uv * 0.83 + 0.5).rgb;
+          float m = smoothstep(0.35, 0.65, noise(vUv * 12.0));     // 用噪声决定两次采样的混合比例
+          col = mix(col, col2, m);
+          col *= 0.65 + 0.7 * noise(vUv * 7.0 + 10.0);             // 低频的明暗起伏
+        }
+        gl_FragColor = vec4(col, 1.0);
+        #include <colorspace_fragment>
+      }`
+  });
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(24, 24), mat);
+  ground.rotation.x = -Math.PI / 2;
+  scene.add(ground);
+  renderSplit(renderer, scene, camera, uniforms);
+  window.__v2 = () => renderSplit(renderer, scene, camera, uniforms);
+}
+</script>
+</body>
+</html>

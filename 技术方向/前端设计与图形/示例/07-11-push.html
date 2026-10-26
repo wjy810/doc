@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>综合项目：图片被指针推开后恢复</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(290px, 1fr); gap: 14px; max-width: 1120px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  #stage { position: relative; width: 100%; aspect-ratio: 3 / 2; border-radius: 8px; overflow: hidden; background: #ddd; touch-action: none; cursor: grab; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  #stage.static { cursor: default; }
+  .param { display: grid; grid-template-columns: 4.5em 1fr 4.2em; gap: 6px; align-items: center; }
+  .param output { font-variant-numeric: tabular-nums; text-align: right; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+  button { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  #curve { width: 100%; height: 110px; display: block; background: #f6f7f9; border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+  th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; }
+  th { color: var(--muted); font-weight: 400; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section>
+    <h2>用指针或手指划过图片：图片被推开，松手后恢复</h2>
+    <div id="stage" role="img" aria-label="一张海报，被指针划过的地方像布一样被推开，随后弹回原状"></div>
+    <div class="bar">
+      <label><input type="checkbox" id="static"> 静态模式</label>
+      <label><input type="checkbox" id="field"> 显示扰动场</label>
+      <button type="button" id="destroy">销毁效果</button>
+      <span class="sub" id="mem" role="status"></span>
+    </div>
+  </section>
+  <section>
+    <h2>参数</h2>
+    <div class="param"><label for="strength">强度</label><input type="range" id="strength" min="0" max="3" step="0.1" value="1"><output id="o-strength"></output></div>
+    <div class="param"><label for="radius">范围</label><input type="range" id="radius" min="20" max="200" step="5" value="80"><output id="o-radius"></output></div>
+    <div class="param"><label for="stiff">衰减</label><input type="range" id="stiff" min="4" max="60" step="1" value="18"><output id="o-stiff"></output></div>
+    <div class="param"><label for="zeta">回弹</label><input type="range" id="zeta" min="0.3" max="1.2" step="0.05" value="0.55"><output id="o-zeta"></output></div>
+    <h2>恢复曲线</h2>
+    <canvas id="curve" width="560" height="220" aria-label="一次推开之后，位移随时间变化的曲线"></canvas>
+    <p class="sub" id="curveNote"></p>
+    <h2>图片尺寸与性能</h2>
+    <div class="bar"><button type="button" data-size="512">512</button><button type="button" data-size="1024">1024</button><button type="button" data-size="2048">2048</button><button type="button" data-size="4096">4096</button></div>
+    <table id="perf"><tr><th>图片</th><th>显存（估计）</th><th>上传</th><th>每帧</th></tr></table>
+  </section>
+</div>
+<script type="module">
+import * as THREE from 'three';
+
+const $ = id => document.getElementById(id);
+const stage = $('stage');
+const life = new AbortController();                 // 销毁时一次移除所有事件监听
+const on = (target, type, fn, opts = {}) => target.addEventListener(type, fn, { ...opts, signal: life.signal });
+
+const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+stage.append(renderer.domElement);
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const quad = new THREE.PlaneGeometry(2, 2);
+const VERT = `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+
+// ---------- 扰动场：一张低分辨率的浮点贴图，rg 存位移，ba 存速度 ----------
+const FIELD_W = 160;
+let fieldH = 107, targets = [];
+function makeTargets() {
+  targets.forEach(t => t.dispose());
+  const rect = stage.getBoundingClientRect();
+  fieldH = Math.max(2, Math.round(FIELD_W * rect.height / rect.width));
+  targets = [0, 1].map(() => new THREE.WebGLRenderTarget(FIELD_W, fieldH, { type: THREE.HalfFloatType, depthBuffer: false }));
+  for (const t of targets) { renderer.setRenderTarget(t); renderer.setClearColor(0x000000, 0); renderer.clear(); }   // 新的场从零开始
+  renderer.setRenderTarget(null);
+}
+const MAXP = 4;                                      // 最多同时处理 4 根手指
+const simMat = new THREE.ShaderMaterial({
+  uniforms: { uPrev: { value: null }, uDt: { value: 0.016 }, uK: { value: 18 }, uC: { value: 4.7 }, uStrength: { value: 1 }, uRadius: { value: 0.1 }, uAspect: { value: 1.5 },
+              uCount: { value: 0 }, uP: { value: Array.from({ length: MAXP }, () => new THREE.Vector2()) }, uV: { value: Array.from({ length: MAXP }, () => new THREE.Vector2()) } },
+  vertexShader: VERT,
+  fragmentShader: /* glsl */`
+    uniform sampler2D uPrev; uniform float uDt, uK, uC, uStrength, uRadius, uAspect; uniform int uCount;
+    uniform vec2 uP[${MAXP}], uV[${MAXP}];
+    varying vec2 vUv;
+    void main() {
+      vec4 s = texture2D(uPrev, vUv);
+      vec2 d = s.xy, v = s.zw;
+      for (int i = 0; i < ${MAXP}; i++) {                       // 输入影响：指针附近的点获得与指针移动方向相同的速度
+        if (i >= uCount) break;
+        vec2 diff = (vUv - uP[i]) * vec2(uAspect, 1.0);
+        float f = exp(-dot(diff, diff) / (uRadius * uRadius));
+        v += uV[i] * f * uStrength * uDt * 60.0;
+      }
+      v += (-uK * d - uC * v) * uDt;                            // 弹簧：位移越大，拉回的力越大；阻尼让它停下
+      d += v * uDt;
+      float len = length(d);
+      if (len > 0.08) { d *= 0.08 / len; v *= 0.5; }            // 连续操作时限制最大位移，避免越推越远
+      gl_FragColor = vec4(d, v);
+    }`
+});
+const simScene = new THREE.Scene(); simScene.add(new THREE.Mesh(quad, simMat));
+
+// ---------- 显示：按扰动场偏移 UV 后采样图片 ----------
+const viewMat = new THREE.ShaderMaterial({
+  uniforms: { uMap: { value: null }, uField: { value: null }, uShowField: { value: 0 }, uImgAspect: { value: 1.5 }, uAspect: { value: 1.5 } },
+  vertexShader: VERT,
+  fragmentShader: /* glsl */`
+    uniform sampler2D uMap, uField; uniform float uShowField, uImgAspect, uAspect; varying vec2 vUv;
+    void main() {
+      vec2 d = texture2D(uField, vUv).xy;
+      vec2 uv = vUv - d;                                         // UV 扰动：从“被推开之前”的位置取色
+      float k = uAspect / uImgAspect;                            // 按“铺满”裁切图片
+      vec2 st = (uv - 0.5) * (k > 1.0 ? vec2(1.0, 1.0 / k) : vec2(k, 1.0)) + 0.5;
+      vec3 col = texture2D(uMap, clamp(st, 0.0, 1.0)).rgb;
+      gl_FragColor = vec4(col, 1.0);
+      if (uShowField > 0.5) gl_FragColor = vec4(0.5 + d * 10.0, 0.5, 1.0);   // 调试：位移直接显示为颜色（向右偏红、向上偏绿）
+      else gl_FragColor = linearToOutputTexel(gl_FragColor);                 // 颜色转换到屏幕的 sRGB
+    }`
+});
+const viewScene = new THREE.Scene(); viewScene.add(new THREE.Mesh(quad, viewMat));
+
+// ---------- 图片：按指定尺寸生成，并测量上传与每帧的时间 ----------
+function posterCanvas(size) {
+  const c = document.createElement('canvas'); c.width = size; c.height = Math.round(size * 2 / 3);
+  const g = c.getContext('2d'), s = size / 1024;
+  const grad = g.createLinearGradient(0, 0, c.width, c.height); grad.addColorStop(0, '#f4d9a8'); grad.addColorStop(1, '#7aa6d6');
+  g.fillStyle = grad; g.fillRect(0, 0, c.width, c.height);
+  g.strokeStyle = 'rgba(29,35,48,.35)'; g.lineWidth = 2 * s;
+  for (let x = 0; x <= c.width; x += 32 * s) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, c.height); g.stroke(); }
+  for (let y = 0; y <= c.height; y += 32 * s) { g.beginPath(); g.moveTo(0, y); g.lineTo(c.width, y); g.stroke(); }
+  g.fillStyle = '#1d2330'; g.font = `700 ${150 * s}px "Noto Sans SC", sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('推开我', c.width / 2, c.height / 2);
+  return c;
+}
+let texture = null;
+function loadImage(size, record = true) {
+  const gl = renderer.getContext(), px = new Uint8Array(4);
+  gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);    // 先等之前的帧画完，计时才只包含这张图
+  const t0 = performance.now();
+  const next = new THREE.CanvasTexture(posterCanvas(size));
+  next.colorSpace = THREE.SRGBColorSpace; next.anisotropy = 4;
+  viewMat.uniforms.uMap.value = next; viewMat.uniforms.uImgAspect.value = 1.5;
+  texture?.dispose(); texture = next;                        // 换图时释放旧贴图的显存
+  renderer.render(viewScene, camera); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);   // 第一次使用时上传贴图
+  const upload = performance.now() - t0;
+  const t1 = performance.now();
+  for (let i = 0; i < 10; i++) { step(1 / 60); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); }
+  const frame = (performance.now() - t1) / 10;
+  const mb = size * Math.round(size * 2 / 3) * 4 * 4 / 3 / 1048576;   // 每像素 4 字节，多级渐远纹理再多三分之一
+  if (!record) return null;                                     // 启动时的第一次加载包含着色器编译，不计入表格
+  const row = $('perf').insertRow();
+  for (const v of [`${size}×${Math.round(size * 2 / 3)}`, `${mb.toFixed(1)} MB`, `${upload.toFixed(0)} 毫秒`, `${frame.toFixed(1)} 毫秒`]) row.insertCell().textContent = v;
+  return { size, mb, upload, frame };
+}
+
+// ---------- 输入：指针事件统一处理鼠标、触摸与触控笔 ----------
+const pointers = new Map();
+on(stage, 'pointerdown', e => { if (staticMode) return; stage.setPointerCapture?.(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, t: e.timeStamp, vx: 0, vy: 0 }); });
+on(stage, 'pointermove', e => {
+  if (staticMode) return;
+  const p = pointers.get(e.pointerId) || (e.pointerType === 'mouse' ? { x: e.clientX, y: e.clientY, t: e.timeStamp, vx: 0, vy: 0 } : null);
+  if (!p) return;
+  const dt = Math.max(1, e.timeStamp - p.t) / 1000, r = stage.getBoundingClientRect();
+  p.vx = (e.clientX - p.x) / r.width / dt; p.vy = -(e.clientY - p.y) / r.height / dt;   // 速度：每秒移动多少个画面宽度
+  Object.assign(p, { x: e.clientX, y: e.clientY, t: e.timeStamp });
+  pointers.set(e.pointerId, p);
+});
+const lift = e => pointers.delete(e.pointerId);
+on(stage, 'pointerup', lift); on(stage, 'pointercancel', lift); on(stage, 'pointerleave', e => { if (e.pointerType === 'mouse') lift(e); });
+
+// ---------- 每一帧：更新扰动场，再显示 ----------
+function step(dt) {
+  const r = stage.getBoundingClientRect(), list = [...pointers.values()].slice(0, MAXP);
+  simMat.uniforms.uCount.value = list.length;
+  list.forEach((p, i) => {
+    simMat.uniforms.uP.value[i].set((p.x - r.left) / r.width, 1 - (p.y - r.top) / r.height);
+    simMat.uniforms.uV.value[i].set(THREE.MathUtils.clamp(p.vx, -4, 4) * 0.02, THREE.MathUtils.clamp(p.vy, -4, 4) * 0.02);
+    p.vx *= 0.5; p.vy *= 0.5;                                   // 指针停住时，推力很快消失
+  });
+  simMat.uniforms.uDt.value = Math.min(dt, 1 / 30);
+  simMat.uniforms.uPrev.value = targets[0].texture;
+  renderer.setRenderTarget(targets[1]); renderer.render(simScene, camera);
+  renderer.setRenderTarget(null);
+  targets.reverse();                                            // 交替读写两张贴图（“乒乓”）
+  viewMat.uniforms.uField.value = targets[0].texture;
+  renderer.render(viewScene, camera);
+}
+let running = false, last = 0, staticMode = false;
+function loop(now) { if (!running) return; step(last ? (now - last) / 1000 : 1 / 60); last = now; requestAnimationFrame(loop); }
+function start() { if (running || staticMode || destroyed) return; running = true; last = 0; requestAnimationFrame(loop); }
+function stop() { running = false; }
+
+// ---------- 参数与恢复曲线 ----------
+function params() {
+  const k = +$('stiff').value, zeta = +$('zeta').value;
+  simMat.uniforms.uK.value = k; simMat.uniforms.uC.value = 2 * zeta * Math.sqrt(k);   // 阻尼 ＝ 2 × 回弹系数 × √衰减
+  simMat.uniforms.uStrength.value = +$('strength').value;
+  simMat.uniforms.uRadius.value = +$('radius').value / stage.clientHeight;
+  for (const id of ['strength', 'radius', 'stiff', 'zeta']) $('o-' + id).textContent = $(id).value + (id === 'radius' ? ' 像素' : '');
+  drawCurve(k, 2 * zeta * Math.sqrt(k));
+}
+function drawCurve(k, c) {   // 用同样的方程模拟一次推开后的位移，画出恢复曲线
+  const cv = $('curve'), g = cv.getContext('2d'), W = cv.width, H = cv.height, T = 2, dt = 1 / 240;
+  let d = 0, v = 1, t = 0, peak = 0, minAfter = 0, settle = null; const pts = [];
+  while (t <= T) { v += (-k * d - c * v) * dt; d += v * dt; t += dt; pts.push([t, d]); peak = Math.max(peak, d); }
+  for (const [tt, dd] of pts) { if (tt > 0.05 && dd < minAfter) minAfter = dd; }
+  for (let i = pts.length - 1; i >= 0; i--) if (Math.abs(pts[i][1]) > peak * 0.05) { settle = pts[i][0]; break; }
+  g.clearRect(0, 0, W, H);
+  const x = tt => 30 + tt / T * (W - 40), y = dd => H / 2 - dd / peak * (H / 2 - 16);
+  g.strokeStyle = '#c3c9d3'; g.beginPath(); g.moveTo(30, H / 2); g.lineTo(W - 10, H / 2); g.stroke();
+  g.strokeStyle = '#2f6fdb'; g.lineWidth = 3; g.beginPath(); pts.forEach(([tt, dd], i) => i ? g.lineTo(x(tt), y(dd)) : g.moveTo(x(tt), y(dd))); g.stroke();
+  g.fillStyle = '#5b6475'; g.font = '20px sans-serif'; g.fillText('0', 8, H / 2 + 6); g.fillText('2 秒', W - 46, H - 6);
+  $('curveNote').textContent = `回到最大位移的 5% 以内约需 ${Math.round(settle * 1000)} 毫秒；${minAfter < 0 ? `会越过原位 ${Math.round(-minAfter / peak * 100)}% 再弹回` : '不会越过原位'}。`;
+}
+for (const id of ['strength', 'radius', 'stiff', 'zeta']) on($(id), 'input', params);
+
+// ---------- 静态模式、调试视图、页面隐藏与销毁 ----------
+const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+function setStatic(v) {
+  staticMode = v; $('static').checked = v; stage.classList.toggle('static', v);
+  if (v) { stop(); pointers.clear(); makeTargets(); viewMat.uniforms.uField.value = targets[0].texture; renderer.render(viewScene, camera); }   // 静态：清空扰动，只画一帧
+  else start();
+}
+on($('static'), 'change', e => setStatic(e.target.checked));
+on($('field'), 'change', e => { viewMat.uniforms.uShowField.value = e.target.checked ? 1 : 0; if (staticMode) renderer.render(viewScene, camera); });
+on(document, 'visibilitychange', () => { if (document.hidden) stop(); else start(); });   // 页面隐藏时停止循环
+let destroyed = false;
+function destroy() {   // 离开页面或组件被移除：停止循环，释放 GPU 资源，移除事件
+  if (destroyed) return;
+  destroyed = true; stop();
+  targets.forEach(t => t.dispose()); texture?.dispose(); simMat.dispose(); viewMat.dispose(); quad.dispose();
+  const m = renderer.info.memory;
+  $('mem').textContent = `已销毁：剩余贴图 ${m.textures} 张、几何体 ${m.geometries} 个。`;
+  renderer.dispose(); life.abort(); ro.disconnect();
+  renderer.domElement.remove();
+  stage.textContent = '效果已销毁。'; stage.style.display = 'grid'; stage.style.placeItems = 'center';
+}
+$('destroy').addEventListener('click', destroy, { once: true });
+on(window, 'pagehide', destroy);
+
+// 窗口或容器尺寸变化：调整画布，并按新的宽高比重新创建扰动场
+const ro = new ResizeObserver(() => {
+  if (destroyed) return;
+  renderer.setSize(stage.clientWidth, stage.clientHeight, false);
+  viewMat.uniforms.uAspect.value = simMat.uniforms.uAspect.value = stage.clientWidth / stage.clientHeight;
+  makeTargets(); params();
+  if (staticMode) { viewMat.uniforms.uField.value = targets[0].texture; renderer.render(viewScene, camera); }
+});
+ro.observe(stage);
+
+document.querySelectorAll('[data-size]').forEach(b => on(b, 'click', () => { const was = running; stop(); loadImage(+b.dataset.size); if (was) start(); }));
+await document.fonts.load('700 150px "Noto Sans SC"', '推开我').catch(() => {});
+renderer.setSize(stage.clientWidth, stage.clientHeight, false);
+viewMat.uniforms.uAspect.value = simMat.uniforms.uAspect.value = stage.clientWidth / stage.clientHeight;
+makeTargets(); params();
+viewMat.uniforms.uField.value = targets[0].texture;
+loadImage(1024, false);
+setStatic(reduce.matches);
+// 读回扰动场，求最大位移（以画面宽度为单位）；只用于调试和测试
+function maxDisplacement() {
+  const buf = new Uint16Array(FIELD_W * fieldH * 4);
+  renderer.readRenderTargetPixels(targets[0], 0, 0, FIELD_W, fieldH, buf);
+  let m = 0;
+  for (let i = 0; i < buf.length; i += 4) m = Math.max(m, Math.hypot(THREE.DataUtils.fromHalfFloat(buf[i]), THREE.DataUtils.fromHalfFloat(buf[i + 1])));
+  return m;
+}
+window.__push = { step, loadImage, pointers, stop, start, destroy, setStatic, renderer, maxDisplacement, get running() { return running; } };
+</script>
+</body>
+</html>

@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>画面后处理：辉光、景深、扭曲、调色与输出</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 14px; max-width: 1100px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  #stage { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: #000; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  #split { position: absolute; top: 0; bottom: 0; border-left: 2px dashed rgba(255, 255, 255, .8); pointer-events: none; }
+  .tag { position: absolute; top: 6px; padding: 0 6px; border-radius: 4px; background: rgba(0, 0, 0, .6); color: #fff; font-size: 12px; }
+  fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0; padding: 6px 10px; display: grid; gap: 2px; }
+  legend { font-weight: 700; padding: 0 4px; }
+  label { display: flex; gap: 6px; align-items: center; }
+  input[type="range"] { flex: 1; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; }
+  th { color: var(--muted); font-weight: 400; }
+  td:first-child, th:first-child { white-space: nowrap; }
+  .warn { color: #b42318; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section>
+    <h2>同一个画面，逐个打开后处理</h2>
+    <p class="sub">虚线左侧是没有后处理的原始渲染，右侧是打开的处理叠加后的结果。拖动“对比位置”移动虚线。</p>
+    <div id="stage" role="img" aria-label="夜色中的场景：发光的圆环、白色方块、玻璃板、橙色加热条和远处的格子墙，右侧有辉光、景深模糊和调色">
+      <span id="split"></span><span class="tag" style="left:6px">原始渲染</span><span class="tag" style="right:6px">后处理</span>
+    </div>
+    <label>对比位置 <input type="range" id="splitPos" min="0" max="1" step="0.01" value="0.5"></label>
+  </section>
+  <section>
+    <fieldset>
+      <legend>处理步骤（按执行顺序）</legend>
+      <label><input type="checkbox" id="bloom" checked> 辉光</label>
+      <label><input type="checkbox" id="dof" checked> 景深</label>
+      <label><input type="checkbox" id="haze" checked> 热浪扭曲</label>
+      <label><input type="checkbox" id="grade" checked> 调色与暗角</label>
+      <label><input type="checkbox" checked disabled> 输出：色调映射与 sRGB 转换（始终在最后）</label>
+    </fieldset>
+    <fieldset>
+      <legend>常见错误</legend>
+      <label><input type="checkbox" id="badOrder"> 把辉光放到输出之后</label>
+      <label><input type="checkbox" id="glassDepth" checked> 玻璃写入景深用的深度</label>
+    </fieldset>
+    <p class="sub warn" id="hint" role="status"></p>
+    <table>
+      <tr><th>处理</th><th>依赖的输入</th><th>注意</th></tr>
+      <tr><td>辉光</td><td>高动态范围的颜色</td><td>在色调映射之前做，才能分清“很亮”和“白色”</td></tr>
+      <tr><td>景深</td><td>颜色 ＋ 深度</td><td>深度每个像素只有一个值，透明物体会出错</td></tr>
+      <tr><td>扭曲</td><td>颜色 ＋ 时间</td><td>偏移后的坐标不能超出画面</td></tr>
+      <tr><td>调色</td><td>颜色</td><td>在线性空间做，结果与在显示空间做不同</td></tr>
+      <tr><td>输出</td><td>颜色</td><td>色调映射与 sRGB 转换只做一次，放在最后</td></tr>
+    </table>
+  </section>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer();
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;   // 色调映射由最后的输出步骤执行
+stage.prepend(renderer.domElement);
+
+// ---------- 场景 ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#06080c');
+const camera = new THREE.PerspectiveCamera(42, 16 / 9, 0.1, 60);
+camera.position.set(0, 1.5, 7); camera.lookAt(0, 1.1, 0);
+scene.add(new THREE.HemisphereLight('#9fb3d9', '#202020', 0.6));
+const key = new THREE.DirectionalLight('#ffffff', 2.2); key.position.set(-3, 5, 4); scene.add(key);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color: '#2a2e36', roughness: 0.9 }));
+ground.rotation.x = -Math.PI / 2; scene.add(ground);
+// 远处的格子墙：细节多，便于看出景深模糊
+const c = document.createElement('canvas'); c.width = c.height = 256;
+const g = c.getContext('2d');
+g.fillStyle = '#d9dee6'; g.fillRect(0, 0, 256, 256);
+g.strokeStyle = '#38404d'; g.lineWidth = 3;
+for (let i = 0; i <= 256; i += 32) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 256); g.moveTo(0, i); g.lineTo(256, i); g.stroke(); }
+const wallTex = new THREE.CanvasTexture(c); wallTex.colorSpace = THREE.SRGBColorSpace; wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping; wallTex.repeat.set(6, 3);
+const wall = new THREE.Mesh(new THREE.PlaneGeometry(24, 9), new THREE.MeshStandardMaterial({ map: wallTex, roughness: 1 }));
+wall.position.set(0, 4.5, -11); scene.add(wall);
+// 发光的圆环：自发光强度远大于 1，属于“高动态范围”的亮
+const ring = new THREE.Mesh(new THREE.TorusGeometry(0.75, 0.07, 24, 96), new THREE.MeshStandardMaterial({ color: '#000', emissive: '#ff8ccf', emissiveIntensity: 3 }));
+ring.position.set(0, 1.6, 0.4); scene.add(ring);   // 放在画面中央，对比线从中间穿过
+// 白色方块：被照亮后接近白色，但并不“发光”
+const box = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.9), new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.6 }));
+box.position.set(1.0, 0.45, 1.0); box.rotation.y = 0.5; scene.add(box);
+const box2 = box.clone(); box2.position.x = -1.6; scene.add(box2);
+// 玻璃板：半透明，放在对焦距离上
+const glass = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 1.5), new THREE.MeshStandardMaterial({ color: '#bfe3ff', transparent: true, opacity: 0.18, roughness: 0.05 }));
+glass.position.set(2.5, 1.25, 1.0); scene.add(glass);
+const frame = new THREE.Mesh(new THREE.BoxGeometry(2.08, 0.06, 0.06), new THREE.MeshStandardMaterial({ color: '#8a93a3' }));
+frame.position.set(2.5, 0.47, 1.0); scene.add(frame);
+// 加热条：上方的空气会扭曲
+const heater = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.08, 0.3), new THREE.MeshStandardMaterial({ color: '#000', emissive: '#ffa04a', emissiveIntensity: 2.5 }));
+heater.position.set(-2.6, 0.05, 2.6); scene.add(heater);
+const heater2 = heater.clone(); heater2.position.x = 2.3; heater2.position.z = 3.2; scene.add(heater2);
+
+// ---------- 后处理步骤 ----------
+const composer = new EffectComposer(renderer);          // 中间结果默认使用半精度浮点，可以保存大于 1 的亮度
+const renderPass = new RenderPass(scene, camera);
+const bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.3, 0.0, 0.8);   // 强度、半径、阈值：亮度超过 0.8 的部分才发光
+const bokeh = new BokehPass(scene, camera, { focus: 6.0, aperture: 0.004, maxblur: 0.01 });   // 对焦在 6 米处：玻璃板与方块
+const haze = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uRect: { value: new THREE.Vector4(0.0, 0.0, 1.0, 1.0) } },
+  vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tDiffuse; uniform float uTime; uniform vec4 uRect; varying vec2 vUv;
+    void main() {
+      // 只在加热条上方的矩形区域内扭曲，越往上越弱
+      float m = smoothstep(uRect.x, uRect.x + 0.04, vUv.x) * smoothstep(uRect.z, uRect.z - 0.04, vUv.x)
+              * smoothstep(uRect.y, uRect.y + 0.05, vUv.y) * smoothstep(uRect.w, uRect.y, vUv.y);
+      vec2 off = vec2(sin(vUv.y * 90.0 - uTime * 7.0), cos(vUv.x * 70.0 + uTime * 5.0)) * 0.004 * m;
+      gl_FragColor = texture2D(tDiffuse, clamp(vUv + off, 0.0, 1.0));   // 偏移后的坐标限制在画面内
+    }`
+});
+const grade = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, uSat: { value: 1.25 }, uContrast: { value: 1.12 }, uWarm: { value: new THREE.Vector3(1.06, 1.0, 0.92) }, uVignette: { value: 0.45 } },
+  vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tDiffuse; uniform float uSat, uContrast, uVignette; uniform vec3 uWarm; varying vec2 vUv;
+    void main() {
+      vec3 c = texture2D(tDiffuse, vUv).rgb * uWarm;                       // 偏暖
+      float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+      c = mix(vec3(l), c, uSat);                                           // 饱和度
+      c = max(vec3(0.0), (c - 0.18) * uContrast + 0.18);                   // 以线性空间的中灰 0.18 为中心调对比
+      c *= 1.0 - uVignette * smoothstep(0.35, 0.85, length(vUv - 0.5));    // 暗角
+      gl_FragColor = vec4(c, 1.0);
+    }`
+});
+const output = new OutputPass();                         // 色调映射 ＋ 转换到 sRGB
+// 没有后处理的对照：只渲染并输出
+const baseComposer = new EffectComposer(renderer);
+baseComposer.addPass(new RenderPass(scene, camera));
+baseComposer.addPass(new OutputPass());
+for (const p of [renderPass, bloom, bokeh, haze, grade, output]) composer.addPass(p);   // 先全部加入，让每一步都得到正确的尺寸
+
+// 景深的深度只在 BokehPass 内部渲染一次；隐藏玻璃，深度就记录玻璃后面的东西
+let glassWritesDepth = true;
+const bokehRender = bokeh.render.bind(bokeh);
+bokeh.render = (...args) => { glass.visible = glassWritesDepth; bokehRender(...args); glass.visible = true; };
+
+const $ = id => document.getElementById(id);
+function arrange() {
+  bloom.enabled = $('bloom').checked; bokeh.enabled = $('dof').checked; haze.enabled = $('haze').checked; grade.enabled = $('grade').checked;
+  glassWritesDepth = $('glassDepth').checked;
+  // 正确顺序：渲染 → 辉光 → 景深 → 扭曲 → 调色 → 输出；错误示范把辉光移到输出之后
+  composer.passes = $('badOrder').checked ? [renderPass, bokeh, haze, grade, output, bloom] : [renderPass, bloom, bokeh, haze, grade, output];
+  const hints = [];
+  if ($('badOrder').checked && bloom.enabled) hints.push('辉光放在输出之后：亮度已被压缩到 0—1，白色方块和格子墙也被当成“很亮”而发光。');
+  if (glassWritesDepth && bokeh.enabled) hints.push('玻璃写入了深度：透过玻璃看到的远处格子墙被当成和玻璃一样近，没有被模糊。');
+  $('hint').textContent = hints.join(' ');
+}
+for (const id of ['bloom', 'dof', 'haze', 'grade', 'badOrder', 'glassDepth']) $(id).addEventListener('change', arrange);
+arrange();
+
+let split = 0.5;
+$('splitPos').addEventListener('input', e => { split = +e.target.value; });
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h, false); composer.setSize(w, h); baseComposer.setSize(w, h);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+  bokeh.uniforms.aspect.value = camera.aspect;
+}
+new ResizeObserver(resize).observe(stage); resize();
+
+// 把加热条两端投影到屏幕上，得到需要扭曲的矩形区域（用 0—1 的画面坐标表示）
+function hazeRect() {
+  const toUv = v => v.project(camera).addScalar(1).multiplyScalar(0.5);
+  const l = toUv(heater2.position.clone().add(new THREE.Vector3(-0.6, 0, 0))), r = toUv(heater2.position.clone().add(new THREE.Vector3(0.6, 0, 0)));
+  return new THREE.Vector4(l.x, l.y, r.x, l.y + 0.35);
+}
+function render(time) {
+  haze.uniforms.uTime.value = time;
+  haze.uniforms.uRect.value.copy(hazeRect());
+  ring.rotation.y = time * 0.4;
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setScissorTest(false);
+  composer.render();
+  // 左侧覆盖为原始渲染
+  renderer.setScissorTest(true);
+  renderer.setScissor(0, 0, w * split, h);
+  baseComposer.render();
+  renderer.setScissorTest(false);
+  $('split').style.left = (split * 100) + '%';
+}
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let running = !reduce;
+renderer.setAnimationLoop(now => { if (running) render(now / 1000); });
+if (!running) render(0);
+window.__post = { render, stop: () => { running = false; renderer.setAnimationLoop(null); }, arrange };
+</script>
+</body>
+</html>

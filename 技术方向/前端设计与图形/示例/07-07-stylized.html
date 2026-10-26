@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>风格化渲染：卡通、素描、水彩与版画</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1080px; display: grid; gap: 8px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  #stage { width: 100%; aspect-ratio: 2 / 1; border-radius: 8px; overflow: hidden; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  .rules { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; font-size: 12px; }
+  .rules b { font-size: 13px; }
+  .rules dl { margin: 2px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 0 6px; }
+  .rules dt { color: var(--muted); } .rules dd { margin: 0; }
+  label { display: inline-flex; gap: 6px; align-items: center; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section>
+  <h2>同一组物体，四种风格：把风格写成轮廓、阴影、纹理与色彩的规则</h2>
+  <p class="sub">四个画面共用同样的模型、相机和光源方向，只替换材质与背景。风格化不只是换着色器：资产的形状、灯光、构图和运动也要一起调整。</p>
+  <div id="stage" role="img" aria-label="同一组茶壶、球和底座，分别渲染成卡通、素描、水彩和版画风格的四个画面"></div>
+  <label><input type="checkbox" id="spin"> 缓慢旋转</label>
+  <div class="rules">
+    <div><b>卡通</b><dl><dt>轮廓</dt><dd>粗而均匀的深色线</dd><dt>阴影</dt><dd>三级硬边色阶</dd><dt>纹理</dt><dd>无，大面积平涂</dd><dt>色彩</dt><dd>饱和、明快</dd></dl></div>
+    <div><b>素描</b><dl><dt>轮廓</dt><dd>细的铅笔线</dd><dt>阴影</dt><dd>越暗排线越密，最暗处交叉排线</dd><dt>纹理</dt><dd>纸张底色</dd><dt>色彩</dt><dd>单色</dd></dl></div>
+    <div><b>水彩</b><dl><dt>轮廓</dt><dd>不描线，边缘颜色加深</dd><dt>阴影</dt><dd>柔和、分界不规则</dd><dt>纹理</dt><dd>颜料浓淡与纸纹</dd><dt>色彩</dt><dd>低饱和、透明感</dd></dl></div>
+    <div><b>版画</b><dl><dt>轮廓</dt><dd>粗黑线</dd><dt>阴影</dt><dd>刻线由细变粗</dd><dt>纹理</dt><dd>平行的刻线</dd><dt>色彩</dt><dd>黑与红两色套印</dd></dl></div>
+  </div>
+</section>
+<script type="module">
+import * as THREE from 'three';
+import { TeapotGeometry } from 'three/addons/geometries/TeapotGeometry.js';
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+stage.append(renderer.domElement);
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 50);
+camera.position.set(0, 2.2, 6.2); camera.lookAt(0, 0.7, 0);
+const LIGHT = new THREE.Vector3(-0.6, 0.9, 0.5).normalize();   // 四个画面使用同一个光源方向
+
+const geos = {
+  teapot: new TeapotGeometry(0.62, 12),
+  ball: new THREE.SphereGeometry(0.42, 64, 32),
+  base: new THREE.CylinderGeometry(1.7, 1.7, 0.16, 96)
+};
+const place = { teapot: [-0.35, 0.86, 0], ball: [0.95, 0.5, 0.45], base: [0, 0, 0] };
+
+// 公用的顶点着色器：把法线和视线方向交给片元着色器
+const VERT = /* glsl */`
+  varying vec3 vN; varying vec3 vView;
+  void main() {
+    vN = normalize(mat3(modelMatrix) * normal);
+    vec4 w = modelMatrix * vec4(position, 1.0);
+    vView = normalize(cameraPosition - w.xyz);
+    gl_Position = projectionMatrix * viewMatrix * w;
+  }`;
+const NOISE = /* glsl */`
+  float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float noise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y); }`;
+// 屏幕空间的平行线：返回 0（纸）到 1（墨）
+const LINES = /* glsl */`
+  float lines(vec2 p, float angle, float spacing, float width) {
+    vec2 d = vec2(cos(angle), sin(angle));
+    float v = abs(fract(dot(p, d) / spacing) - 0.5) * spacing;
+    return 1.0 - smoothstep(width, width + 1.0, v);
+  }`;
+function shader(fragment, color) {
+  return new THREE.ShaderMaterial({
+    uniforms: { uColor: { value: new THREE.Color(color) }, uLight: { value: LIGHT }, uPixel: { value: 1 } },
+    vertexShader: VERT, fragmentShader: NOISE + LINES + fragment
+  });
+}
+// 轮廓：把模型沿法线方向“吹胀”一点，只画背面，露出的边缘就是轮廓线
+function outline(thickness, color) {
+  return new THREE.ShaderMaterial({
+    uniforms: { uThick: { value: thickness }, uColor: { value: new THREE.Color(color) } },
+    vertexShader: `uniform float uThick; void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position + normal * uThick, 1.0); }`,
+    fragmentShader: `uniform vec3 uColor; void main() { gl_FragColor = vec4(uColor, 1.0); }`,
+    side: THREE.BackSide
+  });
+}
+
+const STYLES = {
+  // 卡通：三级色阶（亮面、中间调、暗面），分界是硬边
+  toon: {
+    bg: '#cfe8f7', line: [0.025, '#1d2330'],
+    frag: /* glsl */`uniform vec3 uColor, uLight; varying vec3 vN; varying vec3 vView;
+      void main() {
+        float l = dot(normalize(vN), uLight);
+        float band = l > 0.55 ? 1.0 : (l > 0.05 ? 0.72 : 0.48);
+        float spec = step(0.96, dot(reflect(-uLight, normalize(vN)), vView));   // 一块硬边高光
+        gl_FragColor = vec4(uColor * band + spec * 0.35, 1.0);
+        #include <colorspace_fragment>
+      }`,
+    colors: { teapot: '#f2a33a', ball: '#e2574c', base: '#6fb3d9' }
+  },
+  // 素描：屏幕空间的排线，越暗越密
+  sketch: {
+    bg: '#f4f0e6', line: [0.012, '#4a4a50'],
+    frag: /* glsl */`uniform vec3 uColor, uLight; uniform float uPixel; varying vec3 vN;
+      void main() {
+        float l = max(dot(normalize(vN), uLight), 0.0) * 0.85 + 0.15;
+        vec2 p = gl_FragCoord.xy / uPixel;
+        float ink = 0.0;
+        if (l < 0.85) ink = max(ink, lines(p, 0.8, 6.0, 0.55) * 0.75);
+        if (l < 0.55) ink = max(ink, lines(p, -0.8, 6.0, 0.55) * 0.85);
+        if (l < 0.3) ink = max(ink, lines(p, 0.0, 4.0, 0.7));
+        float grain = noise(p * 0.7) * 0.06;
+        gl_FragColor = vec4(mix(vec3(0.96, 0.94, 0.88) - grain, vec3(0.22, 0.22, 0.25), ink), 1.0);
+        #include <colorspace_fragment>
+      }`,
+    colors: { teapot: '#000', ball: '#000', base: '#000' }
+  },
+  // 水彩：两种浓淡，分界由噪声扰动；边缘颜色加深；叠加纸纹
+  watercolor: {
+    bg: '#f6f1e4', line: null,
+    frag: /* glsl */`uniform vec3 uColor, uLight; uniform float uPixel; varying vec3 vN; varying vec3 vView;
+      void main() {
+        vec2 p = gl_FragCoord.xy / uPixel;
+        vec3 n = normalize(vN);
+        float l = dot(n, uLight) * 0.5 + 0.5;
+        float shade = smoothstep(0.42, 0.62, l + (noise(p * 0.035) - 0.5) * 0.3);   // 不规则的明暗分界
+        vec3 pigment = uColor * (0.88 + 0.24 * noise(p * 0.012));                      // 颜料的浓淡
+        vec3 col = mix(pigment * 0.68, pigment, shade);
+        float rim = pow(1.0 - max(dot(n, vView), 0.0), 2.5);
+        col *= 1.0 - 0.3 * rim;                                                        // 边缘颜料堆积，颜色加深
+        col = mix(col, vec3(0.97, 0.95, 0.9), 0.18) - noise(p * 0.8) * 0.05;          // 透明感与纸纹
+        gl_FragColor = vec4(col, 1.0);
+        #include <colorspace_fragment>
+      }`,
+    colors: { teapot: '#7fa6c9', ball: '#d9897a', base: '#b8b08c' }
+  },
+  // 版画：平行刻线，越暗线越粗；黑与红两种墨色
+  print: {
+    bg: '#efe6d2', line: [0.03, '#141414'],
+    frag: /* glsl */`uniform vec3 uColor, uLight; uniform float uPixel; varying vec3 vN;
+      void main() {
+        vec2 p = gl_FragCoord.xy / uPixel;
+        float l = max(dot(normalize(vN), uLight), 0.0);
+        float y = p.y + 3.0 * sin(p.x * 0.045);                                         // 刻线略带弯曲
+        float v = abs(fract(y / 6.0) - 0.5);
+        float ink = step(v, mix(0.5, 0.04, smoothstep(0.05, 0.95, l)));                // 暗处线粗、亮处线细
+        gl_FragColor = vec4(mix(vec3(0.94, 0.9, 0.82), uColor, ink), 1.0);
+        #include <colorspace_fragment>
+      }`,
+    colors: { teapot: '#141414', ball: '#b3261e', base: '#141414' }
+  }
+};
+
+const scenes = Object.entries(STYLES).map(([name, st]) => {
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(st.bg);
+  const group = new THREE.Group();
+  for (const [key, geo] of Object.entries(geos)) {
+    const mesh = new THREE.Mesh(geo, shader(st.frag, st.colors[key]));
+    mesh.position.set(...place[key]);
+    group.add(mesh);
+    if (st.line) { const o = new THREE.Mesh(geo, outline(...st.line)); o.position.copy(mesh.position); group.add(o); }
+  }
+  scene.add(group);
+  return { name, scene, group };
+});
+
+function resize() {
+  renderer.setSize(stage.clientWidth, stage.clientHeight, false);
+  for (const { group } of scenes) group.traverse(o => { if (o.material?.uniforms?.uPixel) o.material.uniforms.uPixel.value = renderer.getPixelRatio(); });
+}
+new ResizeObserver(resize).observe(stage); resize();
+function render() {
+  const s = renderer.getSize(new THREE.Vector2());
+  const w = s.x / 2, h = s.y / 2;
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+  renderer.setScissorTest(true);
+  scenes.forEach(({ scene }, i) => {
+    const x = (i % 2) * w, y = (1 - Math.floor(i / 2)) * h;
+    renderer.setViewport(x, y, w, h); renderer.setScissor(x, y, w, h);
+    renderer.render(scene, camera);
+  });
+}
+let spin = false;
+document.getElementById('spin').addEventListener('change', e => { spin = e.target.checked; });
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+renderer.setAnimationLoop(now => {
+  if (spin && !reduce) for (const { group } of scenes) group.rotation.y = now / 4000;
+  render();
+});
+window.__styl = { render };
+</script>
+</body>
+</html>

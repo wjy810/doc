@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>资产检查工具：批量检查 glTF 模型并生成预览</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #067647; --warn: #9a6700; --bad: #b42318; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1120px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button, .file { font: inherit; padding: 4px 12px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  .file input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .file:focus-within, :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  #drop { border: 2px dashed #c3c9d3; border-radius: 10px; padding: 10px; text-align: center; color: var(--muted); }
+  #drop.over { border-color: #2f6fdb; background: #f1f6fe; }
+  .rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 2px 16px; font-size: 12px; margin: 0; padding-left: 18px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 6px; text-align: left; vertical-align: top; }
+  th { color: var(--muted); font-weight: 400; white-space: nowrap; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .thumb { width: 120px; height: 90px; border-radius: 6px; background: #eef1f5; display: block; }
+  .thumb.none { display: grid; place-items: center; color: var(--muted); }
+  .state { font-weight: 700; white-space: nowrap; }
+  .state.ok { color: var(--ok); } .state.warn { color: var(--warn); } .state.bad { color: var(--bad); }
+  ul.issues { margin: 0; padding-left: 16px; }
+  ul.issues li.bad { color: var(--bad); } ul.issues li.warn { color: var(--warn); }
+  ul.issues small { color: var(--muted); display: block; }
+</style>
+</head>
+<body>
+<section>
+  <h2>资产检查工具 <span class="sub">版本 1.2.0 · 规则 2026-10</span></h2>
+  <p class="sub"><b>输入</b>：.glb 文件，或把贴图和数据都嵌在一个文件里的 .gltf 文件；单个文件不超过 50 MB。<b>输出</b>：每个文件的检查结果、统一角度的缩略图，以及可以下载的 JSON 报告。所有处理都在本机浏览器中完成，文件不会上传。</p>
+  <ol class="rules">
+    <li>文件大小不超过 2 MB</li><li>三角形不超过 5 万个</li><li>材质不超过 8 个</li><li>贴图边长不超过 2048，最好是 2 的幂</li>
+    <li>有贴图的网格必须有 UV</li><li>每个网格都有法线</li><li>尺寸在 0.05—10 米之间（glTF 以米为单位）</li><li>不使用建模软件的默认名称</li>
+  </ol>
+  <div class="bar">
+    <label class="file">选择文件…<input type="file" id="files" accept=".glb,.gltf" multiple></label>
+    <button type="button" id="samples">载入示例资源</button>
+    <button type="button" id="export" disabled>下载报告（JSON）</button>
+    <span class="sub" id="status" role="status"></span>
+  </div>
+  <div id="drop">也可以把文件拖到这里</div>
+</section>
+<section>
+  <table>
+    <thead><tr><th>预览</th><th>文件</th><th>大小</th><th>三角形</th><th>材质</th><th>贴图</th><th>结果</th><th>问题与修改建议</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</section>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+
+const TOOL = { name: '资产检查工具', version: '1.2.0', rules: '2026-10' };
+const LIMITS = { bytes: 2 * 1024 * 1024, triangles: 50000, materials: 8, texture: 2048, minSize: 0.05, maxSize: 10 };
+// 建模软件的默认名称；加载器会去掉名称中的“.”，所以 Cube.001 读进来是 Cube001
+const DEFAULT_NAME = /^(Cube|Sphere|Cylinder|Plane|Mesh|Material|Object|Untitled)(\.?\d+)?$/i;
+const report = [];
+const $ = id => document.getElementById(id);
+
+// 缩略图：所有资源用同一个相机角度和灯光渲染，便于比较
+const thumbRenderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+thumbRenderer.setSize(240, 180, false);
+function thumbnail(root) {
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color('#eef1f5');
+  scene.add(new THREE.HemisphereLight('#ffffff', '#8a93a3', 2));
+  const sun = new THREE.DirectionalLight('#ffffff', 2); sun.position.set(2, 4, 3); scene.add(sun);
+  scene.add(root);
+  const box = new THREE.Box3().setFromObject(root), sphere = box.getBoundingSphere(new THREE.Sphere());
+  const camera = new THREE.PerspectiveCamera(35, 4 / 3, sphere.radius / 100, sphere.radius * 100);
+  const dir = new THREE.Vector3(1, 0.8, 1.4).normalize();
+  camera.position.copy(sphere.center).addScaledVector(dir, sphere.radius / Math.sin(THREE.MathUtils.degToRad(17.5)));
+  camera.lookAt(sphere.center);
+  thumbRenderer.render(scene, camera);
+  scene.remove(root);
+  return thumbRenderer.domElement.toDataURL('image/png');
+}
+
+async function sha256(buffer) {
+  const hash = await crypto.subtle.digest('SHA-256', buffer);
+  return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// 检查一个文件：返回统计数据与问题列表；每个问题都写明原因和修改建议
+async function check(name, buffer) {
+  const issues = [], add = (level, text, fix) => issues.push({ level, text, fix });
+  const stats = { bytes: buffer.byteLength, triangles: 0, materials: 0, textures: [] };
+  if (stats.bytes > LIMITS.bytes) add('bad', `文件 ${(stats.bytes / 1048576).toFixed(1)} MB，超过 2 MB`, '压缩几何体（Draco 或 Meshopt），贴图转换为 KTX2');
+  let gltf;
+  try {
+    gltf = await new GLTFLoader().parseAsync(buffer, '');
+  } catch (e) {
+    add('bad', '无法解析：不是有效的 glTF 文件，或者引用了没有一起提供的外部文件', '重新导出为 .glb；如果是 .gltf，选择“嵌入”贴图与数据');
+    return { name, stats, issues, root: null };
+  }
+  const root = gltf.scene, materials = new Set(), textures = new Map();
+  root.updateMatrixWorld(true);
+  root.traverse(o => {
+    if (!o.isMesh) return;
+    const g = o.geometry, mats = Array.isArray(o.material) ? o.material : [o.material];
+    stats.triangles += (g.index ? g.index.count : g.attributes.position.count) / 3;
+    mats.forEach(m => materials.add(m));
+    const textured = mats.some(m => ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap'].some(k => m[k]));
+    if (textured && !g.attributes.uv) add('bad', `网格“${o.name || '（无名称）'}”有贴图但没有 UV`, '在建模软件中展开 UV 后重新导出');
+    if (!g.attributes.normal) add('bad', `网格“${o.name || '（无名称）'}”没有法线`, '导出时勾选法线');
+    if (!o.name || DEFAULT_NAME.test(o.name)) add('warn', `网格名称“${o.name || '（空）'}”是默认名称`, '按约定改名，例如 speaker_body');
+    for (const m of mats) for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap']) if (m[k]?.image) textures.set(m[k].image, m[k]);
+  });
+  stats.materials = materials.size;
+  const unnamed = [...materials].filter(m => !m.name).length;
+  if (unnamed) add('warn', `${unnamed} 个材质没有名称`, '按约定命名，例如 metal_dark，便于在代码和其他工具中找到它');
+  for (const m of materials) if (m.name && DEFAULT_NAME.test(m.name)) add('warn', `材质名称“${m.name}”是默认名称`, '按约定改名，例如 metal_dark');
+  if (stats.triangles > LIMITS.triangles) add('bad', `三角形 ${Math.round(stats.triangles).toLocaleString()} 个，超过 5 万`, '减面，或为远处准备低精度版本');
+  if (stats.materials > LIMITS.materials) add('bad', `材质 ${stats.materials} 个，超过 8 个`, '合并材质，或把颜色烘焙到一张贴图');
+  for (const img of textures.keys()) {
+    const w = img.width, h = img.height, pot = n => (n & (n - 1)) === 0;
+    stats.textures.push(`${w}×${h}`);
+    if (Math.max(w, h) > LIMITS.texture) add('bad', `贴图 ${w}×${h}，边长超过 2048`, '缩小到 2048 以内；屏幕上很少需要更大的贴图');
+    else if (!pot(w) || !pot(h)) add('warn', `贴图 ${w}×${h} 的边长不是 2 的幂`, '调整为 1024、2048 等尺寸，便于生成多级渐远纹理和压缩');
+  }
+  const size = new THREE.Box3().setFromObject(root).getSize(new THREE.Vector3()), longest = Math.max(size.x, size.y, size.z);
+  if (longest > LIMITS.maxSize) add('bad', `最长边 ${longest.toFixed(1)} 米，像是按厘米导出的`, '导出时把单位设为米，或者缩放 0.01');
+  else if (longest < LIMITS.minSize) add('bad', `最长边只有 ${(longest * 100).toFixed(2)} 厘米`, '检查导出单位');
+  return { name, stats, issues, root };
+}
+
+function addRow(result, hash) {
+  const { name, stats, issues, root } = result;
+  const level = issues.some(i => i.level === 'bad') ? 'bad' : issues.length ? 'warn' : 'ok';
+  const tr = document.createElement('tr');
+  const td = (html, cls) => { const c = document.createElement('td'); if (cls) c.className = cls; if (html instanceof Node) c.append(html); else c.textContent = html; tr.append(c); };
+  const img = root ? Object.assign(document.createElement('img'), { className: 'thumb', alt: `${name} 的预览`, src: thumbnail(root) })
+                   : Object.assign(document.createElement('div'), { className: 'thumb none', textContent: '无法预览' });
+  td(img);
+  td(name);
+  td(stats.bytes < 1024 ? `${stats.bytes} 字节` : `${(stats.bytes / 1024).toFixed(0)} KB`, 'num');
+  td(Math.round(stats.triangles).toLocaleString(), 'num');
+  td(String(stats.materials), 'num');
+  td(stats.textures.join('，') || '无', 'num');
+  const s = document.createElement('span'); s.className = 'state ' + level; s.textContent = { ok: '通过', warn: '有提示', bad: '不通过' }[level];
+  td(s);
+  const ul = document.createElement('ul'); ul.className = 'issues';
+  for (const i of issues) { const li = document.createElement('li'); li.className = i.level; li.append(i.text); const sm = document.createElement('small'); sm.textContent = '建议：' + i.fix; li.append(sm); ul.append(li); }
+  td(issues.length ? ul : '—');
+  $('rows').append(tr);
+  report.push({ file: name, sha256: hash, result: { ok: '通过', warn: '有提示', bad: '不通过' }[level], stats: { ...stats, triangles: Math.round(stats.triangles) }, issues });
+  $('export').disabled = false;
+}
+
+async function run(files) {
+  $('status').textContent = `正在检查 ${files.length} 个文件…`;
+  for (const { name, buffer } of files) addRow(await check(name, buffer), await sha256(buffer));   // 依次处理，一个文件失败不影响其他文件
+  const bad = report.filter(r => r.result === '不通过').length;
+  $('status').textContent = `已检查 ${report.length} 个文件：${bad} 个不通过。`;
+}
+
+// ---------- 输入：选择文件、拖放、示例资源 ----------
+const readFiles = list => Promise.all([...list].map(async f => ({ name: f.name, buffer: await f.arrayBuffer() })));
+$('files').addEventListener('change', async e => run(await readFiles(e.target.files)));
+const drop = $('drop');
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', async e => { e.preventDefault(); drop.classList.remove('over'); run(await readFiles(e.dataTransfer.files)); });
+
+// 示例资源：一个合格的模型，加上在浏览器里现场导出的几个有问题的模型
+async function exportGlb(object) { return new GLTFExporter().parseAsync(object, { binary: true }); }
+function canvasTexture(w, h) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d'); g.fillStyle = '#9db8e8'; g.fillRect(0, 0, w, h); g.fillStyle = '#f3c98b'; g.fillRect(0, 0, w / 2, h / 2);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+async function samples() {
+  const files = [];
+  let note = '';
+  try {
+    const res = await fetch('models/speaker.glb');
+    if (!res.ok) throw new Error(res.status);
+    files.push({ name: 'speaker.glb', buffer: await res.arrayBuffer() });
+  } catch { note = '（没有读到 models/speaker.glb：需要通过本地服务器打开本页，这次只检查了现场生成的资源。）'; }
+  // 按厘米导出、使用默认名称的箱子
+  const crate = new THREE.Mesh(new THREE.BoxGeometry(150, 80, 60), new THREE.MeshStandardMaterial({ name: 'Material.001', color: '#b07a4a' }));
+  crate.name = 'Cube.001';
+  files.push({ name: 'crate_cm.glb', buffer: await exportGlb(crate) });
+  // 面数过多、贴图过大的球
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.5, 400, 200), new THREE.MeshStandardMaterial({ name: 'ball_paint', map: canvasTexture(3000, 1000) }));
+  ball.name = 'ball_hi';
+  files.push({ name: 'ball_heavy.glb', buffer: await exportGlb(ball) });
+  // 有贴图但没有 UV 的牌子
+  const signGeo = new THREE.PlaneGeometry(0.8, 0.5); signGeo.deleteAttribute('uv');
+  const sign = new THREE.Mesh(signGeo, new THREE.MeshStandardMaterial({ name: 'sign_print', map: canvasTexture(512, 300) }));
+  sign.name = 'sign_board';
+  files.push({ name: 'sign_no_uv.glb', buffer: await exportGlb(sign) });
+  // 损坏的文件
+  files.push({ name: 'broken.glb', buffer: new TextEncoder().encode('这不是一个模型文件').buffer });
+  await run(files);
+  $('status').textContent += note;
+}
+$('samples').addEventListener('click', samples);
+
+// ---------- 输出：JSON 报告，记录工具版本、规则版本与每个文件的哈希 ----------
+$('export').addEventListener('click', () => {
+  const data = { tool: TOOL, checkedAt: new Date().toISOString(), limits: LIMITS, files: report };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  Object.assign(document.createElement('a'), { href: url, download: 'asset-report.json' }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+window.__assets = { samples, report, tool: TOOL };
+</script>
+</body>
+</html>

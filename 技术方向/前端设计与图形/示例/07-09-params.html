@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>效果参数与控制界面：涟漪与颗粒</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr); gap: 14px; max-width: 1120px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  #stage { position: relative; width: 100%; aspect-ratio: 2 / 1; border-radius: 8px; overflow: hidden; background: #000; cursor: crosshair; touch-action: none; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  .ab { position: absolute; top: 6px; left: 0; right: 0; display: grid; grid-template-columns: 1fr 1fr; pointer-events: none; }
+  .ab span { justify-self: start; margin-left: 6px; padding: 0 6px; border-radius: 4px; background: rgba(0, 0, 0, .6); color: #fff; font-size: 12px; }
+  .single .ab span:last-child { display: none; }
+  .param { display: grid; grid-template-columns: 7.5em 1fr 4.6em auto; gap: 2px 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid #eef1f5; }
+  .param small { grid-column: 1 / -1; color: var(--muted); font-size: 11.5px; }
+  .param output { font-variant-numeric: tabular-nums; text-align: right; }
+  .badge { font-size: 11px; padding: 0 6px; border-radius: 99px; background: #e7f5ec; color: #067647; white-space: nowrap; }
+  .badge.rebuild { background: #fdf3e0; color: #9a6700; }
+  .file { position: relative; font: inherit; padding: 2px 8px; border: 1px solid #c3c9d3; border-radius: 6px; cursor: pointer; }
+  .file input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .file:focus-within { outline: 3px solid #e4572e; outline-offset: 2px; }
+  select, button { font: inherit; padding: 2px 8px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  button.reset { padding: 0 6px; font-size: 12px; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  #msg { min-height: 20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section>
+    <h2>点击画面产生涟漪</h2>
+    <p class="sub">“对比”模式把同一次点击同时交给 A、B 两套参数，便于比较。</p>
+    <div id="stage" class="single" role="img" aria-label="一张海报图片，点击处产生向外扩散的涟漪，画面上叠加细小的颗粒">
+      <div class="ab"><span id="labelA">A</span><span id="labelB">B</span></div>
+    </div>
+    <div class="bar">
+      <label><input type="checkbox" id="compare"> 对比</label>
+      <label>A <select id="presetA"></select></label>
+      <label>B <select id="presetB"></select></label>
+      <span class="sub">正在编辑：A</span>
+    </div>
+  </section>
+  <section>
+    <h2>参数（A）</h2>
+    <div id="params"></div>
+    <div class="bar">
+      <button type="button" id="save">保存为新预设</button>
+      <button type="button" id="exportP">导出 JSON</button>
+      <label class="file">导入 JSON…<input type="file" id="importP" accept=".json"></label>
+    </div>
+    <p class="sub" id="msg" role="status"></p>
+  </section>
+</div>
+<script type="module">
+import * as THREE from 'three';
+
+// ---------- 参数定义：名称、单位、范围、默认值、说明、能否实时修改 ----------
+const PARAMS = [
+  { key: 'amp', label: '波幅', unit: '像素', min: 0, max: 30, step: 1, def: 10, live: true, help: '涟漪把画面推开的最大距离' },
+  { key: 'wave', label: '波长', unit: '像素', min: 10, max: 120, step: 2, def: 40, live: true, help: '相邻两道波纹之间的距离' },
+  { key: 'recover', label: '恢复时间', unit: '秒', min: 0.3, max: 4, step: 0.1, def: 1.5, live: true, help: '涟漪减弱到 5% 所需的时间：越短，画面恢复越快' },
+  { key: 'grain', label: '颗粒强度', unit: '%', min: 0, max: 40, step: 1, def: 8, live: true, help: '叠加在画面上的随机明暗' },
+  { key: 'grainSize', label: '颗粒大小', unit: '像素', min: 1, max: 6, step: 1, def: 2, live: true, help: '每颗颗粒的边长' },
+  { key: 'quality', label: '渲染精度', unit: '%', min: 50, max: 100, step: 25, def: 100, live: false, help: '松手后重新分配画布，画面会闪一下' },
+  { key: 'maxRipples', label: '涟漪上限', unit: '个', min: 4, max: 16, step: 4, def: 8, live: false, help: '改变着色器中的数组长度，需要重新编译' }
+];
+const BUILTIN = {
+  '默认': Object.fromEntries(PARAMS.map(p => [p.key, p.def])),
+  '平静': { amp: 4, wave: 70, recover: 3, grain: 3, grainSize: 1, quality: 100, maxRipples: 8 },
+  '活泼': { amp: 18, wave: 28, recover: 0.8, grain: 6, grainSize: 2, quality: 100, maxRipples: 8 },
+  '复古胶片': { amp: 8, wave: 44, recover: 1.6, grain: 28, grainSize: 3, quality: 75, maxRipples: 8 }
+};
+// 自定义预设保存在浏览器中；读写失败（例如隐私模式）时只是不保存，页面照常工作
+const STORE = 'ripple-presets-v1';
+function loadCustom() { try { return JSON.parse(localStorage.getItem(STORE)) || {}; } catch { return {}; } }
+function saveCustom(obj) { try { localStorage.setItem(STORE, JSON.stringify(obj)); return true; } catch { return false; } }
+let custom = loadCustom();
+const allPresets = () => ({ ...BUILTIN, ...custom });
+
+// ---------- 画面 ----------
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ preserveDrawingBuffer: true });
+stage.prepend(renderer.domElement);
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+function poster() {   // 用二维画布画一张海报，作为被扭曲的图片
+  const c = document.createElement('canvas'); c.width = 800; c.height = 800;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 800, 800); grad.addColorStop(0, '#1d3b6e'); grad.addColorStop(1, '#e58f65');
+  g.fillStyle = grad; g.fillRect(0, 0, 800, 800);
+  g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 2;
+  for (let i = 0; i <= 800; i += 50) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 800); g.moveTo(0, i); g.lineTo(800, i); g.stroke(); }
+  g.fillStyle = '#fff'; g.font = '700 150px "Noto Sans SC", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('涟漪', 400, 400);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+await document.fonts.load('700 150px "Noto Sans SC"', '涟漪').catch(() => {});
+const map = poster();
+function makeMaterial(maxRipples) {
+  return new THREE.ShaderMaterial({
+    defines: { MAX: maxRipples },
+    uniforms: { uMap: { value: map }, uTime: { value: 0 }, uRipples: { value: Array.from({ length: maxRipples }, () => new THREE.Vector3(0, 0, -100)) },
+                uAmp: { value: 0 }, uWave: { value: 40 }, uDecay: { value: 2 }, uGrain: { value: 0 }, uGrainSize: { value: 2 }, uSize: { value: new THREE.Vector2(1, 1) } },
+    vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+    fragmentShader: /* glsl */`
+      uniform sampler2D uMap; uniform float uTime, uAmp, uWave, uDecay, uGrain, uGrainSize; uniform vec2 uSize;
+      uniform vec3 uRipples[MAX];   // 每个涟漪：中心（像素）与开始时间
+      varying vec2 vUv;
+      float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+      void main() {
+        vec2 px = vUv * uSize, offset = vec2(0.0);
+        for (int i = 0; i < MAX; i++) {
+          float age = uTime - uRipples[i].z;
+          if (age < 0.0 || age > 6.0) continue;
+          vec2 d = px - uRipples[i].xy; float r = length(d);
+          float front = age * 260.0;                                       // 波前以每秒 260 像素向外扩散
+          float env = exp(-age * uDecay) * smoothstep(uWave * 1.5, 0.0, abs(r - front));
+          offset += (d / max(r, 1.0)) * sin((r - front) / uWave * 6.2832) * uAmp * env;
+        }
+        vec2 uv = vUv + offset / uSize;
+        float a = uSize.x / uSize.y;                                        // 正方形的图片按“铺满”的方式裁切
+        vec2 st = (uv - 0.5) * (a > 1.0 ? vec2(1.0, 1.0 / a) : vec2(a, 1.0)) + 0.5;
+        vec3 col = texture2D(uMap, st).rgb;
+        col += (hash(floor(gl_FragCoord.xy / uGrainSize) + floor(uTime * 24.0)) - 0.5) * uGrain;   // 颗粒：每秒更新 24 次
+        gl_FragColor = vec4(col, 1.0);
+        #include <colorspace_fragment>
+      }`
+  });
+}
+const quad = new THREE.PlaneGeometry(2, 2);
+const views = { A: { params: { ...BUILTIN['默认'] } }, B: { params: { ...BUILTIN['活泼'] } } };
+for (const v of Object.values(views)) { v.scene = new THREE.Scene(); v.mesh = new THREE.Mesh(quad, makeMaterial(v.params.maxRipples)); v.scene.add(v.mesh); v.ripples = []; }
+
+let compare = false, quality = 100;
+function resize() {
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2) * quality / 100);
+  renderer.setSize(stage.clientWidth, stage.clientHeight, false);
+}
+new ResizeObserver(resize).observe(stage); resize();
+
+// 把参数换算成着色器使用的数值：恢复时间 T 秒后振幅剩 5%，即 exp(−3) ≈ 0.05
+function apply(view) {
+  const u = view.mesh.material.uniforms, p = view.params, pr = renderer.getPixelRatio();
+  u.uAmp.value = p.amp * pr; u.uWave.value = p.wave * pr; u.uDecay.value = 3 / p.recover;
+  u.uGrain.value = p.grain / 100; u.uGrainSize.value = p.grainSize * pr;
+}
+function rebuild(view) {   // 涟漪上限改变：生成新材质并立即编译，测量用时
+  const t0 = performance.now();
+  const old = view.mesh.material;
+  view.mesh.material = makeMaterial(view.params.maxRipples);
+  renderer.compile(view.scene, camera);
+  renderer.render(view.scene, camera);   // 第一次使用时才真正等待编译和链接完成
+  old.dispose();
+  view.ripples = [];
+  return performance.now() - t0;
+}
+
+let start = performance.now(), frozen = null;
+const now = () => frozen ?? (performance.now() - start) / 1000;
+function render() {
+  const t = now(), w = renderer.domElement.width, h = renderer.domElement.height;
+  const list = compare ? ['A', 'B'] : ['A'];
+  renderer.setScissorTest(true);
+  list.forEach((k, i) => {
+    const view = views[k], u = view.mesh.material.uniforms, vw = w / list.length;
+    renderer.setViewport(i * vw / renderer.getPixelRatio(), 0, vw / renderer.getPixelRatio(), h / renderer.getPixelRatio());
+    renderer.setScissor(i * vw / renderer.getPixelRatio(), 0, vw / renderer.getPixelRatio(), h / renderer.getPixelRatio());
+    u.uTime.value = t; u.uSize.value.set(vw, h);
+    apply(view);
+    u.uRipples.value.forEach((r, j) => { const rp = view.ripples[j]; if (rp) r.set(rp.x * vw, rp.y * h, rp.t); else r.set(0, 0, -100); });
+    renderer.render(view.scene, camera);
+  });
+}
+renderer.setAnimationLoop(render);
+
+// 点击：换算成所在半边的 0—1 坐标，交给参与比较的每一套参数
+function ripple(u, v) {
+  for (const k of compare ? ['A', 'B'] : ['A']) {
+    const view = views[k];
+    view.ripples.push({ x: u, y: v, t: now() });
+    if (view.ripples.length > view.params.maxRipples) view.ripples.shift();   // 超过上限时丢弃最早的涟漪
+  }
+}
+stage.addEventListener('pointerdown', e => {
+  const r = stage.getBoundingClientRect(), halves = compare ? 2 : 1;
+  const x = (e.clientX - r.left) / r.width * halves;
+  ripple(x % 1, 1 - (e.clientY - r.top) / r.height);
+});
+
+// ---------- 控制界面 ----------
+const $ = id => document.getElementById(id);
+const msg = text => { $('msg').textContent = text; };
+const inputs = {};
+for (const p of PARAMS) {
+  const row = document.createElement('div'); row.className = 'param';
+  const id = 'p-' + p.key;
+  row.innerHTML = `<label for="${id}">${p.label}</label><input type="range" id="${id}" min="${p.min}" max="${p.max}" step="${p.step}">
+    <output for="${id}"></output><button type="button" class="reset" aria-label="把${p.label}恢复为默认值 ${p.def} ${p.unit}">复原</button>
+    <small>${p.help}。范围 ${p.min}—${p.max} ${p.unit}，默认 ${p.def}。<span class="badge ${p.live ? '' : 'rebuild'}">${p.live ? '可以实时调整' : '松手后重建'}</span></small>`;
+  $('params').append(row);
+  const input = row.querySelector('input'), out = row.querySelector('output');
+  inputs[p.key] = { input, out, p };
+  const show = () => { out.textContent = `${input.value} ${p.unit}`; };
+  input.addEventListener('input', () => { show(); if (p.live) views.A.params[p.key] = +input.value; });   // 实时参数：拖动时立即生效
+  input.addEventListener('change', () => { if (!p.live) commit(p.key, +input.value); });                // 重建参数：松手后才生效
+  row.querySelector('.reset').addEventListener('click', () => { input.value = p.def; show(); p.live ? (views.A.params[p.key] = p.def) : commit(p.key, p.def); });
+}
+function commit(key, value) {
+  if (views.A.params[key] === value) return;
+  views.A.params[key] = value;
+  if (key === 'quality') { quality = value; resize(); msg(`渲染精度改为 ${value}%：画布已重新分配。`); }
+  if (key === 'maxRipples') { const ms = rebuild(views.A); msg(`涟漪上限改为 ${value} 个：着色器重新编译用了 ${ms.toFixed(0)} 毫秒，这段时间画面会停顿。`); }
+}
+function showParams() { for (const { input, out, p } of Object.values(inputs)) { input.value = views.A.params[p.key]; out.textContent = `${input.value} ${p.unit}`; } }
+function fillSelects() {
+  for (const id of ['presetA', 'presetB']) {
+    const sel = $(id), cur = sel.value;
+    sel.replaceChildren(...Object.keys(allPresets()).map(n => new Option(n, n)));
+    sel.value = cur && allPresets()[cur] ? cur : (id === 'presetA' ? '默认' : '活泼');
+  }
+}
+function usePreset(k, name) {
+  const p = allPresets()[name]; if (!p) return;
+  const view = views[k], needRebuild = p.maxRipples !== view.params.maxRipples;
+  view.params = { ...p };
+  if (needRebuild) rebuild(view);
+  if (k === 'A') { if (p.quality !== quality) { quality = p.quality; resize(); } showParams(); }
+  $('label' + k).textContent = `${k}：${name}`;
+}
+$('presetA').addEventListener('change', e => usePreset('A', e.target.value));
+$('presetB').addEventListener('change', e => usePreset('B', e.target.value));
+$('compare').addEventListener('change', e => { compare = e.target.checked; stage.classList.toggle('single', !compare); });
+$('save').addEventListener('click', () => {
+  const name = `我的预设 ${Object.keys(custom).length + 1}`;
+  custom[name] = { ...views.A.params };
+  const ok = saveCustom(custom);
+  fillSelects(); $('presetA').value = name; $('labelA').textContent = `A：${name}`;
+  msg(ok ? `已保存“${name}”，下次打开页面仍然可以选择。` : `已加入“${name}”，但浏览器不允许保存，关闭页面后会丢失。`);
+});
+$('exportP').addEventListener('click', () => {
+  const url = URL.createObjectURL(new Blob([JSON.stringify({ version: 1, presets: custom }, null, 2)], { type: 'application/json' }));
+  Object.assign(document.createElement('a'), { href: url, download: 'ripple-presets.json' }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+$('importP').addEventListener('change', async e => {
+  try {
+    const data = JSON.parse(await e.target.files[0].text());
+    if (data.version !== 1 || typeof data.presets !== 'object') throw new Error('格式不对');
+    let n = 0;
+    for (const [name, p] of Object.entries(data.presets)) {   // 逐项检查：缺少的参数用默认值，超出范围的参数截断到范围内
+      custom[name] = Object.fromEntries(PARAMS.map(q => [q.key, Math.min(q.max, Math.max(q.min, Number.isFinite(+p[q.key]) ? +p[q.key] : q.def))]));
+      n++;
+    }
+    saveCustom(custom); fillSelects(); msg(`导入了 ${n} 个预设。`);
+  } catch (err) { msg('导入失败：文件不是本工具导出的预设（' + err.message + '）。'); }
+});
+fillSelects(); showParams();
+$('labelA').textContent = 'A：默认'; $('labelB').textContent = 'B：活泼';
+window.__params = { views, ripple, setCompare: v => { compare = v; $('compare').checked = v; stage.classList.toggle('single', !v); }, freeze: t => { frozen = t; }, usePreset, commit, render };
+</script>
+</body>
+</html>

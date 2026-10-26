@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>实时粒子：火花、能量线与文字粒子</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1080px; display: grid; gap: 8px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  #stage { position: relative; width: 100%; aspect-ratio: 3 / 1; border-radius: 8px; overflow: hidden; background: #07090d; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  .names { position: absolute; left: 0; right: 0; top: 6px; display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; color: #e6ebf2; pointer-events: none; font-weight: 700; }
+  .bar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+  .bar label { display: inline-flex; gap: 4px; align-items: center; }
+  button { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  button[aria-pressed="true"] { background: #1d2330; color: #fff; border-color: #1d2330; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; }
+  th { color: var(--muted); font-weight: 400; }
+  #bench { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<section>
+  <h2>三种粒子效果：共用一套机制，形态与节奏分别设计</h2>
+  <p class="sub">每个粒子的位置、颜色和大小都在顶点着色器中由“出生时间”和“初速度”直接算出，CPU 不必每帧更新粒子。粒子使用加法混合：重叠越多越亮。</p>
+  <div id="stage" role="img" aria-label="黑色背景上三种粒子效果：左边是向上喷射后落下的橙色火花，中间是沿曲线流动的蓝色能量线，右边是聚合成“粒子”二字的白色光点">
+    <div class="names"><span>火花</span><span>能量线</span><span>文字粒子</span></div>
+  </div>
+  <div class="bar">
+    <button type="button" id="overdraw" aria-pressed="false">叠加次数视图</button>
+    <button type="button" id="pause" aria-pressed="false">暂停</button>
+    <button type="button" id="measure">测量成本</button>
+    <span id="bench" role="status"></span>
+  </div>
+  <table>
+    <tr><th>阶段</th><th>火花</th><th>能量线</th><th>文字粒子</th></tr>
+    <tr><td>生成</td><td>从一点持续喷出，方向在向上的锥形内随机</td><td>每条线一个“头部”，沿曲线循环</td><td>从随机位置出发</td></tr>
+    <tr><td>生命</td><td>0.6—1.4 秒，短</td><td>头部永不消失，尾巴由后面的粒子组成</td><td>聚合 1.6 秒，停留 1.6 秒，散开 1.4 秒</td></tr>
+    <tr><td>速度</td><td>初速度大，受重力向下弯</td><td>沿曲线匀速</td><td>缓出曲线：先快后慢地到达文字</td></tr>
+    <tr><td>颜色</td><td>白黄 → 橙 → 暗红（模拟冷却）</td><td>蓝青，头部最亮</td><td>白色带一点蓝</td></tr>
+    <tr><td>尺寸</td><td>随生命缩小</td><td>越靠尾部越小</td><td>聚合后略微闪烁</td></tr>
+    <tr><td>消亡</td><td>透明度降到 0 后重新出生</td><td>尾部逐渐透明</td><td>散开时淡出，然后重新聚合</td></tr>
+  </table>
+</section>
+<script type="module">
+import * as THREE from 'three';
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+stage.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-3, 3, 1, -1, -10, 10);   // 正交相机：三个效果并排，大小一致
+const uniforms = { uTime: { value: 0 }, uPixel: { value: 1 }, uOverdraw: { value: 0 }, uSizeScale: { value: 1 } };
+
+// 所有粒子共用的片元着色器：画一个中心亮、边缘暗的圆点
+const POINT_FRAG = /* glsl */`
+  uniform float uOverdraw;
+  varying vec3 vColor; varying float vAlpha;
+  void main() {
+    float d = length(gl_PointCoord - 0.5);
+    if (d > 0.5) discard;
+    float glow = smoothstep(0.5, 0.0, d);
+    // 叠加次数视图：每个粒子只加一点固定的红色，重叠越多越亮
+    gl_FragColor = uOverdraw > 0.5 ? vec4(0.08, 0.02, 0.0, 1.0) : vec4(vColor * glow * vAlpha, 1.0);
+  }`;
+function points(count, attrs, vertexShader) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(count * 3), 3));
+  for (const [name, size, fn] of attrs) {
+    const arr = new Float32Array(count * size);
+    for (let i = 0; i < count; i++) { const v = fn(i); if (size === 1) arr[i] = v; else arr.set(v, i * size); }
+    geo.setAttribute(name, new THREE.Float32BufferAttribute(arr, size));
+  }
+  const mat = new THREE.ShaderMaterial({ uniforms, vertexShader, fragmentShader: POINT_FRAG, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+  const p = new THREE.Points(geo, mat);
+  p.frustumCulled = false;   // 位置在着色器里计算，包围盒无法预先知道
+  scene.add(p);
+  return p;
+}
+let seed = 1; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+
+// ---------- 火花：持续喷射，受重力影响 ----------
+function sparks(count) {
+  return points(count, [
+    ['aOffset', 1, () => rnd()],                                   // 出生时刻的错开量
+    ['aLife', 1, () => 0.6 + rnd() * 0.8],
+    ['aVel', 2, () => { const a = Math.PI / 2 + (rnd() - 0.5) * 0.9, s = 1.4 + rnd() * 1.2; return [Math.cos(a) * s, Math.sin(a) * s]; }]
+  ], /* glsl */`
+    uniform float uTime, uPixel, uSizeScale;
+    attribute float aOffset, aLife; attribute vec2 aVel;
+    varying vec3 vColor; varying float vAlpha;
+    void main() {
+      float age = mod(uTime + aOffset * aLife, aLife);            // 当前年龄：到达寿命后从 0 重新开始
+      float k = age / aLife;                                       // 生命进度 0…1
+      vec2 p = vec2(-2.0, -0.75) + aVel * age + 0.5 * vec2(0.0, -3.2) * age * age;   // 位置 ＝ 起点 ＋ 速度 × 时间 ＋ 重力
+      vColor = mix(vec3(1.0, 0.95, 0.7), mix(vec3(1.0, 0.45, 0.1), vec3(0.5, 0.05, 0.02), k), smoothstep(0.0, 0.5, k));
+      vAlpha = 1.0 - k;
+      gl_PointSize = mix(7.0, 1.5, k) * uPixel * uSizeScale;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 0.0, 1.0);
+    }`);
+}
+// ---------- 能量线：头部沿曲线循环，后面跟着一串逐渐变暗的粒子 ----------
+function energy(lines, perLine) {
+  return points(lines * perLine, [
+    ['aLine', 1, i => Math.floor(i / perLine)],
+    ['aTrail', 1, i => (i % perLine) / perLine]                    // 0 是头部，越大越靠尾部
+  ], /* glsl */`
+    uniform float uTime, uPixel, uSizeScale;
+    attribute float aLine, aTrail;
+    varying vec3 vColor; varying float vAlpha;
+    vec2 curve(float s, float line) {                              // 每条线是一条不同相位的正弦曲线
+      float ph = line * 1.7;
+      return vec2(mix(-0.85, 0.85, s), 0.45 * sin(s * 6.2832 * 1.2 + ph + uTime * 0.6) * sin(s * 3.1416));
+    }
+    void main() {
+      float s = fract(uTime * 0.35 + aLine * 0.17) - aTrail * 0.28;  // 头部的位置减去尾巴的长度
+      vec2 p = curve(fract(s), aLine);
+      vColor = mix(vec3(0.6, 0.95, 1.0), vec3(0.1, 0.4, 1.0), aTrail);
+      vAlpha = (1.0 - aTrail) * step(0.0, s) * smoothstep(0.0, 0.05, fract(s)) * smoothstep(1.0, 0.95, fract(s));
+      gl_PointSize = mix(6.0, 1.5, aTrail) * uPixel * uSizeScale;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 0.0, 1.0);
+    }`);
+}
+// ---------- 文字粒子：从随机位置聚合成文字，停留后散开 ----------
+function textTargets(text, step = 3) {
+  const c = document.createElement('canvas'); c.width = 240; c.height = 110;
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.font = '700 96px "Noto Sans SC", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, 120, 58);
+  const data = g.getImageData(0, 0, c.width, c.height).data, pts = [];
+  for (let y = 0; y < c.height; y += step) for (let x = 0; x < c.width; x += step) if (data[(y * c.width + x) * 4 + 3] > 128) pts.push([2 + (x - 120) / 120 * 0.85, -(y - 55) / 120 * 0.85]);
+  return pts;
+}
+function textParticles(pts) {
+  return points(pts.length, [
+    ['aTarget', 2, i => pts[i]],
+    ['aFrom', 2, () => { const a = rnd() * 6.2832, r = 0.6 + rnd() * 0.6; return [2 + Math.cos(a) * r, Math.sin(a) * r * 0.8]; }],
+    ['aRand', 1, () => rnd()]
+  ], /* glsl */`
+    uniform float uTime, uPixel, uSizeScale;
+    attribute vec2 aTarget, aFrom; attribute float aRand;
+    varying vec3 vColor; varying float vAlpha;
+    void main() {
+      float t = mod(uTime + aRand * 0.25, 4.6);                    // 聚合 1.6 秒、停留 1.6 秒、散开 1.4 秒
+      float gather = 1.0 - pow(1.0 - clamp(t / 1.6, 0.0, 1.0), 3.0);   // 缓出：先快后慢
+      float spread = clamp((t - 3.2) / 1.4, 0.0, 1.0);
+      vec2 p = mix(aFrom, aTarget, gather);
+      p += (aTarget - vec2(2.0, 0.0)) * spread * 1.2 + vec2(0.0, 0.3) * spread * spread;   // 散开：向外、向上飘
+      vColor = vec3(0.85, 0.92, 1.0) * (0.85 + 0.15 * sin(uTime * 6.0 + aRand * 40.0));
+      vAlpha = 1.0 - spread;
+      gl_PointSize = 3.2 * uPixel * uSizeScale;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 0.0, 1.0);
+    }`);
+}
+
+let groups = [];
+function build(scale = 1) {
+  for (const g of groups) { scene.remove(g); g.geometry.dispose(); g.material.dispose(); }   // 重新生成前释放旧的缓冲区
+  seed = 1;
+  groups = [sparks(Math.round(1500 * scale)), energy(6, Math.round(60 * scale)), textParticles(textTargets('粒子', scale >= 4 ? 1 : 3))];
+}
+await document.fonts.load('700 96px "Noto Sans SC"', '粒子').catch(() => {});
+build();
+
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h, false);
+  uniforms.uPixel.value = renderer.getPixelRatio() * h / 300;   // 粒子大小随画布高度缩放
+}
+new ResizeObserver(resize).observe(stage); resize();
+
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let paused = reduce, last = performance.now();
+if (reduce) uniforms.uTime.value = 2.4;                        // 减少动态效果：停在文字已经聚合的时刻
+renderer.setAnimationLoop(now => {
+  if (!paused) uniforms.uTime.value += Math.min(0.05, (now - last) / 1000);
+  last = now;
+  renderer.render(scene, camera);
+});
+document.getElementById('overdraw').addEventListener('click', e => {
+  const on = e.currentTarget.getAttribute('aria-pressed') !== 'true';
+  e.currentTarget.setAttribute('aria-pressed', String(on));
+  uniforms.uOverdraw.value = on ? 1 : 0;
+});
+document.getElementById('pause').addEventListener('click', e => {
+  paused = !paused;
+  e.currentTarget.setAttribute('aria-pressed', String(paused));
+  e.currentTarget.textContent = paused ? '继续' : '暂停';
+});
+// 成本测量：粒子数量 × 每个粒子覆盖的像素，决定了片元着色器要运行多少次
+async function measure() {
+  const gl = renderer.getContext(), px = new Uint8Array(4), rows = [];
+  renderer.setAnimationLoop(null);
+  for (const [scale, size] of [[1, 1], [10, 1], [1, 4], [10, 4]]) {
+    build(scale); uniforms.uSizeScale.value = size;
+    renderer.render(scene, camera); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);   // 预热
+    const t0 = performance.now();
+    for (let i = 0; i < 20; i++) { uniforms.uTime.value += 0.016; renderer.render(scene, camera); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); }
+    const count = groups.reduce((n, g) => n + g.geometry.attributes.position.count, 0);
+    rows.push({ count, size, ms: (performance.now() - t0) / 20 });
+  }
+  build(); uniforms.uSizeScale.value = 1;
+  renderer.setAnimationLoop(now => { if (!paused) uniforms.uTime.value += Math.min(0.05, (now - last) / 1000); last = now; renderer.render(scene, camera); });
+  document.getElementById('bench').textContent = rows.map(r => `${r.count} 个 × 尺寸 ${r.size} 倍：${r.ms.toFixed(1)} 毫秒`).join('；');
+  return rows;
+}
+document.getElementById('measure').addEventListener('click', measure);
+window.__particles = { uniforms, renderer, measure, setPaused: v => { paused = v; }, render: () => renderer.render(scene, camera) };
+</script>
+</body>
+</html>

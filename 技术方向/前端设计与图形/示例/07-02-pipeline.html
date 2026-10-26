@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPU 怎样画出一帧：顶点、光栅化、片元与插值</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.3.0/400.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 1040px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  canvas { width: 100%; aspect-ratio: 3 / 2; display: block; border-radius: 8px; background: #11151c; }
+  canvas.pixel { image-rendering: pixelated; }
+  pre { margin: 0; font: 10.5px/1.5 "JetBrains Mono", monospace; background: #f6f7f9; border-radius: 6px; padding: 8px; white-space: pre-wrap; }
+  .spaces { grid-column: 1 / -1; }
+  .chain { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr auto 1fr; align-items: stretch; gap: 6px; }
+  .space { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: #f8fafc; }
+  .space b { display: block; font-size: 13px; } .space small { color: var(--muted); }
+  .arrow { align-self: center; color: var(--accent); font-size: 11px; text-align: center; max-width: 64px; }
+  .arrow::after { content: '→'; display: block; font-size: 18px; line-height: 1; }
+  .note { color: #b42318; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <section>
+    <h2>1 顶点处理与插值</h2>
+    <p class="sub">三个顶点各带一种颜色。顶点之间的颜色由 GPU 自动插值：越靠近哪个顶点，越像它的颜色。</p>
+    <canvas id="tri" width="360" height="240" role="img" aria-label="一个三角形，三个角分别是红、绿、蓝，内部颜色平滑过渡"></canvas>
+<pre>// 顶点着色器：每个顶点运行一次
+in vec2 position; in vec3 color;
+out vec3 vColor;  // 交给光栅化插值
+void main() {
+  vColor = color;
+  gl_Position = vec4(position, 0.0, 1.0);
+}
+// 片元着色器：每个像素运行一次
+in vec3 vColor;  out vec4 outColor;
+void main() { outColor = vec4(vColor, 1.0); }</pre>
+  </section>
+  <section>
+    <h2>2 光栅化：三角形被切成片元</h2>
+    <p class="sub">同一个三角形，只用 30 × 20 个像素画出，再放大显示。每个小方块就是一个片元，片元着色器为每个片元算出一种颜色。</p>
+    <canvas id="raster" class="pixel" width="30" height="20" role="img" aria-label="放大后的低分辨率三角形，可以看到一个个方块状的像素"></canvas>
+    <p class="sub" id="count"></p>
+  </section>
+  <section>
+    <h2>3 UV 坐标与纹理采样</h2>
+    <p class="sub">左：把 UV 直接显示为颜色（u 越大越红，v 越大越绿）。右：用 UV × 3 在一张纹理中取色，纹理重复了三次。</p>
+    <canvas id="uv" width="360" height="240" role="img" aria-label="左半边是由黑到红、由黑到绿的渐变；右半边是重复三次的带字母纹理"></canvas>
+<pre>in vec2 vUv;  uniform sampler2D map;
+void main() {
+  if (vUv.x &lt; 0.5)   // 左半边：UV 显示为颜色
+    outColor = vec4(vUv.x * 2.0, vUv.y, 0.0, 1.0);
+  else              // 右半边：纹理采样
+    outColor = texture(map, vUv * vec2(2.0, 1.0) * 3.0);
+}</pre>
+  </section>
+  <section class="spaces">
+    <h2>4 坐标空间：一个顶点从模型到屏幕要经过的几次变换</h2>
+    <div class="chain">
+      <div class="space"><b>模型空间</b><small>以模型自己的中心为原点，建模时的坐标</small></div>
+      <div class="arrow">模型矩阵</div>
+      <div class="space"><b>世界空间</b><small>放进场景后的位置、旋转、缩放</small></div>
+      <div class="arrow">观察矩阵</div>
+      <div class="space"><b>观察空间</b><small>以相机为原点，相机看向 −z 方向</small></div>
+      <div class="arrow">投影矩阵</div>
+      <div class="space"><b>裁剪空间</b><small>gl_Position 的结果；视野外的部分被裁掉</small></div>
+      <div class="arrow">透视除法、视口</div>
+      <div class="space"><b>屏幕空间</b><small>画布上的像素位置，片元在这里生成</small></div>
+    </div>
+  </section>
+</div>
+<script>
+// 编译一个着色器程序；出错时把编译信息显示在页面上，而不是悄悄失败
+function program(gl, vs, fs) {
+  const p = gl.createProgram();
+  for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, '#version 300 es\nprecision highp float;\n' + src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    gl.attachShader(p, s);
+  }
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  return p;
+}
+function attribute(gl, prog, name, data, size) {
+  const loc = gl.getAttribLocation(prog, name);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+}
+const TRI_VS = `in vec2 position; in vec3 color; out vec3 vColor;
+void main() { vColor = color; gl_Position = vec4(position, 0.0, 1.0); }`;
+const TRI_FS = `in vec3 vColor; out vec4 outColor;
+void main() { outColor = vec4(vColor, 1.0); }`;
+const POS = [0, 0.8, -0.8, -0.75, 0.8, -0.75], COL = [1, 0.2, 0.2, 0.2, 0.85, 0.3, 0.25, 0.4, 1];
+
+function drawTriangle(canvas, antialias = true) {
+  const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true, antialias });   // 关闭抗锯齿时，每个像素要么被覆盖、要么不被覆盖
+  if (!gl) { canvas.replaceWith(Object.assign(document.createElement('p'), { className: 'note', textContent: '这个浏览器不支持 WebGL 2。' })); return null; }
+  const prog = program(gl, TRI_VS, TRI_FS);
+  gl.useProgram(prog);
+  attribute(gl, prog, 'position', POS, 2);
+  attribute(gl, prog, 'color', COL, 3);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.clearColor(0.067, 0.082, 0.11, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  return gl;
+}
+drawTriangle(document.getElementById('tri'));
+
+// 低分辨率版本：数一数三角形覆盖了多少个片元
+const gl2 = drawTriangle(document.getElementById('raster'), false);
+if (gl2) {
+  const px = new Uint8Array(30 * 20 * 4);
+  gl2.readPixels(0, 0, 30, 20, gl2.RGBA, gl2.UNSIGNED_BYTE, px);
+  let covered = 0;
+  for (let i = 0; i < px.length; i += 4) if (px[i] + px[i + 1] + px[i + 2] > 3 * 40) covered++;
+  document.getElementById('count').textContent = `这个三角形覆盖了 ${covered} 个片元，片元着色器运行了 ${covered} 次；顶点着色器只运行了 3 次。`;
+}
+
+// UV 与纹理采样
+(function () {
+  const canvas = document.getElementById('uv');
+  const gl = canvas.getContext('webgl2');
+  if (!gl) return;
+  const prog = program(gl,
+    `in vec2 position; out vec2 vUv; void main() { vUv = position * 0.5 + 0.5; gl_Position = vec4(position, 0.0, 1.0); }`,
+    `in vec2 vUv; uniform sampler2D map; out vec4 outColor;
+     void main() {
+       if (vUv.x < 0.5) outColor = vec4(vUv.x * 2.0, vUv.y, 0.0, 1.0);
+       else outColor = texture(map, vUv * vec2(2.0, 1.0) * 3.0);
+     }`);
+  gl.useProgram(prog);
+  attribute(gl, prog, 'position', [-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1], 2);
+  // 用二维画布画一张纹理：格子、字母与左下角的原点标记
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f3c98b'; g.fillRect(0, 0, 128, 128);
+  g.fillStyle = '#9db8e8'; g.fillRect(0, 0, 64, 64); g.fillRect(64, 64, 64, 64);
+  g.fillStyle = '#1d2330'; g.font = 'bold 44px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('UV', 64, 66);
+  g.fillStyle = '#e4572e'; g.fillRect(0, 116, 12, 12);   // 纹理左下角 (0, 0)
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);           // 图片的第一行在上，纹理坐标的 v = 0 在下，需要翻转
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+})();
+</script>
+</body>
+</html>

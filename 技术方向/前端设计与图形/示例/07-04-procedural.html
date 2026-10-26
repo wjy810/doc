@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>程序化材质：用噪声与函数生成岩石、水面、金属与抽象材质</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1040px; display: grid; gap: 8px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  #stage { position: relative; width: 100%; aspect-ratio: 4 / 1.35; border-radius: 8px; overflow: hidden; background: #1b212c; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  .names { position: absolute; left: 0; right: 0; bottom: 6px; display: grid; grid-template-columns: repeat(4, 1fr); text-align: center; color: #fff; pointer-events: none; }
+  .names b { font-size: 13px; } .names small { display: block; color: #c9d1dd; font-size: 11px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+  .bar label { display: inline-flex; gap: 4px; align-items: center; }
+  .bar input[type="range"] { width: 120px; }
+  select, button { font: inherit; padding: 2px 8px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  output { font-variant-numeric: tabular-nums; min-width: 2.5em; }
+</style>
+</head>
+<body>
+<section>
+  <h2>四种程序化材质：没有一张贴图，全部由噪声和函数实时计算</h2>
+  <p class="sub">改变“尺度”看纹理的大小；把坐标换成 UV，球的两极会出现挤压和接缝；换成其他形状，看材质是否仍然合适。</p>
+  <div id="stage" role="img" aria-label="四个球：灰褐色带裂纹的岩石、蓝绿色有波纹的水面、带拉丝纹理的金属、彩色流动的抽象材质">
+    <div class="names">
+      <div><b>岩石</b><small>分形噪声 ＋ 裂纹 ＋ 凹凸</small></div>
+      <div><b>水面</b><small>波纹 ＋ 菲涅耳反射</small></div>
+      <div><b>金属</b><small>拉丝噪声 ＋ 高光</small></div>
+      <div><b>抽象</b><small>域扭曲 ＋ 余弦调色板</small></div>
+    </div>
+  </div>
+  <div class="bar">
+    <label>尺度 <input type="range" id="scale" min="0.5" max="4" step="0.1" value="1.5"><output id="scaleOut">1.5</output></label>
+    <label>时间速度 <input type="range" id="speed" min="0" max="2" step="0.1" value="1"><output id="speedOut">1.0</output></label>
+    <label>坐标 <select id="space"><option value="0">物体坐标（三维噪声）</option><option value="1">UV 坐标（二维）</option></select></label>
+    <label>形状 <select id="shape"><option value="sphere">球</option><option value="knot">圆环结</option><option value="box">圆角立方体</option></select></label>
+  </div>
+</section>
+<script type="module">
+import * as THREE from 'three';
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+stage.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+// 视野较窄、距离较远：两侧的球不会因为透视被拉成椭圆
+const camera = new THREE.PerspectiveCamera(12, 4 / 1.35, 1, 60);
+camera.position.set(0, 0.35, 23);
+camera.lookAt(0, 0.1, 0);
+
+// 所有材质共用的函数：哈希、三维值噪声、分形噪声（fbm）
+const COMMON = /* glsl */`
+  uniform float uTime, uScale, uUseUV;
+  varying vec3 vPos; varying vec3 vNormal; varying vec2 vUv; varying vec3 vView;
+  float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+  float noise(vec3 x) {                       // 值噪声：格点上取随机数，格点之间平滑插值
+    vec3 i = floor(x), f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(hash(i), hash(i + vec3(1, 0, 0)), f.x), mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+               mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x), mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+  }
+  float fbm(vec3 p) {                         // 分形噪声：频率加倍、幅度减半，叠加 5 层
+    float v = 0.0, a = 0.5;
+    for (int i = 0; i < 5; i++) { v += a * noise(p); p = p * 2.03 + 1.7; a *= 0.5; }
+    return v;
+  }
+  vec3 coord() { return uUseUV > 0.5 ? vec3(vUv * vec2(4.0, 2.0), 0.0) : vPos; }   // 噪声的输入坐标
+  // 用噪声的梯度扰动法线，做出凹凸感（不改变真实形状）
+  vec3 bump(vec3 n, vec3 p, float k) {
+    float e = 0.01, h = fbm(p);
+    vec3 g = vec3(fbm(p + vec3(e, 0, 0)) - h, fbm(p + vec3(0, e, 0)) - h, fbm(p + vec3(0, 0, e)) - h) / e;
+    return normalize(n - k * (g - dot(g, n) * n));
+  }
+  const vec3 L = normalize(vec3(0.5, 0.8, 0.6));
+`;
+const VERT = /* glsl */`
+  varying vec3 vPos; varying vec3 vNormal; varying vec2 vUv; varying vec3 vView;
+  void main() {
+    vPos = position; vUv = uv;
+    vNormal = normalize(mat3(modelMatrix) * normal);
+    vec4 world = modelMatrix * vec4(position, 1.0);
+    vView = normalize(cameraPosition - world.xyz);
+    gl_Position = projectionMatrix * viewMatrix * world;
+  }`;
+const FRAGS = {
+  rock: /* glsl */`
+    void main() {
+      vec3 p = coord() * uScale * 2.0;
+      float h = fbm(p);
+      float crack = smoothstep(0.02, 0.0, abs(noise(p * 1.7 + 5.0) - 0.5));           // 噪声等于 0.5 的细线当作裂纹
+      vec3 base = mix(vec3(0.24, 0.22, 0.2), vec3(0.62, 0.55, 0.47), smoothstep(0.3, 0.75, h));
+      base *= 1.0 - 0.6 * crack;
+      vec3 n = bump(normalize(vNormal), p, 0.35);
+      float diff = max(dot(n, L), 0.0);
+      gl_FragColor = vec4(base * (0.25 + 0.85 * diff), 1.0);
+      #include <colorspace_fragment>
+    }`,
+  water: /* glsl */`
+    void main() {
+      vec3 p = coord() * uScale;
+      // 波纹的“高度”随时间流动；用它的梯度扰动法线，水面就有了起伏的反光
+      vec3 q = p * 2.5 + vec3(uTime * 0.35, 0.0, uTime * 0.2);
+      vec3 n = bump(normalize(vNormal), q, 0.25);
+      float fres = pow(1.0 - max(dot(n, vView), 0.0), 3.0);                              // 菲涅耳：越斜看越像镜子
+      vec3 deep = vec3(0.004, 0.035, 0.06), sky = vec3(0.55, 0.75, 0.95);
+      vec3 col = mix(deep, sky, 0.04 + 0.96 * fres);
+      float spec = pow(max(dot(reflect(-L, n), vView), 0.0), 80.0) * 1.5;
+      gl_FragColor = vec4(col + spec, 1.0);
+      #include <colorspace_fragment>
+    }`,
+  metal: /* glsl */`
+    void main() {
+      vec3 p = coord() * uScale;
+      float brushed = noise(vec3(p.x * 2.0, p.y * 220.0, p.z * 2.0));                  // 一个方向拉长、另一个方向压缩：拉丝
+      vec3 n = normalize(vNormal);
+      vec3 h = normalize(L + vView);
+      float spec = pow(max(dot(n, h), 0.0), 40.0) * (0.6 + 0.8 * brushed);
+      float env = 0.5 + 0.5 * reflect(-vView, n).y;                                       // 用反射方向的高低模拟环境的明暗
+      vec3 tint = vec3(0.86, 0.82, 0.76);                                                 // 金属的高光带有本身的颜色
+      vec3 col = tint * (0.12 + 0.45 * env + 0.25 * brushed) + tint * spec;
+      gl_FragColor = vec4(col, 1.0);
+      #include <colorspace_fragment>
+    }`,
+  abstract: /* glsl */`
+    vec3 palette(float t) { return 0.5 + 0.5 * cos(6.2832 * (vec3(1.0, 0.7, 0.4) * t + vec3(0.0, 0.15, 0.2))); }   // 余弦调色板
+    void main() {
+      vec3 p = coord() * uScale;
+      float t = uTime * 0.15;
+      // 域扭曲：用一个噪声去扭曲另一个噪声的输入坐标
+      vec3 q = vec3(fbm(p + t), fbm(p + vec3(5.2, 1.3, 2.8) - t), fbm(p + vec3(2.1, 7.4, 3.3)));
+      float v = fbm(p + 2.5 * q);
+      vec3 col = palette(v * 1.4 + t);
+      float diff = max(dot(normalize(vNormal), L), 0.0);
+      gl_FragColor = vec4(col * (0.45 + 0.55 * diff), 1.0);
+      #include <colorspace_fragment>
+    }`
+};
+const uniforms = { uTime: { value: 0 }, uScale: { value: 1.5 }, uUseUV: { value: 0 } };
+const materials = Object.entries(FRAGS).map(([name, frag]) => new THREE.ShaderMaterial({ name, uniforms, vertexShader: VERT, fragmentShader: COMMON + frag }));
+const GEOMS = {
+  sphere: () => new THREE.SphereGeometry(1.15, 96, 64),
+  knot: () => new THREE.TorusKnotGeometry(0.75, 0.27, 200, 32),
+  box: () => new THREE.BoxGeometry(1.6, 1.6, 1.6, 32, 32, 32)
+};
+// 四个物体的位置与下方四列文字对齐
+const meshes = materials.map((m, i) => { const mesh = new THREE.Mesh(GEOMS.sphere(), m); mesh.position.set((i - 1.5) * 3.65, 0.4, 0); mesh.rotation.x = 0.8; scene.add(mesh); return mesh; });   // 球的北极转向镜头，便于观察两极
+function setShape(name) {
+  for (const mesh of meshes) { mesh.geometry.dispose(); mesh.geometry = GEOMS[name](); mesh.rotation.set(name === 'knot' ? 0 : 0.8, name === 'box' ? 0.6 : 0, 0); }
+}
+function resize() { renderer.setSize(stage.clientWidth, stage.clientHeight, false); camera.aspect = stage.clientWidth / stage.clientHeight; camera.updateProjectionMatrix(); }
+new ResizeObserver(resize).observe(stage); resize();
+
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let speed = 1, last = performance.now();
+renderer.setAnimationLoop(now => {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (!reduce) uniforms.uTime.value += dt * speed;
+  renderer.render(scene, camera);
+});
+const bind = (id, fn) => document.getElementById(id).addEventListener('input', e => fn(e.target.value));
+bind('scale', v => { uniforms.uScale.value = +v; document.getElementById('scaleOut').textContent = (+v).toFixed(1); });
+bind('speed', v => { speed = +v; document.getElementById('speedOut').textContent = (+v).toFixed(1); });
+bind('space', v => { uniforms.uUseUV.value = +v; });
+bind('shape', setShape);
+window.__proc = { uniforms, setShape, renderer, render: () => renderer.render(scene, camera) };
+</script>
+</body>
+</html>

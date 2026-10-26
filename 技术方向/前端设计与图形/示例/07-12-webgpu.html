@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GLSL、WGSL 与节点材质：同一个图案的三种写法</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.3.0/400.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.webgpu.js",
+               "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.tsl.js" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 1140px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .view { width: 100%; aspect-ratio: 3 / 2; border-radius: 8px; overflow: hidden; background: #11151c; display: grid; place-items: center; color: #e6ebf2; text-align: center; padding: 0; }
+  .view canvas { width: 100%; height: 100%; display: block; }
+  pre { margin: 0; font: 10.5px/1.5 "JetBrains Mono", monospace; background: #f6f7f9; border-radius: 6px; padding: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  pre.gen { max-height: 260px; overflow: auto; }
+  .tag { font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <section>
+    <h2>WebGL 2 ＋ GLSL</h2>
+    <p class="sub" id="s1">各主流浏览器都支持。</p>
+    <div class="view" id="v1"></div>
+<pre>uniform float uTime, uAspect;
+in vec2 vUv;  out vec4 outColor;
+void main() {
+  vec2 p = (vUv - 0.5) * vec2(uAspect, 1.0);
+  float r = length(p);
+  float wave = 0.5 + 0.5 * sin(r * 40.0 - uTime * 3.0);
+  vec3 col = mix(vec3(0.12, 0.23, 0.43), vec3(0.96, 0.78, 0.55),
+                 wave * smoothstep(0.7, 0.0, r));
+  outColor = vec4(col, 1.0);
+}</pre>
+  </section>
+  <section>
+    <h2>WebGPU ＋ WGSL</h2>
+    <p class="sub" id="s2">正在检查浏览器是否支持 WebGPU…</p>
+    <div class="view" id="v2"></div>
+<pre>struct U { time: f32, aspect: f32 };
+@group(0) @binding(0) var&lt;uniform&gt; u: U;
+@fragment
+fn fs(@location(0) uv: vec2f) -> @location(0) vec4f {
+  let p = (uv - 0.5) * vec2f(u.aspect, 1.0);
+  let r = length(p);
+  let wave = 0.5 + 0.5 * sin(r * 40.0 - u.time * 3.0);
+  let col = mix(vec3f(0.12, 0.23, 0.43), vec3f(0.96, 0.78, 0.55),
+                wave * smoothstep(0.7, 0.0, r));
+  return vec4f(col, 1.0);
+}</pre>
+  </section>
+  <section>
+    <h2>three.js 节点材质（TSL）</h2>
+    <p class="sub" id="s3">用 JavaScript 组合节点，框架按后端生成 WGSL 或 GLSL。</p>
+    <div class="view" id="v3"></div>
+<pre>const p = uv().sub(0.5).mul(vec2(aspect, 1));
+const r = length(p);
+const wave = sin(r.mul(40).sub(time.mul(3))).mul(0.5).add(0.5);
+material.colorNode = mix(vec3(0.12, 0.23, 0.43), vec3(0.96, 0.78, 0.55),
+                         wave.mul(smoothstep(0.7, 0, r)));</pre>
+    <p class="sub">框架生成的片元着色器（节选）：</p>
+    <pre class="gen" id="gen">正在生成…</pre>
+  </section>
+</div>
+<script type="module">
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const clock = () => reduce ? 1.0 : performance.now() / 1000;
+function canvasIn(id) { const c = document.createElement('canvas'); const v = document.getElementById(id); v.append(c); c.width = v.clientWidth * Math.min(devicePixelRatio, 2); c.height = v.clientHeight * Math.min(devicePixelRatio, 2); return c; }
+const fail = (id, text) => { const v = document.getElementById(id); v.replaceChildren(text); v.style.padding = '12px'; };
+
+// ---------- 1. WebGL 2 ----------
+{
+  const canvas = canvasIn('v1'), gl = canvas.getContext('webgl2');
+  if (!gl) fail('v1', '这个浏览器不支持 WebGL 2。');
+  else {
+    const src = (type, s) => { const sh = gl.createShader(type); gl.shaderSource(sh, '#version 300 es\nprecision highp float;\n' + s); gl.compileShader(sh); if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh)); return sh; };
+    const prog = gl.createProgram();
+    // 顶点着色器：用三个顶点画一个盖住整个画面的大三角形，不需要顶点缓冲区
+    gl.attachShader(prog, src(gl.VERTEX_SHADER, `out vec2 vUv; void main() { vec2 p = vec2(gl_VertexID == 1 ? 3.0 : -1.0, gl_VertexID == 2 ? 3.0 : -1.0); vUv = p * 0.5 + 0.5; gl_Position = vec4(p, 0.0, 1.0); }`));
+    gl.attachShader(prog, src(gl.FRAGMENT_SHADER, `uniform float uTime, uAspect; in vec2 vUv; out vec4 outColor;
+      void main() { vec2 p = (vUv - 0.5) * vec2(uAspect, 1.0); float r = length(p);
+        float wave = 0.5 + 0.5 * sin(r * 40.0 - uTime * 3.0);
+        vec3 col = mix(vec3(0.12, 0.23, 0.43), vec3(0.96, 0.78, 0.55), wave * smoothstep(0.7, 0.0, r));
+        outColor = vec4(col, 1.0); }`));
+    gl.linkProgram(prog); gl.useProgram(prog);
+    const uTime = gl.getUniformLocation(prog, 'uTime');
+    gl.uniform1f(gl.getUniformLocation(prog, 'uAspect'), canvas.width / canvas.height);
+    const frame = () => { gl.viewport(0, 0, canvas.width, canvas.height); gl.uniform1f(uTime, clock()); gl.drawArrays(gl.TRIANGLES, 0, 3); if (!reduce) requestAnimationFrame(frame); };
+    frame();
+  }
+}
+
+// ---------- 2. WebGPU ----------
+async function webgpu() {
+  const s2 = document.getElementById('s2');
+  if (!navigator.gpu) { s2.textContent = '这个浏览器没有提供 WebGPU：左侧的 WebGL 2 版本照常可用。'; fail('v2', '不支持 WebGPU'); return false; }
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) { s2.textContent = '浏览器支持 WebGPU，但这台设备没有可用的图形适配器。'; fail('v2', '没有可用的适配器'); return false; }
+  const device = await adapter.requestDevice();
+  const canvas = canvasIn('v2'), ctx = canvas.getContext('webgpu'), format = navigator.gpu.getPreferredCanvasFormat();
+  ctx.configure({ device, format, alphaMode: 'opaque' });
+  const module = device.createShaderModule({ code: /* wgsl */`
+    struct U { time: f32, aspect: f32 };
+    @group(0) @binding(0) var<uniform> u: U;
+    struct VOut { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
+    @vertex fn vs(@builtin(vertex_index) i: u32) -> VOut {
+      var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
+      var o: VOut; o.pos = vec4f(p[i], 0.0, 1.0); o.uv = p[i] * 0.5 + 0.5; return o;
+    }
+    @fragment fn fs(@location(0) uv: vec2f) -> @location(0) vec4f {
+      let p = (uv - 0.5) * vec2f(u.aspect, 1.0);
+      let r = length(p);
+      let wave = 0.5 + 0.5 * sin(r * 40.0 - u.time * 3.0);
+      let col = mix(vec3f(0.12, 0.23, 0.43), vec3f(0.96, 0.78, 0.55), wave * smoothstep(0.7, 0.0, r));
+      return vec4f(col, 1.0);
+    }` });
+  const info = await module.getCompilationInfo();
+  if (info.messages.some(m => m.type === 'error')) { fail('v2', 'WGSL 编译失败：' + info.messages.map(m => m.message).join('；')); return false; }
+  const pipeline = device.createRenderPipeline({ layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', targets: [{ format }] } });
+  const ubo = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });   // 大小按 16 字节对齐
+  const bind = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: ubo } }] });
+  const frame = () => {
+    device.queue.writeBuffer(ubo, 0, new Float32Array([clock(), canvas.width / canvas.height, 0, 0]));
+    const enc = device.createCommandEncoder();
+    const pass = enc.beginRenderPass({ colorAttachments: [{ view: ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }] });
+    pass.setPipeline(pipeline); pass.setBindGroup(0, bind); pass.draw(3); pass.end();
+    device.queue.submit([enc.finish()]);
+    if (!reduce) requestAnimationFrame(frame);
+  };
+  frame();
+  s2.textContent = `正在使用 WebGPU（适配器：${adapter.info?.vendor || '未知'}）。`;
+  return true;
+}
+
+// ---------- 3. 节点材质：同一份描述，WebGPU 可用时生成 WGSL，否则生成 GLSL ----------
+async function nodes() {
+  const THREE = await import('three/webgpu');
+  const { uv, vec2, vec3, length, sin, mix, smoothstep, float, uniform } = await import('three/tsl');
+  const canvas = canvasIn('v3');
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: true });
+  await renderer.init();
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.outputColorSpace = THREE.LinearSRGBColorSpace;          // 与左边两个版本一样，直接输出计算出的数值
+  const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const aspect = float(canvas.width / canvas.height);
+  const p = uv().sub(0.5).mul(vec2(aspect, 1));
+  const r = length(p);
+  const time = uniform(0);                                         // 与左边两个版本使用同一个时钟
+  const wave = sin(r.mul(40).sub(time.mul(3))).mul(0.5).add(0.5);
+  const material = new THREE.MeshBasicNodeMaterial();
+  material.colorNode = mix(vec3(0.12, 0.23, 0.43), vec3(0.96, 0.78, 0.55), wave.mul(smoothstep(0.7, 0, r)));
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+  scene.add(mesh);
+  if (reduce) { time.value = clock(); await renderer.renderAsync(scene, camera); } else renderer.setAnimationLoop(() => { time.value = clock(); renderer.render(scene, camera); });
+  const isGPU = renderer.backend.isWebGPUBackend;
+  document.getElementById('s3').innerHTML = `当前后端：<span class="tag">${isGPU ? 'WebGPU，生成 WGSL' : 'WebGL 2，生成 GLSL'}</span>。同一份节点描述，换一个后端就换一种语言。`;
+  const { fragmentShader } = await renderer.debug.getShaderAsync(scene, camera, mesh);
+  // 节选：从主函数开始的若干行
+  const lines = fragmentShader.split('\n'), start = Math.max(0, lines.findIndex(l => /fn main|void main/.test(l)));
+  document.getElementById('gen').textContent = lines.slice(start, start + 24).join('\n');
+  return isGPU;
+}
+const gpu = await webgpu().catch(e => { fail('v2', 'WebGPU 初始化失败：' + e.message); return false; });
+const nodeGPU = await nodes().catch(e => { document.getElementById('gen').textContent = '节点材质初始化失败：' + e.message; return null; });
+window.__wgpu = { gpu, nodeGPU };
+</script>
+</body>
+</html>

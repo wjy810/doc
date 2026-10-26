@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>性能与质量分级：档位、自动降档与瓶颈测试</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(300px, 1fr); gap: 14px; max-width: 1120px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  #stage { position: relative; width: 100%; aspect-ratio: 16 / 10; border-radius: 8px; overflow: hidden; background: #0d1117; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  .caption { position: absolute; left: 14px; bottom: 12px; color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .6); }
+  .caption b { font-size: 18px; display: block; } .caption span { font-size: 12px; color: #d6dde8; }
+  .tier { position: absolute; right: 8px; top: 8px; padding: 0 8px; border-radius: 4px; background: rgba(0, 0, 0, .6); color: #fff; font-size: 12px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .seg button { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; background: #fff; cursor: pointer; margin-right: -1px; }
+  .seg button:first-child { border-radius: 6px 0 0 6px; } .seg button:last-child { border-radius: 0 6px 6px 0; }
+  .seg button[aria-pressed="true"] { background: #1d2330; color: #fff; border-color: #1d2330; }
+  button.plain { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+  th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; }
+  th { color: var(--muted); font-weight: 400; }
+  #info, #auto { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section>
+    <h2>同一个展示画面的四个质量档位</h2>
+    <div id="stage" role="img" aria-label="深色背景中的一盏台灯形产品，灯环发光，周围漂浮着光点，下方有阴影；左下角是产品名称">
+      <div class="caption"><b>月光台灯</b><span>无论哪个档位，产品与名称都完整显示</span></div>
+      <span class="tier" id="tierTag"></span>
+    </div>
+    <div class="bar">
+      <span class="seg" role="group" aria-label="质量档位">
+        <button type="button" data-tier="auto">自动</button><button type="button" data-tier="high">高</button><button type="button" data-tier="medium">中</button><button type="button" data-tier="low">低</button><button type="button" data-tier="still">静态</button>
+      </span>
+      <button type="button" class="plain" id="bottleneck">测瓶颈</button>
+    </div>
+    <p class="sub" id="auto" role="status"></p>
+    <p class="sub" id="info"></p>
+  </section>
+  <section>
+    <h2>每个档位改变了什么</h2>
+    <table>
+      <tr><th>档位</th><th>分辨率</th><th>阴影</th><th>光点</th><th>辉光</th><th>动画</th></tr>
+      <tr><td>高</td><td>设备像素比，最多 2 倍</td><td>2048 实时阴影</td><td>20000</td><td>开</td><td>开</td></tr>
+      <tr><td>中</td><td>最多 1.25 倍</td><td>1024 实时阴影</td><td>6000</td><td>半分辨率</td><td>开</td></tr>
+      <tr><td>低</td><td>1 倍</td><td>贴图假阴影</td><td>1500</td><td>关</td><td>开</td></tr>
+      <tr><td>静态</td><td>1 倍</td><td>贴图假阴影</td><td>0</td><td>关</td><td>只画一帧</td></tr>
+    </table>
+    <p class="sub">自动档位：每秒检查一次最近 60 帧的第 75 百分位帧时间。连续 2 秒超过 20 毫秒就降一档；连续 5 秒低于 12 毫秒才升一档。升档比降档更慎重，避免在两个档位之间来回跳。</p>
+    <h2>瓶颈测试</h2>
+    <p class="sub">在当前档位下逐项减半或关闭，看哪一项让帧时间下降最多。</p>
+    <table id="bench"><tr><th>改变</th><th>每帧毫秒</th><th>节省</th></tr></table>
+    <p class="sub" id="verdict"></p>
+  </section>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const TIERS = {
+  high:   { label: '高', ratio: 2, shadow: 2048, particles: 20000, bloom: 1, animate: true },
+  medium: { label: '中', ratio: 1.25, shadow: 1024, particles: 6000, bloom: 0.5, animate: true },
+  low:    { label: '低', ratio: 1, shadow: 0, particles: 1500, bloom: 0, animate: true },
+  still:  { label: '静态', ratio: 1, shadow: 0, particles: 0, bloom: 0, animate: false }
+};
+const ORDER = ['high', 'medium', 'low'];   // 自动档位只在这三档之间移动；静态档由用户选择或减少动态效果时使用
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.info.autoReset = false;                     // 一帧包含多次渲染（场景、辉光、输出），统计要按整帧累计
+renderer.shadowMap.type = THREE.PCFShadowMap;   // 用多次采样让阴影边缘变柔和
+stage.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#0d1117');
+const camera = new THREE.PerspectiveCamera(38, 1.6, 0.1, 50);
+camera.position.set(2.6, 2.0, 4.4); camera.lookAt(0, 0.9, 0);
+scene.add(new THREE.HemisphereLight('#a9b8d6', '#1a1d24', 0.7));
+const sun = new THREE.DirectionalLight('#ffffff', 2.4);
+sun.position.set(-3, 6, 2); sun.shadow.camera.left = sun.shadow.camera.bottom = -2.5; sun.shadow.camera.right = sun.shadow.camera.top = 2.5;
+scene.add(sun);
+// 产品：底座、灯杆、灯罩与发光的灯环
+const product = new THREE.Group();
+const metal = new THREE.MeshStandardMaterial({ color: '#c9ced6', metalness: 0.7, roughness: 0.35 });
+const add = (geo, mat, y) => { const m = new THREE.Mesh(geo, mat); m.position.y = y; m.castShadow = m.receiveShadow = true; product.add(m); return m; };
+add(new THREE.CylinderGeometry(0.55, 0.62, 0.12, 64), metal, 0.06);
+add(new THREE.CylinderGeometry(0.05, 0.05, 1.2, 24), metal, 0.72);
+add(new THREE.SphereGeometry(0.5, 64, 32, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#f2efe8', roughness: 0.6, side: THREE.DoubleSide }), 1.3);
+const ring = add(new THREE.TorusGeometry(0.5, 0.03, 16, 96), new THREE.MeshStandardMaterial({ color: '#000', emissive: '#ffd27a', emissiveIntensity: 5 }), 1.3);
+ring.rotation.x = Math.PI / 2;
+scene.add(product);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({ color: '#2b3038', roughness: 0.95 }));
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+// 低档位的假阴影：一张径向渐变贴图，几乎没有成本
+const c = document.createElement('canvas'); c.width = c.height = 128;
+const g = c.getContext('2d'), grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+grad.addColorStop(0, 'rgba(0,0,0,.65)'); grad.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+const blob = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 2.2), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false }));
+blob.rotation.x = -Math.PI / 2; blob.position.set(0.35, 0.002, -0.2); scene.add(blob);
+// 漂浮的光点：位置在着色器中按时间计算
+const MAXP = 20000, pos = new Float32Array(MAXP * 3), seed = new Float32Array(MAXP);
+for (let i = 0; i < MAXP; i++) { const a = Math.random() * 6.283, r = 0.8 + Math.random() * 2.6; pos.set([Math.cos(a) * r, Math.random() * 2.6, Math.sin(a) * r], i * 3); seed[i] = Math.random(); }
+const pgeo = new THREE.BufferGeometry();
+pgeo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); pgeo.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+const pmat = new THREE.ShaderMaterial({
+  uniforms: { uTime: { value: 0 }, uScale: { value: 1 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  vertexShader: `uniform float uTime, uScale; attribute float aSeed; varying float vA;
+    void main() { vec3 p = position; p.y = mod(p.y + uTime * (0.05 + aSeed * 0.1), 2.6);
+      vec4 mv = modelViewMatrix * vec4(p, 1.0); gl_PointSize = (1.0 + aSeed * 2.0) * uScale / -mv.z * 4.0; vA = 0.12 + 0.35 * aSeed;
+      gl_Position = projectionMatrix * mv; }`,
+  fragmentShader: `varying float vA; void main() { float d = length(gl_PointCoord - 0.5); if (d > 0.5) discard; gl_FragColor = vec4(vec3(1.0, 0.85, 0.55) * vA * (1.0 - d * 2.0), 1.0); }`
+});
+const dust = new THREE.Points(pgeo, pmat); dust.frustumCulled = false; scene.add(dust);
+
+const composer = new EffectComposer(renderer);
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.6, 0.2, 1.0);
+composer.addPass(new RenderPass(scene, camera)); composer.addPass(bloomPass); composer.addPass(new OutputPass());
+
+// ---------- 应用档位 ----------
+let tierName = 'high', settings = { ...TIERS.high };
+function size() {
+  const ratio = Math.min(devicePixelRatio, settings.ratio);
+  renderer.setPixelRatio(ratio);
+  renderer.setSize(stage.clientWidth, stage.clientHeight, false);
+  composer.setPixelRatio(ratio); composer.setSize(stage.clientWidth, stage.clientHeight);
+  bloomPass.resolution.set(stage.clientWidth * ratio * (settings.bloom || 1), stage.clientHeight * ratio * (settings.bloom || 1));
+  camera.aspect = stage.clientWidth / stage.clientHeight; camera.updateProjectionMatrix();
+  pmat.uniforms.uScale.value = ratio * stage.clientHeight / 500;
+}
+function applySettings(s) {
+  const shadowChanged = (s.shadow > 0) !== renderer.shadowMap.enabled || s.shadow !== settings.shadow;
+  settings = { ...s };
+  renderer.shadowMap.enabled = s.shadow > 0;
+  sun.castShadow = s.shadow > 0;
+  if (shadowChanged) {
+    sun.shadow.mapSize.set(s.shadow || 512, s.shadow || 512);
+    sun.shadow.map?.dispose(); sun.shadow.map = null;                              // 阴影贴图尺寸改变：释放旧的，下一帧重新创建
+    scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });      // 阴影开关改变：材质需要重新编译
+  }
+  blob.visible = s.shadow === 0;
+  dust.geometry.setDrawRange(0, s.particles);
+  size();
+  renderOnce();
+}
+function setTier(name) {
+  tierName = name;
+  applySettings(TIERS[name]);
+  document.getElementById('tierTag').textContent = `档位：${TIERS[name].label}${auto ? '（自动）' : ''}`;
+}
+
+// ---------- 渲染与自动档位 ----------
+let time = 0, last = performance.now(), auto = false, frames = [], slow = 0, fast = 0;
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function renderOnce() {
+  renderer.info.reset();
+  pmat.uniforms.uTime.value = time;
+  product.rotation.y = time * 0.3;
+  if (settings.bloom) composer.render(); else renderer.render(scene, camera);
+}
+const quantile = (arr, q) => { const s = [...arr].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(q * s.length))]; };
+setInterval(() => {
+  const info = renderer.info.render;
+  document.getElementById('info').textContent = `画布 ${renderer.domElement.width}×${renderer.domElement.height} · 绘制调用 ${info.calls} · 三角形 ${info.triangles.toLocaleString()} · 点 ${info.points.toLocaleString()}`;
+  if (!auto || frames.length < 20) return;
+  const p75 = quantile(frames, 0.75);
+  slow = p75 > 20 ? slow + 1 : 0;
+  fast = p75 < 12 ? fast + 1 : 0;
+  const i = ORDER.indexOf(tierName);
+  let note = `最近帧时间（第 75 百分位）${p75.toFixed(1)} 毫秒`;
+  if (slow >= 2 && i < ORDER.length - 1) { setTier(ORDER[i + 1]); slow = 0; frames = []; note += `，降到“${TIERS[tierName].label}”`; }
+  else if (fast >= 5 && i > 0) { setTier(ORDER[i - 1]); fast = 0; frames = []; note += `，升到“${TIERS[tierName].label}”`; }
+  document.getElementById('auto').textContent = note;
+}, 1000);
+renderer.setAnimationLoop(now => {
+  const dt = now - last; last = now;
+  if (!settings.animate) return;
+  frames.push(dt); if (frames.length > 60) frames.shift();
+  time += Math.min(dt, 50) / 1000;
+  renderOnce();
+});
+
+// ---------- 瓶颈测试：同步渲染若干帧，用读取一个像素的方式等待 GPU 完成 ----------
+function timeFrames(n = 12) {
+  const gl = renderer.getContext(), px = new Uint8Array(4);
+  renderOnce(); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);   // 预热：包括可能的着色器编译
+  const t0 = performance.now();
+  for (let i = 0; i < n; i++) { time += 0.016; renderOnce(); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); }
+  return (performance.now() - t0) / n;
+}
+async function bottleneck() {
+  const base = { ...settings }, wasAuto = auto;
+  auto = false;
+  const tests = [
+    ['当前设置', base],
+    ['分辨率减半', { ...base, ratio: Math.min(devicePixelRatio, base.ratio) / 2 }],
+    base.particles && ['光点减半', { ...base, particles: base.particles / 2 }],
+    base.bloom && ['关闭辉光', { ...base, bloom: 0 }],
+    base.shadow && ['关闭实时阴影', { ...base, shadow: 0 }]
+  ].filter(Boolean);                                     // 只测试当前档位里确实开着的项目
+  const rows = [];
+  for (const [label, s] of tests) { applySettings(s); rows.push([label, timeFrames()]); }
+  applySettings(base); auto = wasAuto;
+  const table = document.getElementById('bench');
+  table.querySelectorAll('tr:not(:first-child)').forEach(r => r.remove());
+  const ms0 = rows[0][1];
+  for (const [label, ms] of rows) {
+    const tr = table.insertRow();
+    for (const v of [label, ms.toFixed(1), label === '当前设置' ? '—' : `${Math.round((1 - ms / ms0) * 100)}%`]) tr.insertCell().textContent = v;
+  }
+  const best = rows.slice(1).sort((a, b) => a[1] - b[1])[0];
+  document.getElementById('verdict').textContent = `在这台设备的“${TIERS[tierName].label}”档，${best[0]}节省最多：先从这一项入手。`;
+  return rows;
+}
+document.getElementById('bottleneck').addEventListener('click', bottleneck);
+document.querySelectorAll('[data-tier]').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('[data-tier]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  auto = b.dataset.tier === 'auto'; frames = []; slow = fast = 0;
+  setTier(auto ? 'high' : b.dataset.tier);
+  document.getElementById('auto').textContent = auto ? '自动档位：从“高”开始，按实际帧时间调整。' : '';
+}));
+new ResizeObserver(() => { size(); renderOnce(); }).observe(stage);
+const startTier = reduce ? 'still' : 'auto';
+document.querySelector(`[data-tier="${startTier}"]`).click();
+window.__quality = { setTier, bottleneck, timeFrames, setTime: t => { time = t; renderOnce(); }, stopAuto: () => { auto = false; }, get tier() { return tierName; } };
+</script>
+</body>
+</html>
