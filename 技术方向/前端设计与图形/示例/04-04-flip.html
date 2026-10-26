@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>布局与共享元素过渡：列表重排与卡片展开</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 14px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; max-width: 980px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  h2 { font-size: 15px; margin: 0 0 2px; } .sub { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+  .bar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .bar button, .back { font: inherit; font-size: 13px; padding: 4px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  ul.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  ul.list li { display: flex; justify-content: space-between; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+  ul.list li b { font-weight: 700; } ul.list li span { color: var(--muted); font-variant-numeric: tabular-nums; }
+  /* 卡片网格与详情：通过 view-transition-name 告诉浏览器“这两个元素是同一个东西” */
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .card { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; cursor: pointer; text-align: left; padding: 0; font: inherit; }
+  .card .img, .detail .img { height: 64px; background: linear-gradient(135deg, var(--a), var(--b)); }
+  .card p { margin: 0; padding: 6px 8px; font-size: 13px; font-weight: 700; }
+  .detail { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .detail .img { height: 120px; }
+  .detail h3 { margin: 10px 14px 4px; font-size: 18px; }
+  .detail p { margin: 0 14px 12px; color: var(--muted); font-size: 13px; }
+  .detail .back { margin: 0 14px 14px; }
+  ::view-transition-group(*) { animation-duration: 350ms; animation-timing-function: cubic-bezier(.2, .8, .2, 1); }
+  @media (prefers-reduced-motion: reduce) { ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; } }
+</style>
+</head>
+<body>
+<div class="cols">
+  <section>
+    <h2>列表重排：先记位置，再改顺序，最后从旧位置动到新位置</h2>
+    <p class="sub">快速连续点击也不会跳动：每次都从元素当前看到的位置出发。</p>
+    <div class="bar"><button type="button" data-sort="pay">按日薪</button><button type="button" data-sort="date">按发布时间</button><button type="button" id="remove">移除第一项</button><button type="button" id="reset">恢复</button></div>
+    <ul class="list" id="list"></ul>
+  </section>
+  <section>
+    <h2>卡片展开：同一个元素从卡片“长”成详情</h2>
+    <p class="sub">使用视图过渡；不支持的浏览器直接切换，内容不受影响。</p>
+    <div id="view"></div>
+  </section>
+</div>
+<script>
+// ---------- FLIP：First（记下位置）→ Last（改变 DOM）→ Invert（算出差距）→ Play（从差距动到 0） ----------
+const JOBS = [
+  { id: 1, title: '前端开发实习生', pay: 300, date: '10-20' }, { id: 2, title: '数据分析实习生', pay: 260, date: '10-24' },
+  { id: 3, title: '测试开发实习生', pay: 280, date: '10-18' }, { id: 4, title: '产品助理', pay: 220, date: '10-22' },
+  { id: 5, title: 'UI 设计实习生', pay: 240, date: '10-23' }
+];
+let rows = [...JOBS];
+const list = document.getElementById('list');
+const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+function render() {
+  const existing = new Map([...list.children].map(li => [+li.dataset.id, li]));
+  list.replaceChildren(...rows.map(r => {
+    const li = existing.get(r.id) || document.createElement('li');   // 保留已有元素，FLIP 才能测量它的前后位置
+    li.dataset.id = r.id;
+    if (!li.firstChild) {
+      const b = document.createElement('b'); b.textContent = r.title;
+      const s = document.createElement('span'); s.textContent = `${r.pay} 元／天 · ${r.date}`;
+      li.append(b, s);
+    }
+    return li;
+  }));
+}
+function flip(change) {
+  // First：记下每一项“现在看到”的位置（如果正在动画中，得到的就是动画中的位置）
+  const first = new Map([...list.children].map(li => [li.dataset.id, li.getBoundingClientRect()]));
+  for (const li of list.children) li.getAnimations().forEach(a => a.cancel());   // 打断正在进行的动画
+  change();                                                                       // Last：改变顺序
+  if (reduce.matches) return;
+  for (const li of list.children) {
+    const a = first.get(li.dataset.id), b = li.getBoundingClientRect();
+    if (!a) { li.animate([{ opacity: 0, transform: 'scale(.96)' }, { opacity: 1, transform: 'none' }], { duration: 250 }); continue; }
+    const dx = a.left - b.left, dy = a.top - b.top;                               // Invert
+    if (dx || dy) li.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }],
+                             { duration: 400, easing: 'cubic-bezier(.2, .8, .2, 1)' }); // Play
+  }
+}
+document.querySelectorAll('[data-sort]').forEach(btn => btn.addEventListener('click', () => flip(() => {
+  rows.sort(btn.dataset.sort === 'pay' ? (a, b) => b.pay - a.pay : (a, b) => b.date.localeCompare(a.date));
+  render();
+})));
+document.getElementById('remove').addEventListener('click', () => {
+  const li = list.firstElementChild;
+  if (!li) return;
+  // 被移除的元素先淡出，再从数据中删掉，其余元素从原位置补上
+  const fade = reduce.matches ? null : li.animate([{ opacity: 1 }, { opacity: 0, transform: 'translateX(-12px)' }], { duration: 180, fill: 'forwards' });
+  const go = () => flip(() => { rows = rows.filter(r => r.id !== +li.dataset.id); render(); });
+  fade ? fade.finished.then(go) : go();
+});
+document.getElementById('reset').addEventListener('click', () => flip(() => { rows = [...JOBS]; render(); }));
+render();
+
+// ---------- 视图过渡：卡片与详情使用同一个 view-transition-name ----------
+const CARDS = [
+  { id: 'a', title: '前端开发实习生', a: '#9db8e8', b: '#f3c98b', text: '参与简历编辑器与岗位匹配页面开发。' },
+  { id: 'b', title: '数据分析实习生', a: '#a8d8c5', b: '#9db8e8', text: '整理招聘数据，制作每周的投递分析报告。' },
+  { id: 'c', title: '产品助理', a: '#f3c98b', b: '#e9a3a3', text: '协助整理需求，参与用户访谈与可用性测试。' }
+];
+let open = null;
+const view = document.getElementById('view');
+function h(tag, attrs = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) { if (k.startsWith('on')) el.addEventListener(k.slice(2), v); else el.setAttribute(k, v); }
+  el.append(...children);
+  return el;
+}
+function renderView() {
+  if (!open) {
+    view.replaceChildren(h('div', { class: 'cards' }, ...CARDS.map(c => h('button', { type: 'button', class: 'card', id: 'card-' + c.id, onclick: () => go(c.id) },
+      h('div', { class: 'img', style: `--a:${c.a};--b:${c.b};view-transition-name:img-${c.id}` }),
+      h('p', { style: `view-transition-name:title-${c.id}` }, c.title)))));
+    if (lastOpened) document.getElementById('card-' + lastOpened)?.focus();   // 返回时焦点回到刚才的卡片
+  } else {
+    const c = CARDS.find(x => x.id === open);
+    view.replaceChildren(h('div', { class: 'detail' },
+      h('div', { class: 'img', style: `--a:${c.a};--b:${c.b};view-transition-name:img-${c.id}` }),
+      h('h3', { style: `view-transition-name:title-${c.id}` }, c.title), h('p', {}, c.text),
+      h('button', { type: 'button', class: 'back', id: 'back', onclick: () => go(null) }, '返回列表')));
+    document.getElementById('back').focus();
+  }
+}
+let lastOpened = null;
+function go(id) {
+  if (id) lastOpened = id;
+  open = id;
+  // 不支持视图过渡时直接更新；快速连续点击时，浏览器会跳过上一个尚未完成的过渡
+  if (!document.startViewTransition || reduce.matches) return renderView();
+  document.startViewTransition(renderView);
+}
+renderView();
+</script>
+</body>
+</html>

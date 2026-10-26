@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>动效的三件工具：过渡、变换与关键帧</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 14px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; max-width: 900px; }
+  h2 { font-size: 15px; margin: 0 0 2px; } .sub { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+  .live { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+
+  /* 1. 过渡：属性从一个值变到另一个值时，在一段时间内平滑变化 */
+  .btn { font: inherit; font-weight: 700; padding: 10px 20px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer;
+         box-shadow: 0 1px 2px rgba(16,24,40,.15);
+         transition: transform 150ms ease-out, box-shadow 150ms ease-out; }
+  .btn:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(47,111,219,.35); }
+  .btn:active { transform: translateY(0) scale(.97); box-shadow: 0 1px 2px rgba(16,24,40,.15); transition-duration: 60ms; }
+
+  /* 2. 变换：移动、缩放、旋转只改变“画出来的样子”，不影响周围元素的布局 */
+  .tbox { width: 56px; height: 56px; border-radius: 10px; background: #9db8e8; display: grid; place-items: center; font-size: 12px; }
+
+  /* 3. 关键帧：定义一段可以重复的动画 */
+  .spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid #dbe3f0; border-top-color: var(--accent); animation: spin 800ms linear infinite; }
+  @keyframes spin { to { transform: rotate(1turn); } }
+  .pulse { width: 120px; height: 12px; border-radius: 6px; background: #dbe3f0; animation: pulse 1.2s ease-in-out infinite alternate; }
+  @keyframes pulse { from { opacity: .45; } to { opacity: 1; } }
+  /* 用户要求减少动态效果时：停止无限循环的动画，改为静态提示 */
+  @media (prefers-reduced-motion: reduce) {
+    .spinner, .pulse { animation: none; }
+    .btn, .btn:hover { transition: none; transform: none; }
+  }
+
+  /* 胶片条：把同一个动画停在不同时刻排成一排 */
+  .strip { display: flex; gap: 10px; align-items: end; }
+  .frame { display: grid; justify-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+  .frame .stage { width: 74px; height: 74px; display: grid; place-items: center; background: #f6f7f9; border-radius: 8px; }
+</style>
+</head>
+<body>
+<section>
+  <h2>过渡（transition）：悬停时上浮，按下时回落</h2>
+  <p class="sub">把鼠标移到按钮上再按下。下面是悬停过渡在 0—150 毫秒内的五个时刻（ease-out：先快后慢）。</p>
+  <div class="live"><button class="btn" type="button">投递简历</button></div>
+  <div class="strip" id="s1"></div>
+</section>
+<section>
+  <h2>变换（transform）：移动、缩放、旋转</h2>
+  <p class="sub">变换不改变元素在布局中占据的位置，所以不会推动周围的内容，动画成本也低。</p>
+  <div class="strip" id="s2"></div>
+</section>
+<section>
+  <h2>关键帧（@keyframes）：可以循环的动画</h2>
+  <p class="sub">加载指示每 800 毫秒转一圈。开启“减少动态效果”后停止转动。</p>
+  <div class="live"><span class="spinner" role="status" aria-label="正在加载"></span><span class="pulse" aria-hidden="true"></span></div>
+  <div class="strip" id="s3"></div>
+</section>
+<script>
+// 用 Web Animations API 在某个时刻“定格”一段动画
+function frames(id, make, keyframes, timing, times) {
+  const strip = document.getElementById(id);
+  for (const t of times) {
+    const frame = document.createElement('div'); frame.className = 'frame';
+    const stage = document.createElement('div'); stage.className = 'stage';
+    const el = make();
+    stage.append(el);
+    const label = document.createElement('span'); label.textContent = `${t} 毫秒`;
+    frame.append(stage, label);
+    strip.append(frame);
+    const anim = el.animate(keyframes, { fill: 'both', ...timing });
+    anim.pause();
+    anim.currentTime = t;
+  }
+}
+const mini = () => { const b = document.createElement('div'); b.style.cssText = 'width:44px;height:22px;border-radius:5px;background:#2f6fdb'; return b; };
+frames('s1', mini,
+  [{ transform: 'translateY(0)', boxShadow: '0 1px 2px rgba(16,24,40,.15)' }, { transform: 'translateY(-6px)', boxShadow: '0 8px 14px rgba(47,111,219,.45)' }],
+  { duration: 150, easing: 'ease-out' }, [0, 30, 60, 100, 150]);
+
+const box = text => () => { const b = document.createElement('div'); b.className = 'tbox'; b.textContent = text; return b; };
+const s2 = document.getElementById('s2');
+for (const [label, transform] of [['原样', 'none'], ['移动', 'translate(10px, -8px)'], ['缩放', 'scale(.75)'], ['旋转', 'rotate(20deg)'], ['组合', 'translateX(8px) rotate(-12deg) scale(.9)']]) {
+  const frame = document.createElement('div'); frame.className = 'frame';
+  const stage = document.createElement('div'); stage.className = 'stage';
+  const b = box(label)(); b.style.transform = transform;
+  stage.append(b);
+  const cap = document.createElement('span'); cap.textContent = { 原样: 'none', 移动: 'translate', 缩放: 'scale', 旋转: 'rotate', 组合: '三者组合' }[label];
+  frame.append(stage, cap);
+  s2.append(frame);
+}
+const spin = () => { const s = document.createElement('div'); s.className = 'spinner'; s.style.animation = 'none'; return s; };
+frames('s3', spin, [{ transform: 'rotate(0turn)' }, { transform: 'rotate(1turn)' }], { duration: 800, easing: 'linear' }, [0, 200, 400, 600, 800]);
+</script>
+</body>
+</html>

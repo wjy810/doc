@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>运动规律：缓动曲线与弹簧</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.3.0/400.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; max-width: 980px; }
+  h2 { font-size: 15px; margin: 0 0 2px; } .sub { color: var(--muted); margin: 0 0 10px; }
+  .curves { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+  .curve { display: grid; gap: 4px; }
+  .curve b { font-size: 13px; } .curve code { font: 11px "JetBrains Mono", monospace; color: var(--muted); }
+  svg { width: 100%; height: auto; display: block; }
+  .spring { display: grid; grid-template-columns: 220px 1fr; gap: 16px; align-items: start; }
+  .spring label { display: grid; grid-template-columns: 70px 1fr 40px; gap: 6px; align-items: center; }
+  pre { font: 11px/1.5 "JetBrains Mono", monospace; background: #f6f7f9; border-radius: 6px; padding: 8px; white-space: pre-wrap; word-break: break-all; margin: 8px 0 0; }
+  .demo { position: relative; height: 34px; background: #f6f7f9; border-radius: 17px; margin-top: 8px; }
+  .ball { position: absolute; left: 4px; top: 4px; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); }
+  button { font: inherit; padding: 3px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; margin-top: 8px; }
+  table { border-collapse: collapse; width: 100%; } td, th { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 400; }
+</style>
+</head>
+<body>
+<section>
+  <h2>缓动曲线：横轴是时间，纵轴是完成的比例；下方的点是等时间间隔的位置</h2>
+  <p class="sub">点越密的地方运动越慢。进入画面的元素常用“先快后慢”（ease-out），离开时用“先慢后快”（ease-in）。</p>
+  <div class="curves" id="curves"></div>
+</section>
+<section>
+  <h2>弹簧：用刚度、阻尼和质量描述运动，结果可以转换成 CSS 的 linear() 缓动</h2>
+  <div class="spring">
+    <div>
+      <label>刚度 <input type="range" id="k" min="50" max="600" value="260"><output id="ko"></output></label>
+      <label>阻尼 <input type="range" id="c" min="5" max="60" value="16"><output id="co"></output></label>
+      <label>质量 <input type="range" id="m" min="0.5" max="3" step="0.1" value="1"><output id="mo"></output></label>
+      <p class="sub" id="settle"></p>
+      <button type="button" id="play">播放</button>
+      <div class="demo"><span class="ball" id="ball"></span></div>
+    </div>
+    <div><svg id="springPlot" viewBox="0 0 520 170" role="img" aria-label="弹簧位移随时间变化的曲线"></svg><pre id="css"></pre></div>
+  </div>
+</section>
+<section>
+  <h2>时长：按移动距离和元素大小选择（起步参考，需在目标设备上验证）</h2>
+  <table>
+    <tr><th>变化</th><th>例子</th><th>起步时长</th><th>缓动</th></tr>
+    <tr><td>小元素、短距离</td><td>开关滑块、勾选、按钮按下</td><td>100—150 毫秒</td><td>ease-out</td></tr>
+    <tr><td>中等变化</td><td>下拉菜单、提示出现、卡片悬停</td><td>150—250 毫秒</td><td>ease-out</td></tr>
+    <tr><td>大面积、长距离</td><td>卡片展开为详情、侧栏滑入、页面切换</td><td>250—400 毫秒</td><td>先快后慢的自定义曲线或弹簧</td></tr>
+    <tr><td>离开画面</td><td>关闭弹窗、删除列表项</td><td>比进入短约三分之一</td><td>ease-in</td></tr>
+  </table>
+</section>
+<script>
+const NS = 'http://www.w3.org/2000/svg';
+function el(parent, tag, attrs = {}, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (text !== undefined) e.textContent = text;
+  parent.append(e);
+  return e;
+}
+// 三次贝塞尔缓动：给定时间 x，用牛顿迭代求出参数 t，再算出 y
+function cubicBezier(x1, y1, x2, y2) {
+  const bez = (a, b, t) => 3 * a * t * (1 - t) ** 2 + 3 * b * t * t * (1 - t) + t ** 3;
+  const dbez = (a, b, t) => 3 * a * (1 - t) ** 2 + 6 * (b - a) * t * (1 - t) + 3 * (1 - b) * t * t;
+  return x => { let t = x; for (let i = 0; i < 8; i++) { const d = dbez(x1, x2, t); if (Math.abs(d) < 1e-6) break; t -= (bez(x1, x2, t) - x) / d; } return bez(y1, y2, Math.min(1, Math.max(0, t))); };
+}
+const EASINGS = [
+  ['linear', '匀速', x => x], ['ease-in', '先慢后快', cubicBezier(.42, 0, 1, 1)], ['ease-out', '先快后慢', cubicBezier(0, 0, .58, 1)],
+  ['ease-in-out', '两头慢', cubicBezier(.42, 0, .58, 1)], ['cubic-bezier(.2, .8, .2, 1)', '强调减速', cubicBezier(.2, .8, .2, 1)]
+];
+const box = document.getElementById('curves');
+for (const [code, name, f] of EASINGS) {
+  const div = document.createElement('div'); div.className = 'curve';
+  const b = document.createElement('b'); b.textContent = name;
+  const svg = document.createElementNS(NS, 'svg'); svg.setAttribute('viewBox', '0 0 150 150');
+  el(svg, 'rect', { x: 10, y: 10, width: 130, height: 100, fill: '#f6f7f9', rx: 4 });
+  el(svg, 'polyline', { points: Array.from({ length: 61 }, (_, i) => { const x = i / 60; return `${10 + x * 130},${110 - f(x) * 100}`; }).join(' '), fill: 'none', stroke: '#2f6fdb', 'stroke-width': 2.5 });
+  el(svg, 'line', { x1: 10, x2: 140, y1: 132, y2: 132, stroke: '#dde1e7', 'stroke-width': 2 });
+  for (let i = 0; i <= 8; i++) el(svg, 'circle', { cx: 10 + f(i / 8) * 130, cy: 132, r: 4.5, fill: '#e4572e', 'fill-opacity': 0.25 + 0.75 * i / 8 });
+  const c = document.createElement('code'); c.textContent = code;
+  div.append(b, svg, c);
+  box.append(div);
+}
+
+// 弹簧：m·a = −k·(x − 1) − c·v，从 0 出发，用小时间步逐步计算
+function simulate(k, c, m) {
+  const dt = 1 / 600, xs = [];
+  let x = 0, v = 0, t = 0, settled = 0;
+  while (t < 3) {
+    const a = (-k * (x - 1) - c * v) / m;
+    v += a * dt; x += v * dt; t += dt;
+    xs.push(x);
+    if (Math.abs(x - 1) < 0.002 && Math.abs(v) < 0.02) { if (!settled) settled = t; } else settled = 0;
+    if (settled && t - settled > 0.05) break;
+  }
+  return { xs, duration: xs.length * dt };
+}
+function updateSpring() {
+  const k = +document.getElementById('k').value, c = +document.getElementById('c').value, m = +document.getElementById('m').value;
+  document.getElementById('ko').textContent = k; document.getElementById('co').textContent = c; document.getElementById('mo').textContent = m;
+  const { xs, duration } = simulate(k, c, m);
+  const ratio = c / (2 * Math.sqrt(k * m));                         // 阻尼比：小于 1 会回弹，大于等于 1 不回弹
+  const peak = Math.max(...xs);
+  document.getElementById('settle').textContent = `停稳约需 ${Math.round(duration * 1000)} 毫秒；阻尼比 ${ratio.toFixed(2)}，${ratio < 1 ? `最多越过目标 ${Math.round((peak - 1) * 100)}%` : '不回弹'}`;
+  const svg = document.getElementById('springPlot');
+  svg.replaceChildren();
+  el(svg, 'line', { x1: 30, x2: 510, y1: 40, y2: 40, stroke: '#dde1e7', 'stroke-dasharray': '4 4' });
+  el(svg, 'text', { x: 26, y: 44, 'text-anchor': 'end', 'font-size': 11, fill: '#5b6475' }, '目标');
+  el(svg, 'line', { x1: 30, x2: 510, y1: 150, y2: 150, stroke: '#dde1e7' });
+  const step = Math.max(1, Math.floor(xs.length / 240));
+  el(svg, 'polyline', { points: xs.filter((_, i) => i % step === 0).map((x, i, arr) => `${30 + i / (arr.length - 1) * 480},${150 - x * 110}`).join(' '), fill: 'none', stroke: '#2f6fdb', 'stroke-width': 2.5 });
+  el(svg, 'text', { x: 510, y: 165, 'text-anchor': 'end', 'font-size': 11, fill: '#5b6475' }, `${Math.round(duration * 1000)} 毫秒`);
+  // 把曲线均匀取 40 个点，写成 CSS 的 linear() 缓动函数
+  const n = 40, samples = Array.from({ length: n + 1 }, (_, i) => xs[Math.min(xs.length - 1, Math.round(i / n * (xs.length - 1)))]);
+  samples[0] = 0; samples[n] = 1;                                   // 从 0 开始，到 1 结束
+  const easing = `linear(${samples.map(v => +v.toFixed(3)).join(', ')})`;
+  document.getElementById('css').textContent = `transition: transform ${Math.round(duration * 1000)}ms ${easing};`;
+  document.getElementById('ball').dataset.easing = easing;
+  document.getElementById('ball').dataset.duration = Math.round(duration * 1000);
+}
+['k', 'c', 'm'].forEach(id => document.getElementById(id).addEventListener('input', updateSpring));
+document.getElementById('play').addEventListener('click', () => {
+  const ball = document.getElementById('ball');
+  const distance = ball.parentElement.clientWidth - 34;
+  ball.animate([{ transform: 'translateX(0)' }, { transform: `translateX(${distance}px)` }],
+               { duration: +ball.dataset.duration, easing: ball.dataset.easing, fill: 'forwards' });
+});
+updateSpring();
+</script>
+</body>
+</html>

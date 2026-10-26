@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>手势与直接操纵：滑动、松手、缩放与旋转</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; --ok: #067647; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 14px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; max-width: 980px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  h2 { font-size: 15px; margin: 0 0 2px; } .sub { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+  .deck { position: relative; height: 210px; }
+  .job { position: absolute; inset: 0 30px; border-radius: 14px; background: #fff; border: 1px solid var(--line); box-shadow: 0 6px 18px rgba(16,24,40,.12);
+         padding: 18px; touch-action: pan-y; user-select: none; cursor: grab; }   /* pan-y：竖向滑动交给浏览器滚动页面，横向由脚本处理 */
+  .job:nth-last-child(2) { transform: translateY(8px) scale(.96); filter: brightness(.98); }   /* 下面的卡片不透明，文字不会透出来 */
+  .job:nth-last-child(n+3) { transform: translateY(16px) scale(.92); filter: brightness(.96); }
+  .job h3 { margin: 0 0 4px; font-size: 18px; } .job p { margin: 0; color: var(--muted); }
+  .stamp { position: absolute; top: 16px; padding: 2px 10px; border: 2px solid; border-radius: 6px; font-weight: 700; opacity: 0; }
+  .stamp.save { right: 16px; color: var(--ok); } .stamp.skip { left: 16px; color: #8a93a3; }
+  .actions { display: flex; justify-content: center; gap: 10px; margin-top: 14px; }
+  button { font: inherit; padding: 6px 14px; border: 1px solid #c3c9d3; border-radius: 8px; background: #fff; cursor: pointer; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  .log { font-size: 13px; color: var(--muted); text-align: center; min-height: 21px; margin: 8px 0 0; }
+  .viewer { height: 210px; border-radius: 10px; background: #f6f7f9; overflow: hidden; display: grid; place-items: center; touch-action: none; }
+  .photo { width: 160px; height: 110px; border-radius: 8px; background: linear-gradient(135deg, #9db8e8, #f3c98b); display: grid; place-items: center; font-weight: 700; color: #1d2330; }
+</style>
+</head>
+<body>
+<div class="cols">
+  <section>
+    <h2>滑动卡片：右滑收藏，左滑跳过</h2>
+    <p class="sub">拖过一定距离，或者甩得足够快，卡片会飞出；否则弹回原位。按钮提供同样的操作。</p>
+    <div class="deck" id="deck"></div>
+    <div class="actions"><button type="button" id="skip">← 跳过</button><button type="button" id="undo">撤销</button><button type="button" id="save">收藏 →</button></div>
+    <p class="log" id="log" role="status"></p>
+  </section>
+  <section>
+    <h2>双指缩放与旋转</h2>
+    <p class="sub">在触屏上用两根手指缩放、旋转图片；没有触屏时使用按钮。</p>
+    <div class="viewer" id="viewer"><div class="photo" id="photo">作品集封面</div></div>
+    <div class="actions"><button type="button" data-z="1.2">放大</button><button type="button" data-z="0.83">缩小</button><button type="button" data-r="15">旋转</button><button type="button" id="resetPhoto">复原</button></div>
+  </section>
+</div>
+<script>
+const JOBS = ['前端开发实习生', '数据分析实习生', '测试开发实习生', '产品助理', 'UI 设计实习生'];
+let queue = [...JOBS], history = [];
+const deck = document.getElementById('deck'), log = document.getElementById('log');
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function renderDeck() {
+  deck.replaceChildren(...queue.slice(0, 3).reverse().map(title => {
+    const d = document.createElement('div'); d.className = 'job';
+    const h = document.createElement('h3'); h.textContent = title;
+    const p = document.createElement('p'); p.textContent = '日薪 200—300 元 · 每周 4 天 · 可转正';
+    const save = document.createElement('span'); save.className = 'stamp save'; save.textContent = '收藏';
+    const skip = document.createElement('span'); skip.className = 'stamp skip'; skip.textContent = '跳过';
+    d.append(h, p, save, skip);
+    return d;
+  }));
+  const top = deck.lastElementChild;
+  if (top) attach(top);
+}
+
+// 松手后：飞出（继续以当前速度运动并逐渐加速离开）或弹回（带一点回弹）
+function finish(card, dir, from = 0) {
+  const title = queue[0];
+  history.push(title);
+  queue.shift();
+  log.textContent = `${dir > 0 ? '已收藏' : '已跳过'}：${title}`;
+  if (reduce) return renderDeck();
+  card.animate([{ transform: `translateX(${from}px) rotate(${from / 20}deg)` }, { transform: `translateX(${dir * 520}px) rotate(${dir * 24}deg)`, opacity: 0 }],
+               { duration: 300, easing: 'cubic-bezier(.4, 0, 1, 1)', fill: 'forwards' }).finished.then(renderDeck);
+}
+function attach(card) {
+  let start = null, samples = [];
+  card.addEventListener('pointerdown', e => {
+    start = { x: e.clientX, y: e.clientY };
+    samples = [{ x: e.clientX, t: e.timeStamp }];
+    try { card.setPointerCapture(e.pointerId); } catch { /* 触点已经抬起时无法捕获，忽略 */ }
+    card.style.cursor = 'grabbing';
+  });
+  card.addEventListener('pointermove', e => {
+    if (!start) return;
+    const dx = e.clientX - start.x;
+    samples.push({ x: e.clientX, t: e.timeStamp });
+    if (samples.length > 5) samples.shift();                     // 只用最近几次移动估计速度
+    card.style.transform = `translateX(${dx}px) rotate(${dx / 20}deg)`;   // 跟手：拖动时没有任何延迟
+    card.querySelector('.save').style.opacity = Math.max(0, Math.min(1, dx / 80));
+    card.querySelector('.skip').style.opacity = Math.max(0, Math.min(1, -dx / 80));
+  });
+  card.addEventListener('pointerup', e => {
+    if (!start) return;
+    const dx = e.clientX - start.x;
+    const a = samples[0], b = samples[samples.length - 1];
+    const v = (b.x - a.x) / Math.max(1, b.t - a.t);              // 速度：像素每毫秒
+    start = null; card.style.cursor = '';
+    if (Math.abs(dx) > card.offsetWidth * 0.35 || Math.abs(v) > 0.6) return finish(card, Math.sign(Math.abs(v) > 0.6 ? v : dx), dx);
+    // 弹回：从当前位置回到原位，越过一点再停下
+    card.animate([{ transform: `translateX(${dx}px) rotate(${dx / 20}deg)` }, { transform: 'none' }],
+                 { duration: reduce ? 0 : 450, easing: 'cubic-bezier(.3, 1.4, .5, 1)' });
+    card.style.transform = '';
+    card.querySelectorAll('.stamp').forEach(s => { s.style.opacity = 0; });
+    log.textContent = '已放回';
+  });
+}
+document.getElementById('save').addEventListener('click', () => deck.lastElementChild && finish(deck.lastElementChild, 1));
+document.getElementById('skip').addEventListener('click', () => deck.lastElementChild && finish(deck.lastElementChild, -1));
+document.getElementById('undo').addEventListener('click', () => {
+  const title = history.pop();
+  if (!title) return;
+  queue.unshift(title);
+  renderDeck();
+  log.textContent = `已撤销：${title}`;
+});
+renderDeck();
+
+// ---------- 双指：两根手指之间的距离决定缩放，连线的角度决定旋转 ----------
+const viewer = document.getElementById('viewer'), photo = document.getElementById('photo');
+const pointers = new Map();
+let view = { scale: 1, angle: 0 }, base = null;
+const apply = () => { photo.style.transform = `scale(${view.scale}) rotate(${view.angle}deg)`; };
+const geom = () => { const [a, b] = [...pointers.values()]; return { d: Math.hypot(b.x - a.x, b.y - a.y), ang: Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI }; };
+viewer.addEventListener('pointerdown', e => {
+  try { viewer.setPointerCapture(e.pointerId); } catch { /* 同上 */ }
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pointers.size === 2) base = { ...geom(), scale: view.scale, angle: view.angle };
+});
+viewer.addEventListener('pointermove', e => {
+  if (!pointers.has(e.pointerId)) return;
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pointers.size === 2 && base) {
+    const g = geom();
+    view.scale = Math.min(3, Math.max(0.5, base.scale * g.d / base.d));
+    view.angle = base.angle + (g.ang - base.ang);
+    apply();
+  }
+});
+const lift = e => { pointers.delete(e.pointerId); if (pointers.size < 2) base = null; };
+viewer.addEventListener('pointerup', lift);
+viewer.addEventListener('pointercancel', lift);
+document.querySelectorAll('[data-z]').forEach(b => b.addEventListener('click', () => { view.scale = Math.min(3, Math.max(0.5, view.scale * +b.dataset.z)); apply(); }));
+document.querySelectorAll('[data-r]').forEach(b => b.addEventListener('click', () => { view.angle += +b.dataset.r; apply(); }));
+document.getElementById('resetPhoto').addEventListener('click', () => { view = { scale: 1, angle: 0 }; apply(); });
+</script>
+</body>
+</html>

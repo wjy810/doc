@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>微交互：触发、过程与反馈</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; --ok: #067647; --bad: #b42318; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 14px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; max-width: 960px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: grid; gap: 8px; align-content: start;
+            grid-template-columns: minmax(0, 1fr); }   /* 允许内容缩小，否则输入框的固有宽度会把按钮挤出卡片 */
+  h2 { font-size: 15px; margin: 0; }
+  .flow { font-size: 12px; color: var(--muted); margin: 0; }
+  .msg { font-size: 13px; min-height: 21px; margin: 0; }
+  .msg.ok { color: var(--ok); } .msg.bad { color: var(--bad); }
+  button { font: inherit; cursor: pointer; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  label.fail { font-size: 12px; color: var(--muted); display: flex; gap: 4px; align-items: center; }
+
+  /* 收藏：按下立即变化（乐观更新），失败时恢复并说明 */
+  .fav { width: 44px; height: 44px; border-radius: 50%; border: 1px solid #c3c9d3; background: #fff; display: grid; place-items: center; }
+  .fav svg { width: 22px; height: 22px; fill: none; stroke: #5b6475; stroke-width: 2; transition: fill .15s, stroke .15s; }
+  .fav[aria-pressed="true"] svg { fill: #e4572e; stroke: #e4572e; }
+  .pop { animation: pop .28s cubic-bezier(.3, 1.6, .5, 1); }
+  @keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(1.25); } 100% { transform: scale(1); } }
+  .shake { animation: shake .3s; }
+  @keyframes shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+
+  /* 复制：等真正复制成功后才显示“已复制” */
+  .copy { display: flex; gap: 6px; }
+  .copy input { font: inherit; font-size: 13px; flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid #c3c9d3; border-radius: 6px; }
+  .copy button { padding: 6px 12px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; min-width: 72px; }
+
+  /* 切换：开关的滑块平移，状态用 role="switch" 与 aria-checked 告诉读屏软件 */
+  .switch { display: flex; align-items: center; gap: 10px; border: 0; background: none; padding: 0; }
+  .track { width: 46px; height: 26px; border-radius: 13px; background: #c3c9d3; position: relative; transition: background .2s; }
+  .knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .2s cubic-bezier(.3, .7, .4, 1); }
+  .switch[aria-checked="true"] .track { background: var(--accent); }
+  .switch[aria-checked="true"] .knob { transform: translateX(20px); }
+
+  /* 提交：加载中保持按钮宽度，成功后显示对勾，再回到初始状态 */
+  .submit { width: 132px; height: 40px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 700; display: inline-grid; place-items: center; }
+  .submit[data-state="loading"] { background: #5b8be3; cursor: progress; }
+  .submit[data-state="success"] { background: var(--ok); }
+  .submit[data-state="error"] { background: var(--bad); }
+  .dots { display: inline-flex; gap: 4px; } .dots i { width: 6px; height: 6px; border-radius: 50%; background: #fff; animation: dot 1s infinite; }
+  .dots i:nth-child(2) { animation-delay: .15s; } .dots i:nth-child(3) { animation-delay: .3s; }
+  @keyframes dot { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .pop, .shake { animation: none; } .knob, .track { transition: none; } .dots i { animation: none; opacity: 1; } }
+</style>
+</head>
+<body>
+<div class="grid">
+  <section>
+    <h2>收藏</h2>
+    <p class="flow">触发：点击 → 过程：图标立即填充并弹跳 → 反馈：服务器确认；失败则恢复并说明</p>
+    <button class="fav" id="fav" type="button" aria-pressed="false" aria-label="收藏这个岗位">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5s-7.5-4.6-7.5-10.1A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.8c0 5.5-7.5 10.1-7.5 10.1z"/></svg>
+    </button>
+    <p class="msg" id="fav-msg" role="status"></p>
+    <label class="fail"><input type="checkbox" id="fav-fail"> 模拟网络失败</label>
+  </section>
+  <section>
+    <h2>复制链接</h2>
+    <p class="flow">触发：点击 → 过程：写入剪贴板 → 反馈：成功后才显示“已复制”；失败时选中文字，提示手动复制</p>
+    <div class="copy"><input id="link" value="https://example.com/jobs/1024" readonly aria-label="岗位链接"><button id="copy" type="button">复制</button></div>
+    <p class="msg" id="copy-msg" role="status"></p>
+  </section>
+  <section>
+    <h2>切换</h2>
+    <p class="flow">触发：点击或按空格 → 过程：滑块平移 → 反馈：颜色与文字同时变化</p>
+    <button class="switch" id="sw" type="button" role="switch" aria-checked="false"><span class="track"><span class="knob"></span></span><span id="sw-text">岗位提醒：关</span></button>
+  </section>
+  <section>
+    <h2>提交</h2>
+    <p class="flow">触发：点击 → 过程：加载中，宽度不变，不能重复点击 → 反馈：成功或失败，然后恢复</p>
+    <button class="submit" id="submit" type="button" data-state="idle">提交投递</button>
+    <p class="msg" id="submit-msg" role="status"></p>
+    <label class="fail"><input type="checkbox" id="submit-fail"> 模拟提交失败</label>
+  </section>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const wait = ms => new Promise(r => setTimeout(r, ms));
+function replay(el, cls) { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }   // 重新触发同一个动画
+
+// 收藏：先改界面，再等服务器；失败时恢复原状并说明
+$('fav').addEventListener('click', async () => {
+  const btn = $('fav'), next = btn.getAttribute('aria-pressed') !== 'true';
+  btn.setAttribute('aria-pressed', String(next));
+  replay(btn, 'pop');
+  $('fav-msg').className = 'msg'; $('fav-msg').textContent = '';
+  await wait(500);                                         // 模拟请求
+  if ($('fav-fail').checked) {
+    btn.setAttribute('aria-pressed', String(!next));
+    replay(btn, 'shake');
+    $('fav-msg').className = 'msg bad'; $('fav-msg').textContent = next ? '收藏失败，已恢复原状。请稍后再试。' : '取消收藏失败，请稍后再试。';
+  } else {
+    $('fav-msg').className = 'msg ok'; $('fav-msg').textContent = next ? '已收藏，可以在“我的收藏”中找到' : '已取消收藏';
+  }
+});
+
+// 复制：只有 writeText 成功后才说“已复制”
+$('copy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText($('link').value);
+    $('copy').textContent = '已复制 ✓';
+    $('copy-msg').className = 'msg ok'; $('copy-msg').textContent = '链接已复制到剪贴板';
+    setTimeout(() => { $('copy').textContent = '复制'; }, 1500);
+  } catch {
+    $('link').focus(); $('link').select();                // 失败时提供替代操作
+    $('copy-msg').className = 'msg bad'; $('copy-msg').textContent = '无法自动复制。链接已选中，请按 Ctrl ＋ C（Mac 上按 ⌘ ＋ C）复制。';
+  }
+});
+
+// 切换
+$('sw').addEventListener('click', () => {
+  const on = $('sw').getAttribute('aria-checked') !== 'true';
+  $('sw').setAttribute('aria-checked', String(on));
+  $('sw-text').textContent = `岗位提醒：${on ? '开' : '关'}`;
+});
+
+// 提交：状态与真实结果一致
+$('submit').addEventListener('click', async () => {
+  const b = $('submit');
+  if (b.dataset.state === 'loading') return;              // 防止重复提交
+  b.dataset.state = 'loading';
+  b.setAttribute('aria-busy', 'true');
+  b.replaceChildren(Object.assign(document.createElement('span'), { className: 'dots', ariaLabel: '正在提交' }));
+  b.firstChild.append(...Array.from({ length: 3 }, () => document.createElement('i')));
+  $('submit-msg').textContent = '';
+  await wait(900);
+  b.removeAttribute('aria-busy');
+  const failed = $('submit-fail').checked;
+  b.dataset.state = failed ? 'error' : 'success';
+  b.textContent = failed ? '提交失败' : '已提交 ✓';
+  if (failed) replay(b, 'shake');
+  $('submit-msg').className = 'msg ' + (failed ? 'bad' : 'ok');
+  $('submit-msg').textContent = failed ? '网络中断，内容已保留，可以再试一次。' : '已投递，结果会通过邮件通知你。';
+  await wait(1800);
+  b.dataset.state = 'idle'; b.textContent = '提交投递';
+});
+</script>
+</body>
+</html>
