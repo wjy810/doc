@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>引擎接口与调试工具：一个最小的展示引擎</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --warn: #a15c00; --bad: #b3261e; --ok: #1f7a4d; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 12px; max-width: 1140px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  #view { width: 100%; height: auto; display: block; border-radius: 8px; background: #20242c; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+  button, select { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+  th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .stats div { background: #f6f7f9; border-radius: 6px; padding: 4px 8px; } .stats b { display: block; font-size: 16px; font-variant-numeric: tabular-nums; } .stats span { color: var(--muted); font-size: 12px; }
+  #log { margin: 0; padding: 8px 10px; background: #1d2330; color: #e6e9ef; border-radius: 8px; font: 12px/1.55 ui-monospace, "JetBrains Mono", monospace; max-height: 260px; overflow: auto; white-space: pre-wrap; }
+  #log .w { color: #ffcf7a; } #log .e { color: #ff9a8f; } #log .i { color: #9fd3a8; } #log .c { color: #9fb7ff; }
+  .tag { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 11px; } .tag.live { background: #e3f3ea; color: var(--ok); } .tag.leak { background: #fde7e5; color: var(--bad); }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section>
+    <h2>业务代码只通过引擎接口操作场景</h2>
+    <canvas id="view" width="720" height="420" aria-label="三件产品陈列在展台上：木纹底座、金属球和织物圆环"></canvas>
+    <div class="bar">
+      <label>调试视图 <select id="debug"><option value="none">正常画面</option><option value="normals">法线</option><option value="overdraw">重叠层数</option><option value="wireframe">线框</option><option value="bounds">包围盒</option></select></label>
+      <label><input type="checkbox" id="shadows" checked> 阴影</label>
+      <button type="button" id="remove">删除产品 B</button>
+      <button type="button" id="leak">模拟：绕过接口直接建贴图</button>
+      <button type="button" id="typo">模拟：参数写错</button>
+    </div>
+    <div class="stats" id="stats"></div>
+  </section>
+  <section>
+    <h2>诊断面板</h2>
+    <p class="sub">资源登记表：每个资源记录引用数与估计大小。引用数降到 0 时由引擎释放；GPU 上的数量多于登记数，说明有资源绕过了接口。</p>
+    <table id="res"><tr><th>资源</th><th>类型</th><th>引用</th><th>估计大小</th><th>状态</th></tr></table>
+    <h2>接口调用与警告</h2>
+    <pre id="log" aria-live="polite"></pre>
+  </section>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+const $ = id => document.getElementById(id);
+const logEl = $('log');
+function log(kind, text) { const s = document.createElement('span'); s.className = kind; s.textContent = text + '\n'; logEl.append(s); logEl.scrollTop = logEl.scrollHeight; }
+
+// ================= 引擎（约 150 行）：业务代码看不到 three.js =================
+const CONFIG_SCHEMA = {
+  pixelRatio: v => typeof v === 'number' && v >= 0.5 && v <= 2 || '应为 0.5—2 的数字',
+  shadows: v => typeof v === 'boolean' || '应为 true 或 false',
+  toneMapping: v => ['none', 'aces', 'agx', 'neutral'].includes(v) || '可选 none、aces、agx、neutral',
+  debugView: v => ['none', 'normals', 'overdraw', 'wireframe', 'bounds'].includes(v) || '可选 none、normals、overdraw、wireframe、bounds'
+};
+const MATERIAL_SCHEMA = { standard: ['color', 'roughness', 'metalness', 'map'], unlit: ['color', 'map'] };
+function closest(word, list) {          // 编辑距离最小的候选，用于“你是不是想写……”
+  const d = (a, b) => { const m = [...Array(a.length + 1)].map((_, i) => [i, ...Array(b.length).fill(0)]); for (let j = 1; j <= b.length; j++) m[0][j] = j;
+    for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) m[i][j] = Math.min(m[i - 1][j] + 1, m[i][j - 1] + 1, m[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); return m[a.length][b.length]; };
+  return list.map(w => [w, d(word, w)]).sort((x, y) => x[1] - y[1])[0];
+}
+class ResourceRegistry {
+  constructor(onChange) { this.items = new Map(); this.onChange = onChange; }
+  acquire(key, kind, create, bytes) {
+    let r = this.items.get(key);
+    if (!r) { r = { key, kind, value: create(), bytes, refs: 0 }; this.items.set(key, r); log('i', `  创建 ${kind} ${key}（约 ${(bytes / 1048576).toFixed(1)} MB）`); }
+    r.refs++; this.onChange(); return r.value;
+  }
+  release(key) {
+    const r = this.items.get(key); if (!r) return log('e', `  释放了不存在的资源 ${key}`);
+    r.refs--;
+    if (r.refs === 0) { r.value.dispose(); this.items.delete(key); log('i', `  释放 ${r.kind} ${key}：没有物体再使用它`); }
+    else log('c', `  ${key} 引用 ${r.refs + 1}→${r.refs}，仍有物体使用，保留`);
+    this.onChange();
+  }
+  count(kind) { let n = 0; for (const r of this.items.values()) if (r.kind === kind) n++; return n; }
+}
+class Engine {
+  constructor(canvas, config) {
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+    this.renderer.setSize(canvas.width, canvas.height, false);
+    this.scene = new THREE.Scene(); this.scene.background = new THREE.Color('#20242c');
+    this.camera = new THREE.PerspectiveCamera(38, canvas.width / canvas.height, 0.1, 100); this.camera.position.set(0, 3.2, 8.2); this.camera.lookAt(0, 0.7, 0);
+    this.scene.add(new THREE.HemisphereLight('#e8eeff', '#3a3430', 0.6));
+    // 环境贴图：金属只反射周围环境，没有它金属会发黑
+    const pmrem = new THREE.PMREMGenerator(this.renderer), room = new RoomEnvironment();
+    this.scene.environment = pmrem.fromScene(room, 0.04).texture; this.scene.environmentIntensity = 0.6;
+    pmrem.dispose(); room.dispose();   // 生成环境贴图用的临时场景也要释放，否则它的几何体一直留在 GPU 上
+    const sun = new THREE.DirectionalLight('#fff4e0', 2.4); sun.position.set(-4, 7, 5); sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
+    Object.assign(sun.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6 }); this.scene.add(sun);
+    this.resources = new ResourceRegistry(() => this.onChange && this.onChange());
+    this.nodes = new Set(); this.helpers = []; this.config = {};
+    this.debugMaterials = {
+      normals: new THREE.MeshNormalMaterial(),
+      overdraw: new THREE.MeshBasicMaterial({ color: new THREE.Color(0.12, 0.07, 0.03), blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, transparent: true }),
+      wireframe: new THREE.MeshBasicMaterial({ color: '#9fb7ff', wireframe: true })
+    };
+    this.setConfig(config, true);
+  }
+  setConfig(patch, initial = false) {
+    for (const [k, v] of Object.entries(patch)) {
+      const check = CONFIG_SCHEMA[k];
+      if (!check) { const [s] = closest(k, Object.keys(CONFIG_SCHEMA)); log('w', `警告：配置项 ${k} 不存在，已忽略。你是不是想写 ${s}？`); continue; }
+      const ok = check(v); if (ok !== true) { log('w', `警告：配置 ${k} = ${JSON.stringify(v)} 无效（${ok}），保持 ${JSON.stringify(this.config[k])}`); continue; }
+      if (this.config[k] === v) continue;
+      this.config[k] = v; if (!initial) log('c', `engine.setConfig({ ${k}: ${JSON.stringify(v)} })`);
+      if (k === 'shadows') { this.renderer.shadowMap.enabled = v; let n = 0; this.scene.traverse(o => { if (o.material && !Array.isArray(o.material)) { o.material.needsUpdate = true; n++; } }); if (!initial) log('i', `  阴影开关会改变着色器：${n} 个材质需要重新编译，下一帧会稍慢`); }
+      if (k === 'pixelRatio') this.renderer.setPixelRatio(v);
+      if (k === 'toneMapping') this.renderer.toneMapping = { none: THREE.NoToneMapping, aces: THREE.ACESFilmicToneMapping, agx: THREE.AgXToneMapping, neutral: THREE.NeutralToneMapping }[v];
+      if (k === 'debugView') this.applyDebug(v);
+    }
+  }
+  applyDebug(view) {
+    this.scene.overrideMaterial = this.debugMaterials[view] || null;
+    this.helpers.forEach(h => { this.scene.remove(h); h.dispose(); }); this.helpers = [];
+    if (view === 'bounds') for (const n of this.nodes) n.traverse(o => { if (o.isMesh) { const h = new THREE.BoxHelper(o, '#ffcf3a'); this.helpers.push(h); this.scene.add(h); } });
+  }
+  createMaterial(type, params) {
+    const allowed = MATERIAL_SCHEMA[type]; if (!allowed) throw new Error(`没有 ${type} 这种材质`);
+    const clean = {};
+    for (const [k, v] of Object.entries(params)) {
+      if (!allowed.includes(k)) { const [s, dist] = closest(k, allowed); log('w', `警告：${type} 材质没有参数 ${k}${dist <= 2 ? `，你是不是想写 ${s}？` : ''}（已忽略，画面会使用默认值）`); continue; }
+      clean[k] = k === 'map' ? this.texture(v) : v;
+    }
+    const m = type === 'standard' ? new THREE.MeshStandardMaterial(clean) : new THREE.MeshBasicMaterial(clean);
+    m.userData.textureKey = params.map; return m;
+  }
+  geometry(key) {
+    const make = { box: () => new THREE.BoxGeometry(1.6, 0.5, 1.6), sphere: () => new THREE.SphereGeometry(0.5, 64, 32), torus: () => new THREE.TorusGeometry(0.42, 0.14, 32, 96), floor: () => new THREE.PlaneGeometry(14, 8) }[key];
+    return this.resources.acquire('geo:' + key, '几何体', make, 0);
+  }
+  texture(key) { return this.resources.acquire('tex:' + key, '贴图', () => makeTexture(key), 1024 * 1024 * 4 * 4 / 3); }
+  createNode({ name, parts }) {
+    const g = new THREE.Group(); g.name = name;
+    for (const p of parts) {
+      const mesh = new THREE.Mesh(this.geometry(p.geometry), this.createMaterial(p.material, p.params));
+      mesh.position.set(...(p.position || [0, 0, 0])); if (p.rotation) mesh.rotation.set(...p.rotation);
+      mesh.castShadow = mesh.receiveShadow = true; mesh.userData.geoKey = p.geometry; g.add(mesh);
+    }
+    return g;
+  }
+  add(node, pos) { node.position.set(...pos); this.scene.add(node); this.nodes.add(node); log('c', `engine.add(${node.name})`); this.applyDebug(this.config.debugView); this.onChange && this.onChange(); }
+  remove(node) {
+    log('c', `engine.remove(${node.name})`);
+    node.traverse(o => { if (!o.isMesh) return; this.resources.release('geo:' + o.userData.geoKey); if (o.material.userData.textureKey) this.resources.release('tex:' + o.material.userData.textureKey); o.material.dispose(); });
+    this.scene.remove(node); this.nodes.delete(node); this.applyDebug(this.config.debugView);
+  }
+  render() { const t0 = performance.now(); this.renderer.render(this.scene, this.camera); this.frameMs = performance.now() - t0; }
+  diagnostics() {
+    const mem = this.renderer.info.memory, r = this.renderer.info.render;
+    return { frameMs: this.frameMs, calls: r.calls, triangles: r.triangles, gpuTextures: mem.textures, gpuGeometries: mem.geometries, regTextures: this.resources.count('贴图'), regGeometries: this.resources.count('几何体') };
+  }
+}
+// 程序生成的三种 1024 × 1024 贴图：木纹、织物、拉丝金属
+function makeTexture(key) {
+  const c = document.createElement('canvas'); c.width = c.height = 1024; const g = c.getContext('2d');
+  if (key === 'wood' || key === 'oak') { g.fillStyle = key === 'oak' ? '#b98a57' : '#8a5a36'; g.fillRect(0, 0, 1024, 1024); for (let i = 0; i < 160; i++) { g.strokeStyle = `rgba(60,30,10,${0.08 + (i % 5) * 0.03})`; g.lineWidth = 2 + (i % 4); g.beginPath(); g.moveTo(0, i * 6.4); for (let x = 0; x <= 1024; x += 32) g.lineTo(x, i * 6.4 + Math.sin(x * 0.01 + i) * 6); g.stroke(); } }
+  if (key === 'fabric') { g.fillStyle = '#3f6fb0'; g.fillRect(0, 0, 1024, 1024); for (let i = 0; i < 1024; i += 8) { g.fillStyle = 'rgba(255,255,255,0.10)'; g.fillRect(i, 0, 3, 1024); g.fillStyle = 'rgba(0,0,0,0.12)'; g.fillRect(0, i, 1024, 3); } }
+  if (key === 'brushed') { g.fillStyle = '#c9ccd2'; g.fillRect(0, 0, 1024, 1024); for (let i = 0; i < 3000; i++) { g.fillStyle = `rgba(${i % 2 ? 255 : 80},${i % 2 ? 255 : 80},${i % 2 ? 255 : 90},0.06)`; g.fillRect(0, (i * 7919) % 1024, 1024, 1); } }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
+}
+
+// ================= 业务代码：只用 engine.* =================
+let leaked = [], baseline = 0;
+const engine = new Engine($('view'), { pixelRatio: 1, shadows: true, toneMapping: 'agx', debugView: 'none' });
+engine.onChange = () => renderTables();
+const floor = engine.createNode({ name: '展台', parts: [{ geometry: 'floor', material: 'standard', params: { color: '#d9d4c8', roughness: 0.9 }, rotation: [-Math.PI / 2, 0, 0] }] });
+engine.add(floor, [0, 0, 0]);
+const product = (name, wood) => engine.createNode({ name, parts: [
+  { geometry: 'box', material: 'standard', params: { map: wood, roughness: 0.7 }, position: [0, 0.25, 0] },
+  { geometry: 'sphere', material: 'standard', params: { map: 'brushed', metalness: 1, roughness: 0.35 }, position: [-0.35, 1, 0] },
+  { geometry: 'torus', material: 'standard', params: { map: 'fabric', roughness: 0.8 }, position: [0.45, 0.9, 0.1], rotation: [0.3, 0.6, 0] }] });
+const A = product('产品 A', 'wood'), B = product('产品 B', 'oak'), C = product('产品 C', 'wood');
+engine.add(A, [-2.6, 0, 0]); engine.add(B, [0, 0, 0]); engine.add(C, [2.6, 0, 0]);
+
+function renderTables() {
+  const t = $('res'); while (t.rows.length > 1) t.deleteRow(1);
+  for (const r of engine.resources.items.values()) { const tr = t.insertRow(); for (const v of [r.key.replace(/^\w+:/, ''), r.kind, r.refs, r.bytes ? `${(r.bytes / 1048576).toFixed(1)} MB` : '—']) tr.insertCell().textContent = v; tr.insertCell().innerHTML = '<span class="tag live">已登记</span>'; }
+  for (const k of leaked) { const tr = t.insertRow(); for (const v of [k, '贴图', '?', '5.3 MB']) tr.insertCell().textContent = v; tr.insertCell().innerHTML = '<span class="tag leak">未登记</span>'; }
+}
+function frame() {
+  engine.render();
+  const d = engine.diagnostics();
+  $('stats').innerHTML = [['绘制调用', d.calls], ['三角形', d.triangles.toLocaleString()], ['GPU 贴图／登记', `${d.gpuTextures} / ${d.regTextures}`], ['GPU 几何体／登记', `${d.gpuGeometries} / ${d.regGeometries}`]].map(([k, v]) => `<div><b>${v}</b><span>${k}</span></div>`).join('');
+  return d;
+}
+function checkLeaks() {
+  const d = engine.diagnostics();
+  // 渲染器内部还有阴影贴图等自用贴图，这里只比较“比登记多出的数量”的变化
+  const extra = d.gpuTextures - d.regTextures - baseline;
+  if (extra > 0) log('e', `诊断：GPU 上的贴图比登记表多 ${extra} 张——有代码绕过了 engine.texture()，删除物体时它们不会被释放`);
+  return extra;
+}
+frame(); baseline = engine.diagnostics().gpuTextures - engine.diagnostics().regTextures;
+log('i', `启动完成：登记贴图 ${engine.resources.count('贴图')} 张；渲染器与场景自用贴图 ${baseline} 张（阴影贴图、环境贴图等），作为比较基线`);
+
+$('debug').addEventListener('change', e => { engine.setConfig({ debugView: e.target.value }); frame(); });
+$('shadows').addEventListener('change', e => { engine.setConfig({ shadows: e.target.checked }); frame(); });
+$('remove').addEventListener('click', () => { if (!engine.nodes.has(B)) return; engine.remove(B); frame(); $('remove').disabled = true; });
+$('leak').addEventListener('click', () => {
+  log('c', '// 某段业务代码直接 new THREE.CanvasTexture(...)，没有经过 engine.texture()');
+  const tex = makeTexture('wood'); const m = new THREE.Mesh(new THREE.PlaneGeometry(0.01, 0.01), new THREE.MeshBasicMaterial({ map: tex }));
+  m.position.set(0, 0.02, 2); engine.scene.add(m); leaked.push('临时木纹（未登记）'); frame(); renderTables(); checkLeaks();
+});
+$('typo').addEventListener('click', () => {
+  log('c', "engine.createMaterial('standard', { color: '#e4572e', roughnes: 0.2, metalnes: 1 })");
+  engine.createMaterial('standard', { color: '#e4572e', roughnes: 0.2, metalnes: 1 });
+  log('c', "engine.setConfig({ toneMaping: 'aces', pixelRatio: 4 })");
+  engine.setConfig({ toneMaping: 'aces', pixelRatio: 4 });
+});
+renderTables();
+window.__en = { engine, frame, view: v => { $('debug').value = v; engine.setConfig({ debugView: v }); return frame(); }, click: id => $(id).click(), checkLeaks };
+</script>
+</body>
+</html>

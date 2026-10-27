@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPU 并行计算：工作组、数据布局、同步与搬运成本</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --a: #2f6fdb; --b: #e4572e; --c: #5b8c7a; --bad: #b3261e; --ok: #1f7a4d; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-width: 1140px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  section.wide { grid-column: 1 / -1; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+  button, select { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+  th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); font-weight: 700; }
+  .hist { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 10px; align-items: end; }
+  canvas { width: 100%; height: auto; display: block; border-radius: 6px; }
+  .stack { display: flex; height: 14px; border-radius: 3px; overflow: hidden; min-width: 2px; }
+  .stack span { display: block; height: 100%; }
+  .legend { display: flex; gap: 12px; color: var(--muted); font-size: 12px; } .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+  code { font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section class="wide">
+    <h2>0 先检测：这台设备能不能用 WebGPU</h2>
+    <p class="sub" id="env" role="status">正在检测……</p>
+    <table id="limits"><tr><th>限制项</th><th>这台设备</th><th>说明</th></tr></table>
+  </section>
+
+  <section>
+    <h2>1 图像直方图：四百万个像素，统计 256 级亮度</h2>
+    <p class="sub">每个线程处理若干像素，把亮度对应的计数加一。很多线程同时给同一个格子加一时，必须用<strong>原子操作</strong>，否则会互相覆盖。</p>
+    <div class="hist"><canvas id="img" width="160" height="160" aria-label="被统计的测试图像：左上偏暗、右下偏亮，中间有一个亮斑"></canvas><canvas id="histC" width="520" height="160" aria-label="亮度直方图"></canvas></div>
+    <div class="bar"><button type="button" id="runHist">运行三种写法</button></div>
+    <table id="histT"><tr><th>写法</th><th>时间（毫秒）</th><th>与 CPU 结果</th></tr></table>
+  </section>
+
+  <section>
+    <h2>2 粒子更新：工作组大小与数据布局</h2>
+    <p class="sub">一百万个粒子，每步只更新位置和速度。<b>AoS</b>（结构体数组）把每个粒子的 12 个数（位置、速度、颜色、寿命等）挨着放；<b>SoA</b>（数组的结构体）把位置、速度分别放成连续数组，更新时只读需要的数据。</p>
+    <div class="bar"><button type="button" id="runParticles">运行 20 步 × 六种组合</button></div>
+    <table id="partT"><tr><th>布局</th><th>工作组大小</th><th>读写的数据</th><th>每步（毫秒）</th><th>结果核对</th></tr></table>
+  </section>
+
+  <section class="wide">
+    <h2>3 搬运也要算时间：上传、计算、读回</h2>
+    <p class="sub">同一个简单计算（每个数乘 1.5 再加 2）。数据量小时，把数据送进 GPU 再取回来的时间远超计算本身；只有数据量大、或者数据本来就留在 GPU 上（例如下一步直接用来绘制）时，搬到 GPU 才划算。</p>
+    <div class="bar"><button type="button" id="runTransfer">测量四种数据量</button>
+      <span class="legend"><span><i style="background:var(--a)"></i>上传</span><span><i style="background:var(--b)"></i>计算</span><span><i style="background:var(--c)"></i>读回</span><span><i style="background:#9aa3b2"></i>CPU 直接算</span></span></div>
+    <table id="trT"><tr><th>数据量</th><th>CPU</th><th>GPU 合计（上传 ＋ 计算 ＋ 读回）</th><th style="width:44%">比例</th></tr></table>
+  </section>
+</div>
+<script type="module">
+const $ = id => document.getElementById(id);
+const median = a => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+const fmt = v => v == null ? '—' : v < 1 ? v.toFixed(2) : v.toFixed(1);
+
+// ---------- 0. 检测 ----------
+let device = null, adapterInfo = null;
+async function init() {
+  const env = $('env');
+  if (!isSecureContext) { env.textContent = '当前页面不是安全上下文（需要 https 或本机地址），浏览器不会提供 WebGPU。下面的 CPU 部分照常运行。'; return false; }
+  if (!navigator.gpu) { env.textContent = '这个浏览器没有提供 WebGPU（navigator.gpu 不存在）。下面的实验只运行 CPU 部分，GPU 一栏显示“不可用”。可以换用支持 WebGPU 的浏览器，或在 WebGL 中用“渲染到浮点纹理”完成同类计算（见《生成艺术与物理仿真》12 章）。'; return false; }
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) { env.textContent = '浏览器支持 WebGPU，但没有找到可用的适配器（可能被禁用或驱动不在许可名单中）。只运行 CPU 部分。'; return false; }
+  adapterInfo = adapter.info || {};
+  device = await adapter.requestDevice({ requiredLimits: { maxStorageBufferBindingSize: Math.min(adapter.limits.maxStorageBufferBindingSize, 64 * 1048576), maxBufferSize: Math.min(adapter.limits.maxBufferSize, 64 * 1048576) } });
+  device.lost.then(info => { env.textContent = `GPU 设备丢失：${info.message || info.reason}。刷新页面可以重新创建。`; device = null; });
+  device.addEventListener('uncapturederror', e => { env.textContent = 'GPU 报错：' + e.error.message; console.error(e.error.message); });
+  env.textContent = `WebGPU 可用。适配器：${[adapterInfo.vendor, adapterInfo.architecture, adapterInfo.description].filter(Boolean).join(' · ') || '（浏览器未公开名称）'}。`;
+  const L = device.limits;
+  for (const [k, note] of [
+    ['maxComputeWorkgroupSizeX', '一个工作组在 x 方向最多多少个线程'],
+    ['maxComputeInvocationsPerWorkgroup', '一个工作组最多多少个线程（三个方向相乘）'],
+    ['maxComputeWorkgroupStorageSize', '工作组共享内存的字节数：本页直方图用 256 × 4 ＝ 1024 字节'],
+    ['maxComputeWorkgroupsPerDimension', '一次派发每个方向最多多少个工作组'],
+    ['maxStorageBufferBindingSize', '一个存储缓冲区能绑定的最大字节数']])
+    { const tr = $('limits').insertRow(); tr.insertCell().innerHTML = `<code>${k}</code>`; tr.insertCell().textContent = L[k].toLocaleString(); tr.insertCell().textContent = note; }
+  return true;
+}
+
+// ---------- 通用：缓冲区、管线、计时 ----------
+const U = () => GPUBufferUsage;
+function buffer(size, usage, data) {
+  const b = device.createBuffer({ size: Math.ceil(size / 4) * 4, usage });
+  if (data) device.queue.writeBuffer(b, 0, data);
+  return b;
+}
+function pipeline(code, constants = {}) {
+  const module = device.createShaderModule({ code });
+  return device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main', constants } });
+}
+function bind(p, buffers) {
+  return device.createBindGroup({ layout: p.getBindGroupLayout(0), entries: buffers.map((b, i) => ({ binding: i, resource: { buffer: b } })) });
+}
+async function dispatch(p, group, workgroups, times = 1) {
+  const enc = device.createCommandEncoder();
+  for (let k = 0; k < times; k++) { const pass = enc.beginComputePass(); pass.setPipeline(p); pass.setBindGroup(0, group); pass.dispatchWorkgroups(workgroups); pass.end(); }
+  device.queue.submit([enc.finish()]);
+  await device.queue.onSubmittedWorkDone();       // 等 GPU 真正做完，才能计时
+}
+async function readBack(src, size) {
+  const dst = device.createBuffer({ size, usage: U().MAP_READ | U().COPY_DST });
+  const enc = device.createCommandEncoder(); enc.copyBufferToBuffer(src, 0, dst, 0, size); device.queue.submit([enc.finish()]);
+  await dst.mapAsync(GPUMapMode.READ);
+  const copy = dst.getMappedRange().slice(0); dst.unmap(); dst.destroy();
+  return copy;
+}
+
+// ---------- 1. 直方图 ----------
+const SIDE = 2048, NPIX = SIDE * SIDE;
+const pixels = new Uint32Array(NPIX);
+(function makeImage() {            // 测试图：对角渐变 ＋ 亮斑 ＋ 噪声，直方图有两个峰
+  let s = 12345; const rnd = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+  for (let y = 0; y < SIDE; y++) for (let x = 0; x < SIDE; x++) {
+    const u = x / SIDE, v = y / SIDE, d = Math.hypot(u - 0.68, v - 0.32);
+    let l = 40 + 90 * (u * 0.5 + v * 0.5) + 150 * Math.exp(-d * d * 40) + (rnd() - 0.5) * 30;
+    l = Math.max(0, Math.min(255, l));
+    const r = Math.min(255, l * 1.05), g = l, b = Math.min(255, l * 0.85 + 20);
+    pixels[y * SIDE + x] = (r | 0) | ((g | 0) << 8) | ((b | 0) << 16) | (255 << 24);
+  }
+  const c = $('img').getContext('2d'), im = c.createImageData(160, 160);
+  for (let y = 0; y < 160; y++) for (let x = 0; x < 160; x++) { const p = pixels[Math.floor(y * SIDE / 160) * SIDE + Math.floor(x * SIDE / 160)]; im.data.set([p & 255, (p >> 8) & 255, (p >> 16) & 255, 255], (y * 160 + x) * 4); }
+  c.putImageData(im, 0, 0);
+})();
+// 亮度用整数系数（54 ＋ 183 ＋ 19 ＝ 256），GPU 与 CPU 能得到完全相同的结果
+const LUMA = `fn luma(p: u32) -> u32 { return (54u * (p & 255u) + 183u * ((p >> 8u) & 255u) + 19u * ((p >> 16u) & 255u)) >> 8u; }`;
+function cpuHistogram() {
+  const bins = new Uint32Array(256);
+  for (let i = 0; i < NPIX; i++) { const p = pixels[i]; bins[(54 * (p & 255) + 183 * ((p >>> 8) & 255) + 19 * ((p >>> 16) & 255)) >>> 8]++; }
+  return bins;
+}
+const HIST_GLOBAL = `
+@group(0) @binding(0) var<storage, read> pixels: array<u32>;
+@group(0) @binding(1) var<storage, read_write> bins: array<atomic<u32>, 256>;
+override WG: u32 = 256;
+${LUMA}
+@compute @workgroup_size(WG)
+fn main(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) nw: vec3u) {
+  let n = arrayLength(&pixels);
+  // 网格跨步循环：线程总数固定，每个线程隔 total 个像素处理一个
+  for (var i = gid.x; i < n; i += nw.x * WG) {
+    atomicAdd(&bins[luma(pixels[i])], 1u);          // 所有线程争抢同一组全局计数
+  }
+}`;
+const HIST_SHARED = barrier => `
+@group(0) @binding(0) var<storage, read> pixels: array<u32>;
+@group(0) @binding(1) var<storage, read_write> bins: array<atomic<u32>, 256>;
+override WG: u32 = 256;
+var<workgroup> local: array<atomic<u32>, 256>;      // 工作组内共享，速度快，只有组内线程能看到
+${LUMA}
+@compute @workgroup_size(WG)
+fn main(@builtin(global_invocation_id) gid: vec3u, @builtin(local_invocation_index) li: u32, @builtin(num_workgroups) nw: vec3u) {
+  for (var b = li; b < 256u; b += WG) { atomicStore(&local[b], 0u); }
+  workgroupBarrier();                                // 等全组清零完毕
+  let n = arrayLength(&pixels);
+  for (var i = gid.x; i < n; i += nw.x * WG) {
+    atomicAdd(&local[luma(pixels[i])], 1u);         // 只和本组的线程争抢
+  }
+  ${barrier ? 'workgroupBarrier();                                // 等全组统计完毕，再合并' : '// 故意去掉了这里的 workgroupBarrier()'}
+  for (var b = li; b < 256u; b += WG) {
+    let c = atomicLoad(&local[b]);
+    if (c > 0u) { atomicAdd(&bins[b], c); }         // 每组只向全局写 256 次
+  }
+}`;
+let pixelBuf = null;
+async function runHist() {
+  const cpu0 = performance.now(); const ref = cpuHistogram(); const cpuMs = performance.now() - cpu0;
+  drawHist(ref);
+  const rows = [{ name: 'CPU（JavaScript 单线程）', ms: cpuMs, ok: true, diff: 0 }];
+  if (device) {
+    pixelBuf ||= buffer(NPIX * 4, U().STORAGE | U().COPY_DST, pixels);
+    const binBuf = buffer(1024, U().STORAGE | U().COPY_SRC | U().COPY_DST);
+    for (const [name, code] of [['GPU · 全局原子操作', HIST_GLOBAL], ['GPU · 工作组共享内存 ＋ 屏障', HIST_SHARED(true)], ['GPU · 共享内存，去掉第二个屏障', HIST_SHARED(false)]]) {
+      const p = pipeline(code, { WG: 256 }), g = bind(p, [pixelBuf, binBuf]);
+      const times = []; let res;
+      for (let k = 0; k < 5; k++) {
+        device.queue.writeBuffer(binBuf, 0, new Uint32Array(256));
+        const t0 = performance.now(); await dispatch(p, g, 256); times.push(performance.now() - t0);
+        res = new Uint32Array(await readBack(binBuf, 1024));
+      }
+      let diff = 0, total = 0; for (let b = 0; b < 256; b++) { diff += Math.abs(res[b] - ref[b]); total += res[b]; }
+      rows.push({ name, ms: median(times), ok: diff === 0, diff, total });
+    }
+    binBuf.destroy();
+  }
+  const t = $('histT'); while (t.rows.length > 1) t.deleteRow(1);
+  for (const r of rows) {
+    const tr = t.insertRow(); tr.insertCell().textContent = r.name; tr.insertCell().textContent = fmt(r.ms);
+    tr.insertCell().innerHTML = r.ok ? '<span class="ok">完全一致</span>' : `<span class="bad">不一致：总数 ${r.total.toLocaleString()}（应为 ${NPIX.toLocaleString()}），各格差值之和 ${r.diff.toLocaleString()}</span>`;
+  }
+  if (!device) { const tr = t.insertRow(); tr.insertCell().textContent = 'GPU'; tr.insertCell().textContent = '不可用'; tr.insertCell().textContent = '见第 0 部分'; }
+  return rows;
+}
+function drawHist(bins) {
+  const c = $('histC'), g = c.getContext('2d'), W = c.width, H = c.height, max = Math.max(...bins);
+  g.fillStyle = '#f6f7f9'; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#2f6fdb';
+  for (let b = 0; b < 256; b++) { const h = (bins[b] / max) * (H - 20); g.fillRect(b * W / 256, H - 16 - h, W / 256 + 0.5, h); }
+  g.fillStyle = '#5b6475'; g.font = '11px "Noto Sans SC", sans-serif'; g.fillText('0（暗）', 2, H - 3); g.fillText('255（亮）', W - 52, H - 3);
+}
+
+// ---------- 2. 粒子：AoS 与 SoA，工作组 1／64／256 ----------
+const NP = 1 << 20, DT = 1 / 60, STEPS = 20;
+const STRIDE = 12;   // AoS：每个粒子 12 个 f32 ＝ 48 字节（位置 2、速度 2、颜色 4、寿命、质量、种子、年龄）
+function initialState() {
+  const pos = new Float32Array(NP * 2), vel = new Float32Array(NP * 2);
+  let s = 7; const rnd = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+  for (let i = 0; i < NP; i++) { pos[2 * i] = rnd(); pos[2 * i + 1] = rnd(); vel[2 * i] = (rnd() - 0.5) * 0.6; vel[2 * i + 1] = (rnd() - 0.5) * 0.6; }
+  return { pos, vel };
+}
+// 更新规则：重力、移动、碰到边界反弹并损失 10% 速度
+const STEP_WGSL = `
+fn advance(p: vec2f, v: vec2f) -> array<vec2f, 2> {
+  var vel = v + vec2f(0.0, -0.98) * DT;
+  var pos = p + vel * DT;
+  if (pos.x < 0.0 || pos.x > 1.0) { vel.x = -vel.x * 0.9; pos.x = clamp(pos.x, 0.0, 1.0); }
+  if (pos.y < 0.0 || pos.y > 1.0) { vel.y = -vel.y * 0.9; pos.y = clamp(pos.y, 0.0, 1.0); }
+  return array<vec2f, 2>(pos, vel);
+}`;
+const AOS = `
+struct Particle { pos: vec2f, vel: vec2f, color: vec4f, life: f32, mass: f32, seed: f32, age: f32 };
+@group(0) @binding(0) var<storage, read_write> ps: array<Particle>;
+override WG: u32 = 64; const DT: f32 = ${DT};
+${STEP_WGSL}
+@compute @workgroup_size(WG)
+fn main(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) nw: vec3u) {
+  let n = arrayLength(&ps);
+  for (var i = gid.x; i < n; i += nw.x * WG) {
+    let r = advance(ps[i].pos, ps[i].vel);              // 只用到 48 字节中的 16 字节
+    ps[i].pos = r[0]; ps[i].vel = r[1];
+  }
+}`;
+const SOA = `
+@group(0) @binding(0) var<storage, read_write> pos: array<vec2f>;
+@group(0) @binding(1) var<storage, read_write> vel: array<vec2f>;
+override WG: u32 = 64; const DT: f32 = ${DT};
+${STEP_WGSL}
+@compute @workgroup_size(WG)
+fn main(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) nw: vec3u) {
+  let n = arrayLength(&pos);
+  for (var i = gid.x; i < n; i += nw.x * WG) {
+    let r = advance(pos[i], vel[i]);                    // 相邻线程读相邻地址，读到的每个字节都有用
+    pos[i] = r[0]; vel[i] = r[1];
+  }
+}`;
+function cpuParticles(pos0, vel0) {
+  const f = Math.fround, pos = pos0.slice(), vel = vel0.slice(), dt = f(DT), g = f(-0.98);
+  for (let k = 0; k < STEPS; k++) for (let i = 0; i < NP; i++) {
+    let vx = vel[2 * i], vy = f(vel[2 * i + 1] + f(g * dt));
+    let px = f(pos[2 * i] + f(vx * dt)), py = f(pos[2 * i + 1] + f(vy * dt));
+    if (px < 0 || px > 1) { vx = f(-vx * f(0.9)); px = Math.min(1, Math.max(0, px)); }
+    if (py < 0 || py > 1) { vy = f(-vy * f(0.9)); py = Math.min(1, Math.max(0, py)); }
+    pos[2 * i] = px; pos[2 * i + 1] = py; vel[2 * i] = vx; vel[2 * i + 1] = vy;
+  }
+  return pos;
+}
+async function runParticles() {
+  const { pos, vel } = initialState();
+  const c0 = performance.now(); const ref = cpuParticles(pos, vel); const cpuMs = (performance.now() - c0) / STEPS;
+  const rows = [{ layout: 'CPU', wg: '—', bytes: `${(NP * 16 / 1048576).toFixed(0)} MB`, ms: cpuMs, check: '作为参照' }];
+  if (device) {
+    const aos = new Float32Array(NP * STRIDE);
+    for (let i = 0; i < NP; i++) { aos.set([pos[2 * i], pos[2 * i + 1], vel[2 * i], vel[2 * i + 1], 1, 0.6, 0.2, 1, 3, 1, i, 0], i * STRIDE); }
+    for (const layout of ['AoS', 'SoA']) for (const wg of [1, 64, 256]) {
+      const p = pipeline(layout === 'AoS' ? AOS : SOA, { WG: wg });
+      const bufs = layout === 'AoS' ? [buffer(aos.byteLength, U().STORAGE | U().COPY_SRC | U().COPY_DST, aos)] : [buffer(pos.byteLength, U().STORAGE | U().COPY_SRC | U().COPY_DST, pos), buffer(vel.byteLength, U().STORAGE | U().COPY_DST, vel)];
+      const g = bind(p, bufs);
+      await device.queue.onSubmittedWorkDone();
+      const groups = Math.min(4096, Math.ceil(NP / wg));
+      const t0 = performance.now(); await dispatch(p, g, groups, STEPS); const ms = (performance.now() - t0) / STEPS;
+      const out = new Float32Array(await readBack(bufs[0], layout === 'AoS' ? aos.byteLength : pos.byteLength));
+      let maxDiff = 0;
+      for (let i = 0; i < NP; i++) for (let k = 0; k < 2; k++) maxDiff = Math.max(maxDiff, Math.abs((layout === 'AoS' ? out[i * STRIDE + k] : out[2 * i + k]) - ref[2 * i + k]));
+      rows.push({ layout, wg, bytes: layout === 'AoS' ? `${(NP * 48 / 1048576).toFixed(0)} MB（每个 48 字节，只用 16）` : `${(NP * 16 / 1048576).toFixed(0)} MB（全部用到）`, ms, maxDiff, check: maxDiff < 1e-4 ? `与 CPU 最大差 ${maxDiff.toExponential(1)}` : `差异过大：${maxDiff}` });
+      bufs.forEach(b => b.destroy());
+    }
+  }
+  const t = $('partT'); while (t.rows.length > 1) t.deleteRow(1);
+  for (const r of rows) { const tr = t.insertRow(); for (const v of [r.layout, r.wg, r.bytes, fmt(r.ms), r.check]) tr.insertCell().textContent = v; }
+  if (!device) { const tr = t.insertRow(); tr.insertCell().textContent = 'GPU'; tr.insertCell().colSpan = 4; tr.cells[1].textContent = '不可用'; }
+  return rows;
+}
+
+// ---------- 3. 搬运成本 ----------
+const AXPB = `
+@group(0) @binding(0) var<storage, read_write> data: array<f32>;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) nw: vec3u) {
+  for (var i = gid.x; i < arrayLength(&data); i += nw.x * 64u) { data[i] = data[i] * 1.5 + 2.0; }
+}`;
+async function runTransfer() {
+  const rows = [];
+  const p = device ? pipeline(AXPB) : null;
+  for (const n of [1 << 12, 1 << 16, 1 << 20, 1 << 23]) {
+    const data = new Float32Array(n); for (let i = 0; i < n; i++) data[i] = i % 1000;
+    const cpuT = [], up = [], comp = [], down = [];
+    for (let k = 0; k < 5; k++) {
+      const copy = data.slice(); const t0 = performance.now(); for (let i = 0; i < n; i++) copy[i] = copy[i] * 1.5 + 2; cpuT.push(performance.now() - t0);
+      if (!device) continue;
+      const buf = buffer(n * 4, U().STORAGE | U().COPY_SRC | U().COPY_DST); await device.queue.onSubmittedWorkDone();
+      let t = performance.now(); device.queue.writeBuffer(buf, 0, data); await device.queue.onSubmittedWorkDone(); up.push(performance.now() - t);
+      const g = bind(p, [buf]);
+      t = performance.now(); await dispatch(p, g, Math.min(4096, Math.ceil(n / 64))); comp.push(performance.now() - t);
+      t = performance.now(); const out = new Float32Array(await readBack(buf, n * 4)); down.push(performance.now() - t);
+      if (out[n - 1] !== copy[n - 1]) console.error('结果不一致', n, out[n - 1], copy[n - 1]);
+      buf.destroy();
+    }
+    rows.push({ n, cpu: median(cpuT), up: device ? median(up) : null, comp: device ? median(comp) : null, down: device ? median(down) : null });
+  }
+  const t = $('trT'); while (t.rows.length > 1) t.deleteRow(1);
+  const maxT = Math.max(...rows.map(r => Math.max(r.cpu, (r.up || 0) + (r.comp || 0) + (r.down || 0))));
+  for (const r of rows) {
+    const tr = t.insertRow(), total = r.up == null ? null : r.up + r.comp + r.down;
+    tr.insertCell().textContent = `${r.n.toLocaleString()} 个数（${(r.n * 4 / 1048576 >= 1 ? (r.n * 4 / 1048576).toFixed(0) + ' MB' : (r.n * 4 / 1024).toFixed(0) + ' KB')}）`;
+    tr.insertCell().textContent = fmt(r.cpu) + ' 毫秒';
+    tr.insertCell().textContent = total == null ? '不可用' : `${fmt(total)} 毫秒（${fmt(r.up)} ＋ ${fmt(r.comp)} ＋ ${fmt(r.down)}）`;
+    const w = v => `${Math.max(0.4, (v / maxT) * 100)}%`;
+    tr.insertCell().innerHTML = `<div class="stack" style="width:${w(r.cpu)}"><span style="flex:1;background:#9aa3b2"></span></div>` + (total == null ? '' : `<div class="stack" style="margin-top:3px;width:${w(total)}"><span style="flex:${r.up};background:var(--a)"></span><span style="flex:${r.comp};background:var(--b)"></span><span style="flex:${r.down};background:var(--c)"></span></div>`);
+  }
+  return rows;
+}
+
+const ready = init();
+$('runHist').addEventListener('click', async () => { await ready; runHist(); });
+$('runParticles').addEventListener('click', async () => { await ready; runParticles(); });
+$('runTransfer').addEventListener('click', async () => { await ready; runTransfer(); });
+ready.then(() => drawHist(cpuHistogram()));
+window.__cs = { ready, runHist, runParticles, runTransfer, hasGPU: () => !!device };
+</script>
+</body>
+</html>

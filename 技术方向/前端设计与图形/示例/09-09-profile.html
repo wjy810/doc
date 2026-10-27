@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>性能剖析与平台适配：找出瓶颈在哪里</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --cpu: #2f6fdb; --gpu: #e4572e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; max-width: 1140px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+  .wide { grid-column: 1 / -1; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  #view { width: 100%; height: auto; display: block; border-radius: 8px; background: #0e1116; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+  button { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  button[aria-pressed="true"] { background: #1d2330; color: #fff; border-color: #1d2330; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+  th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  .charts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+  .charts figure { margin: 0; } .charts canvas { width: 100%; height: auto; display: block; background: #f6f7f9; border-radius: 4px; }
+  .charts figcaption { font-size: 12px; color: var(--muted); }
+  .legend { display: flex; gap: 12px; color: var(--muted); font-size: 12px; } .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  .verdict { font-weight: 700; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section>
+    <h2>同一个场景，五种情况</h2>
+    <canvas id="view" width="640" height="360" aria-label="深色背景上排列着几百个彩色方块，相机缓慢环绕"></canvas>
+    <div class="bar" id="modes" role="group" aria-label="选择情况"></div>
+    <p class="sub" id="status" role="status">选择一种情况观察画面；“全部测量”会按固定的相机路径各运行 120 帧。</p>
+  </section>
+  <section>
+    <h2>这台设备的能力与选择的路径</h2>
+    <table id="caps"><tr><th>检测项</th><th>结果</th><th>用途</th></tr></table>
+    <p class="sub" id="tier"></p>
+  </section>
+  <section class="wide">
+    <h2>固定条件下的测量：每帧拆成“CPU 提交”与“等待 GPU”</h2>
+    <p class="sub">测量时每帧末尾读回一个像素，强制等 GPU 画完：<b>CPU 提交</b>是 JavaScript 更新与发出绘制命令的时间，<b>等待 GPU</b>是命令发出后 GPU 还要做多久。再把渲染分辨率减半重测一次：如果时间随像素数明显下降，瓶颈在片元着色。</p>
+    <div class="bar"><button type="button" id="bench">全部测量（约 20 秒）</button>
+      <span class="legend"><span><i style="background:var(--cpu)"></i>CPU 提交</span><span><i style="background:var(--gpu)"></i>等待 GPU</span><span>虚线：16.7 与 33.3 毫秒</span></span></div>
+    <div class="charts" id="charts"></div>
+    <table id="res"><tr><th>情况</th><th>绘制调用</th><th>平均帧（毫秒）</th><th>CPU 提交</th><th>等待 GPU</th><th>第 95 百分位</th><th>最长帧</th><th>超过 33 毫秒</th><th>分辨率减半后</th><th>判断</th></tr></table>
+  </section>
+  <section class="wide">
+    <h2>网络：页面加载了哪些资源</h2>
+    <p class="sub">网络瓶颈不在帧时间里，而在“多久才能开始画”。资源计时记录每个文件的大小与耗时（跨域资源需要服务器允许才会给出大小）。</p>
+    <table id="net"><tr><th>资源</th><th>传输大小</th><th>耗时（毫秒）</th></tr></table>
+  </section>
+</div>
+<script type="module">
+import * as THREE from 'three';
+const $ = id => document.getElementById(id);
+const canvas = $('view');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+renderer.setSize(640, 360, false);
+const gl = renderer.getContext();
+const scene = new THREE.Scene(); scene.background = new THREE.Color('#0e1116');
+const camera = new THREE.PerspectiveCamera(50, 640 / 360, 0.1, 200);
+scene.add(new THREE.HemisphereLight('#dfe8ff', '#202030', 1.2));
+const sun = new THREE.DirectionalLight('#ffffff', 2); sun.position.set(5, 10, 4); scene.add(sun);
+
+// 基准：400 个方块合成一个实例化网格，一次绘制
+const N = 400, palette = ['#e4572e', '#2f6fdb', '#f3b13b', '#5b8c7a', '#c0c6d0'];
+const boxGeo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+const inst = new THREE.InstancedMesh(boxGeo, new THREE.MeshStandardMaterial({ roughness: 0.6 }), N);
+const m4 = new THREE.Matrix4(), col = new THREE.Color();
+for (let i = 0; i < N; i++) { const x = (i % 20) - 9.5, z = Math.floor(i / 20) - 9.5; m4.makeTranslation(x * 1.2, Math.sin(x * 0.6) * Math.cos(z * 0.5) * 0.8, z * 1.2); inst.setMatrixAt(i, m4); inst.setColorAt(i, col.set(palette[i % 5])); }
+scene.add(inst);
+// 绘制调用多：同样的方块拆成 3000 个独立网格（每个有自己的材质）
+const many = new THREE.Group(); many.visible = false; scene.add(many);
+for (let i = 0; i < 3000; i++) { const m = new THREE.Mesh(boxGeo, new THREE.MeshStandardMaterial({ color: palette[i % 5], roughness: 0.6 })); m.position.set((Math.random() - 0.5) * 30, Math.random() * 3 + 1.5, (Math.random() - 0.5) * 30); m.scale.setScalar(0.35); many.add(m); }
+// 片元重：覆盖全屏的半透明层，每个像素计算 8 层噪声 × 16 次迭代
+const heavy = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  transparent: true, depthTest: false, depthWrite: false,
+  uniforms: { time: { value: 0 } },
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+  fragmentShader: `
+    precision highp float; varying vec2 vUv; uniform float time;
+    float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float noise(vec2 p) { vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+      return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y); }
+    void main() {
+      float v = 0.0; vec2 p = vUv * 4.0;
+      for (int k = 0; k < 16; k++) { float a = 0.5, s = 0.0; vec2 q = p + float(k) * 0.37 + time * 0.05;
+        for (int o = 0; o < 8; o++) { s += a * noise(q); q *= 2.0; a *= 0.5; } v += s; }
+      v /= 16.0;
+      gl_FragColor = vec4(vec3(0.35, 0.5, 0.9) * v, 0.35);
+    }` }));
+heavy.frustumCulled = false; heavy.renderOrder = 10; heavy.visible = false; scene.add(heavy);
+// 资源上传尖峰：每 30 帧换一张新生成的 2048 × 2048 贴图
+const board = new THREE.Mesh(new THREE.PlaneGeometry(6, 3.4), new THREE.MeshBasicMaterial({ color: '#ffffff' }));
+board.position.set(0, 5, -13); board.visible = false; scene.add(board);
+function newTexture(seed) {
+  const S = 2048, data = new Uint8Array(S * S * 4);
+  for (let i = 0; i < S * S; i++) { const v = ((i * 2654435761 + seed * 97) >>> 24); data[i * 4] = v; data[i * 4 + 1] = (v + seed * 40) & 255; data[i * 4 + 2] = 160; data[i * 4 + 3] = 255; }
+  const t = new THREE.DataTexture(data, S, S); t.needsUpdate = true; return t;
+}
+// CPU 重：每帧用 JavaScript 模拟 30 万个点（没有用到画面里，只为制造 CPU 负担）
+const pts = new Float32Array(300000 * 2);
+function cpuWork(t) { let s = 0; for (let i = 0; i < pts.length; i += 2) { pts[i] = Math.sin(i * 0.001 + t) * Math.cos(i * 0.0007 - t); pts[i + 1] = Math.atan2(pts[i], 1 + i * 1e-5); s += pts[i + 1]; } return s; }
+
+const MODES = [
+  { id: 'base', name: '基准', note: '400 个方块，一次实例化绘制' },
+  { id: 'cpu', name: 'CPU 重', note: '每帧额外的 JavaScript 计算' },
+  { id: 'draws', name: '绘制调用多', note: '再加 3000 个独立网格' },
+  { id: 'fill', name: '片元重', note: '全屏噪声层，每像素大量计算' },
+  { id: 'upload', name: '上传尖峰', note: '每 30 帧上传一张 2048 贴图' }
+];
+let mode = 'base', frameNo = 0, uploads = 0;
+function apply(id) {
+  mode = id; many.visible = id === 'draws'; heavy.visible = id === 'fill'; board.visible = id === 'upload';
+  document.querySelectorAll('#modes button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.id === id)));
+}
+for (const m of MODES) { const b = document.createElement('button'); b.type = 'button'; b.dataset.id = m.id; b.textContent = m.name; b.title = m.note; b.onclick = () => apply(m.id); $('modes').append(b); }
+apply('base');
+
+function update(i) {
+  const t = i / 60;
+  camera.position.set(Math.sin(t * 0.4) * 17, 9, Math.cos(t * 0.4) * 17); camera.lookAt(0, 0, 0);   // 固定的相机路径：第 i 帧总在同一位置
+  heavy.material.uniforms.time.value = t;
+  if (mode === 'cpu') cpuWork(t);
+  if (mode === 'upload' && i % 30 === 0) { const old = board.material.map; board.material.map = newTexture(++uploads); board.material.needsUpdate = true; if (old) old.dispose(); }
+}
+const px = new Uint8Array(4);
+function measuredFrame(i) {
+  const t0 = performance.now();
+  update(i); renderer.render(scene, camera);
+  const t1 = performance.now();
+  gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);   // 等 GPU 完成（只在测量时这样做）
+  const t2 = performance.now();
+  return { cpu: t1 - t0, gpu: t2 - t1, calls: renderer.info.render.calls };
+}
+function stats(frames) {
+  const tot = frames.map(f => f.cpu + f.gpu), sorted = [...tot].sort((a, b) => a - b);
+  const avg = a => a.reduce((s, v) => s + v, 0) / a.length;
+  return { avg: avg(tot), cpu: avg(frames.map(f => f.cpu)), gpu: avg(frames.map(f => f.gpu)), p95: sorted[Math.floor(sorted.length * 0.95)], max: sorted[sorted.length - 1], over33: tot.filter(v => v > 33.3).length, median: sorted[Math.floor(sorted.length / 2)], calls: frames[frames.length - 1].calls };
+}
+async function runMode(id, scale = 1, n = 120) {
+  apply(id); renderer.setPixelRatio(scale);
+  for (let k = 0; k < 10; k++) measuredFrame(k);                // 预热：编译着色器、首次上传
+  const frames = [];
+  for (let i = 0; i < n; i++) { frames.push(measuredFrame(i)); if (i % 20 === 0) await new Promise(r => setTimeout(r)); }
+  renderer.setPixelRatio(1);
+  return frames;
+}
+function chart(frames, title, maxMs) {
+  const fig = document.createElement('figure'), c = document.createElement('canvas'); c.width = 240; c.height = 120;
+  const g = c.getContext('2d'), W = c.width, H = c.height, bw = W / frames.length, y = ms => H - (ms / maxMs) * (H - 6);
+  frames.forEach((f, i) => { g.fillStyle = '#2f6fdb'; g.fillRect(i * bw, y(f.cpu), Math.max(1, bw - 0.3), H - y(f.cpu)); g.fillStyle = '#e4572e'; g.fillRect(i * bw, y(f.cpu + f.gpu), Math.max(1, bw - 0.3), y(f.cpu) - y(f.cpu + f.gpu)); });
+  g.strokeStyle = '#5b6475'; g.setLineDash([3, 3]); for (const ms of [16.7, 33.3]) if (ms < maxMs) { g.beginPath(); g.moveTo(0, y(ms)); g.lineTo(W, y(ms)); g.stroke(); }
+  g.setLineDash([]); g.fillStyle = '#5b6475'; g.font = '10px sans-serif'; g.fillText(`${maxMs.toFixed(0)} ms`, 2, 10);
+  fig.append(c); fig.insertAdjacentHTML('beforeend', `<figcaption>${title}</figcaption>`); return fig;
+}
+function verdict(s, half) {
+  const cpuShare = s.cpu / s.avg, drop = 1 - half.avg / s.avg, spiky = s.max > s.median * 3;
+  if (spiky && s.over33 < 15) return `尖峰：中位数 ${s.median.toFixed(1)}，最长 ${s.max.toFixed(1)}；查看尖峰那一帧做了什么`;
+  if (drop > 0.5) return `受片元（像素）限制：分辨率减半，时间降 ${(drop * 100).toFixed(0)}%`;
+  if (s.calls > 500) return `受绘制调用限制：${s.calls} 次调用，分辨率减半只降 ${(drop * 100).toFixed(0)}%`;
+  if (cpuShare > 0.5) return `受 CPU 限制：CPU 提交占 ${(cpuShare * 100).toFixed(0)}%，分辨率减半只降 ${(drop * 100).toFixed(0)}%`;
+  return `比较均衡：分辨率减半降 ${(drop * 100).toFixed(0)}%，CPU 提交占 ${(cpuShare * 100).toFixed(0)}%`;
+}
+async function benchAll() {
+  $('bench').disabled = true; $('charts').innerHTML = ''; const t = $('res'); while (t.rows.length > 1) t.deleteRow(1);
+  const out = [];
+  for (const m of MODES) {
+    $('status').textContent = `正在测量：${m.name}……`;
+    const frames = await runMode(m.id), half = stats(await runMode(m.id, 0.5, 60)), s = stats(frames);
+    out.push({ ...m, frames, s, half });
+  }
+  const maxMs = Math.max(...out.map(o => o.s.max)) * 1.05;
+  for (const o of out) {
+    $('charts').append(chart(o.frames, `${o.name}：平均 ${o.s.avg.toFixed(1)} 毫秒`, maxMs));
+    const tr = t.insertRow(), v = verdict(o.s, o.half);
+    for (const val of [o.name, o.s.calls, o.s.avg.toFixed(1), o.s.cpu.toFixed(1), o.s.gpu.toFixed(1), o.s.p95.toFixed(1), o.s.max.toFixed(1), `${o.s.over33} / 120`, `${o.half.avg.toFixed(1)}（${((o.half.avg / o.s.avg - 1) * 100).toFixed(0)}%）`, v]) tr.insertCell().textContent = val;
+    tr.cells[9].className = 'verdict';
+  }
+  apply('base'); $('status').textContent = '测量完成。图表纵轴相同，可以直接比较高度。'; $('bench').disabled = false;
+  return out.map(o => ({ name: o.name, ...o.s, half: o.half.avg, verdict: verdict(o.s, o.half) }));
+}
+$('bench').addEventListener('click', benchAll);
+
+// ---------- 能力检测与路径选择 ----------
+function capabilities() {
+  const caps = [], add = (k, v, why) => caps.push([k, v, why]);
+  add('WebGL 2', typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext ? '可用' : '不可用', '本页的基础路径');
+  add('WebGPU', 'gpu' in navigator ? '浏览器提供（仍需请求适配器）' : '不提供', '可用时可改走 WebGPU 渲染器与计算着色器');
+  add('浮点渲染目标', gl.getExtension('EXT_color_buffer_float') ? '可用' : '不可用', 'HDR、GPU 粒子与后处理需要');
+  const timer = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+  add('GPU 计时查询', timer ? '可用' : '不可用', '可用时直接测 GPU 时间，不必每帧强制同步');
+  add('最大贴图尺寸', gl.getParameter(gl.MAX_TEXTURE_SIZE) + ' 像素', '超过就要缩小或切块');
+  add('设备像素比', devicePixelRatio, '高像素比屏幕的像素数是 1 倍屏的 4 倍以上');
+  add('逻辑处理器数', navigator.hardwareConcurrency || '未知', '决定能开几个 Worker');
+  add('设备内存', navigator.deviceMemory ? navigator.deviceMemory + ' GB（取整后的近似值）' : '浏览器未提供', '用于选择贴图档位');
+  add('减少动态效果', matchMedia('(prefers-reduced-motion: reduce)').matches ? '是' : '否', '为“是”时停止自动环绕');
+  add('省流量模式', navigator.connection && navigator.connection.saveData ? '是' : '否或未提供', '为“是”时加载低档资源');
+  for (const [k, v, why] of caps) { const tr = $('caps').insertRow(); for (const x of [k, v, why]) tr.insertCell().textContent = x; }
+  const lowMem = navigator.deviceMemory && navigator.deviceMemory <= 2, float = !!gl.getExtension('EXT_color_buffer_float');
+  const tier = !float || lowMem ? '低档：关闭后处理与阴影，贴图上限 1024' : devicePixelRatio > 1.5 ? '中档：渲染像素比限制在 1.5，开启阴影' : '高档：全部效果，贴图上限 2048';
+  $('tier').textContent = `选择的路径：${tier}。路径由检测结果决定，而不是由浏览器名称决定；运行中再按实测帧时间升降档（见《技术美术与实时效果》10 章）。`;
+  return { caps, tier };
+}
+const capInfo = capabilities();
+function network() {
+  const rows = performance.getEntriesByType('resource').map(e => ({ name: e.name.replace(/^.*\/npm\//, '').slice(0, 70), size: e.transferSize, ms: e.duration }));
+  for (const r of rows) { const tr = $('net').insertRow(); tr.insertCell().textContent = r.name; tr.insertCell().textContent = r.size ? (r.size / 1024).toFixed(1) + ' KB' : '未提供（跨域或缓存）'; tr.insertCell().textContent = r.ms.toFixed(1); }
+  return rows;
+}
+setTimeout(network, 300);
+
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let running = true;
+function loop() { if (running && $('bench').disabled === false) { update(reduce ? 0 : frameNo++); renderer.render(scene, camera); } requestAnimationFrame(loop); }
+requestAnimationFrame(loop);
+window.__pf = { benchAll, apply, capInfo, stop: () => { running = false; }, show: id => { running = false; apply(id); update(40); renderer.render(scene, camera); } };
+</script>
+</body>
+</html>
