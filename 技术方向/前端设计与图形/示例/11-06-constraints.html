@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>约束与自动布局：一个模板，七种尺寸</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script src="https://cdn.jsdelivr.net/npm/kiwi.js@1.1.3/lib/kiwi.js"></script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .gallery { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+  figure { margin: 0; display: grid; gap: 2px; } figure canvas { display: block; border-radius: 4px; box-shadow: 0 0 0 1px #dde1e7; }
+  figcaption { font-size: 12px; color: var(--muted); max-width: 300px; } figcaption b { color: var(--ink); display: block; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  .warn { color: #a15c00; } .bad { color: #b3261e; font-weight: 700; }
+  code { font: 12px ui-monospace, "JetBrains Mono", monospace; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>同一套内容与规则，自动排成七种尺寸</h2>
+  <p class="sub">规则分四个强度：<b>必须</b>（不能违反，例如边距、最小字号）、<b>强</b>、<b>中</b>、<b>弱</b>（空间不够时先放弃弱的）。约束求解用 kiwi.js（Cassowary 算法）。空间实在不够时，按优先级隐藏可选内容，并把处理过程记下来。</p>
+  <div class="gallery" id="g"></div>
+</section>
+<section class="panel">
+  <h2>每种尺寸的处理记录</h2>
+  <table id="t"><tr><th>尺寸</th><th>排法</th><th>标题字号</th><th>放弃或调整了什么</th><th>求解用时</th></tr></table>
+  <p class="sub">规则：边距 ＝ 短边 × 6%（必须）；图片保持 4:3（必须），高度在下限与占满宽度之间，尽量大（弱）；元素间距 ≥ 短边 × 1.5%（必须），尽量等于短边 × 3%（中）；标题字号尽量为短边 × 8%，最小 14 像素（必须）；优先级：标志、标题、按钮必须保留 ＞ 图片 ＞ 副标题 ＞ 日期。宽高比大于 1.6 时改为左右排列。</p>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const { Solver, Variable, Constraint, Expression, Operator, Strength } = kiwi;
+const CONTENT = { title: '职业能力画布：把简历变成一份可以执行的学习计划', titleLong: '职业能力画布：把简历、岗位要求与学习任务放在同一张画布上，看清下一步该学什么、先做哪个项目', subtitle: '上传简历，三十秒得到技能差距与推荐岗位', date: '11 月 8 日 · 线上分享', cta: '免费试用' };
+const ctx = document.createElement('canvas').getContext('2d');
+function wrap(text, size, width, weight = 700) { ctx.font = `${weight} ${size}px "Noto Sans SC", sans-serif`; const lines = []; let cur = ''; for (const ch of text) { if (ctx.measureText(cur + ch).width > width && cur) { lines.push(cur); cur = ch; } else cur += ch; } if (cur) lines.push(cur); return lines; }
+
+function layout(W, H, content) {
+  const t0 = performance.now(), S = Math.min(W, H), pad = Math.round(S * 0.06), log = [], landscape = W / H > 1.6;
+  const minGap = Math.max(4, S * 0.015), prefGap = S * 0.03;
+  // ---------- 左右排列时，先解出图片与文字列的宽度 ----------
+  let colX = pad, colW = W - 2 * pad, img = null;
+  if (landscape) {
+    const s = new Solver(), iw = new Variable(), cw = new Variable(), avail = W - 2 * pad - prefGap, ih = H - 2 * pad;
+    s.addConstraint(new Constraint(new Expression(iw, cw), Operator.Eq, avail, Strength.required));                 // 图片宽 ＋ 文字列宽 ＝ 可用宽度
+    s.addConstraint(new Constraint(cw, Operator.Ge, Math.min(avail, 160), Strength.required));                       // 文字列至少 160 像素
+    s.addConstraint(new Constraint(iw, Operator.Ge, 0, Strength.required));
+    s.addConstraint(new Constraint(iw, Operator.Eq, ih * 4 / 3, Strength.medium));                                   // 图片按 4:3 占满高度（中）
+    s.addConstraint(new Constraint(cw, Operator.Ge, avail * 0.5, Strength.strong));                                  // 文字列最好占一半以上（强）
+    s.updateVariables();
+    const w = iw.value();
+    if (w >= ih * 4 / 3 * 0.6) { const h = Math.min(ih, w * 3 / 4); img = { x: pad, y: pad + (ih - h) / 2, w: h * 4 / 3, h }; colX = pad + img.w + prefGap; colW = W - colX - pad; }
+    else log.push('图片：左右排列时宽度不足，隐藏');
+  }
+  // ---------- 文字列：纵向排列，按优先级尝试 ----------
+  const logoH = Math.max(12, S * 0.05), ctaH = Math.max(20, S * 0.07), minSize = 14, prefSize = Math.max(minSize, S * 0.08);
+  let items = [
+    { key: 'logo', req: true, h: logoH },
+    ...(landscape ? [] : [{ key: 'image', prio: 3, flex: true, max: colW * 0.75, min: Math.min(colW * 0.75, H * 0.18) }]),   // 图片高度可伸缩，宽度始终 ＝ 高度 × 4/3
+    { key: 'title', req: true },
+    { key: 'subtitle', prio: 2, text: content.subtitle, size: Math.max(12, S * 0.035) },
+    { key: 'date', prio: 1, text: content.date, size: Math.max(11, S * 0.03) },
+    { key: 'cta', req: true, h: ctaH }
+  ];
+  for (const it of items) if (it.text) { const lines = wrap(it.text, it.size, colW, 400); it.h = lines.length * it.size * 1.4; it.lines = lines; }
+  let titleSize = prefSize, titleLines;
+  const titleH = size => { titleLines = wrap(content.title, size, colW); return titleLines.length * size * 1.2; };
+  function solve(list, size) {
+    const s = new Solver(), vars = list.map(() => new Variable()), gaps = list.slice(1).map(() => new Variable());
+    const total = new Expression(...vars, ...gaps);
+    s.addConstraint(new Constraint(total, Operator.Eq, H - 2 * pad, Strength.required));                              // 所有高度与间距之和 ＝ 可用高度
+    gaps.forEach(g => { s.addConstraint(new Constraint(g, Operator.Ge, minGap, Strength.required)); s.addConstraint(new Constraint(g, Operator.Eq, prefGap, Strength.medium)); });   // 间距尽量等于首选值（中）
+    list.forEach((it, i) => {
+      const v = vars[i];
+      if (it.flex) { s.addConstraint(new Constraint(v, Operator.Ge, it.min, Strength.required)); s.addConstraint(new Constraint(v, Operator.Le, it.max, Strength.required)); s.addConstraint(new Constraint(v, Operator.Eq, it.max, Strength.weak)); }   // 图片尽量大（弱）：空间不够时先缩小图片
+      else s.addConstraint(new Constraint(v, Operator.Eq, it.key === 'title' ? titleH(size) : it.h, Strength.required));
+    });
+    s.updateVariables();
+    return { heights: vars.map(v => v.value()), gaps: gaps.map(g => g.value()) };
+  }
+  // 依次尝试：缩小标题字号 → 隐藏优先级最低的可选内容 → 截断标题
+  let result = null;
+  for (;;) {
+    try { result = solve(items, titleSize); break; }
+    catch (e) {   // 必须满足的约束互相冲突：kiwi 抛出 UnsatisfiableConstraint
+      if (titleSize > minSize * 1.25 && titleSize > prefSize * 0.6) { titleSize = Math.max(minSize, titleSize * 0.9); continue; }
+      const opt = items.filter(i => i.prio).sort((a, b) => a.prio - b.prio)[0];
+      if (opt) { items = items.filter(i => i !== opt); log.push({ image: '图片：高度低于下限，隐藏', subtitle: '副标题：空间不足，隐藏', date: '日期：空间不足，隐藏' }[opt.key]); continue; }
+      if (titleSize > minSize) { titleSize = Math.max(minSize, titleSize * 0.9); continue; }
+      const maxLines = Math.max(1, Math.floor((H - 2 * pad - logoH - ctaH - 2 * minGap) / (minSize * 1.2)));
+      content = { ...content, title: wrap(content.title, minSize, colW).slice(0, maxLines).join('').slice(0, -1) + '…' };
+      log.push(`标题：最小字号仍放不下，截断为 ${maxLines} 行（冲突，需要人工处理）`); continue;
+    }
+  }
+  if (titleSize < prefSize - 0.5) log.push(`标题：字号从 ${prefSize.toFixed(0)} 缩小到 ${titleSize.toFixed(0)} 像素`);
+  // 生成每个元素的位置
+  let y = pad; const boxes = [];
+  items.forEach((it, i) => { boxes.push({ ...it, x: colX, y, w: colW, h: result.heights[i] }); y += result.heights[i] + (result.gaps[i] || 0); });
+  if (img) boxes.push({ key: 'image', ...img });
+  return { W, H, boxes, titleSize, titleLines, log, ms: performance.now() - t0, mode: landscape ? '左右' : '上下' };
+}
+// ---------- 绘制 ----------
+function render(L, scale) {
+  const c = document.createElement('canvas'); c.width = Math.round(L.W * scale); c.height = Math.round(L.H * scale); const g = c.getContext('2d'); g.scale(scale, scale);
+  g.fillStyle = '#fbf7f0'; g.fillRect(0, 0, L.W, L.H);
+  for (const b of L.boxes) {
+    if (b.key === 'logo') { g.fillStyle = '#2f6fdb'; g.beginPath(); g.arc(b.x + b.h / 2, b.y + b.h / 2, b.h / 2, 0, 7); g.fill(); g.fillStyle = '#1d2330'; g.font = `700 ${b.h * 0.6}px "Noto Sans SC"`; g.textBaseline = 'middle'; g.fillText('职途', b.x + b.h * 1.3, b.y + b.h / 2); }
+    if (b.key === 'image' && b.flex) b.w = Math.min(b.w, b.h * 4 / 3);   // 保持 4:3
+    if (b.key === 'image') { const grd = g.createLinearGradient(b.x, b.y, b.x + b.w, b.y + b.h); grd.addColorStop(0, '#8fb2f0'); grd.addColorStop(1, '#5b8c7a'); g.fillStyle = grd; g.fillRect(b.x, b.y, b.w, b.h); g.fillStyle = 'rgba(255,255,255,.85)'; for (let k = 0; k < 5; k++) g.fillRect(b.x + b.w * (0.12 + k * 0.16), b.y + b.h * (0.75 - k * 0.1), b.w * 0.1, b.h * (0.15 + k * 0.1)); }
+    if (b.key === 'title') { g.fillStyle = '#1d2330'; g.font = `700 ${L.titleSize}px "Noto Sans SC"`; g.textBaseline = 'top'; L.titleLines.forEach((t, i) => g.fillText(t, b.x, b.y + i * L.titleSize * 1.2)); }
+    if (b.key === 'subtitle' || b.key === 'date') { g.fillStyle = b.key === 'date' ? '#a15c00' : '#5b6475'; g.font = `400 ${b.size}px "Noto Sans SC"`; g.textBaseline = 'top'; b.lines.forEach((t, i) => g.fillText(t, b.x, b.y + i * b.size * 1.4)); }
+    if (b.key === 'cta') { const w = Math.min(b.w, b.h * 3.6); g.fillStyle = '#e4572e'; g.beginPath(); g.roundRect(b.x, b.y, w, b.h, b.h * 0.2); g.fill(); g.fillStyle = '#fff'; g.font = `700 ${b.h * 0.42}px "Noto Sans SC"`; g.textBaseline = 'middle'; g.textAlign = 'center'; g.fillText(CONTENT.cta, b.x + w / 2, b.y + b.h / 2); g.textAlign = 'left'; }
+  }
+  return c;
+}
+const SIZES = [['方形 1080 × 1080', 1080, 1080], ['竖屏 1080 × 1920', 1080, 1920], ['链接预览 1200 × 628', 1200, 628], ['矩形广告 300 × 250', 300, 250], ['横幅 728 × 90', 728, 90], ['方形 · 长标题', 1080, 1080, true], ['矩形 · 长标题', 300, 250, true]];
+const out = [];
+document.fonts.ready.then(() => {
+  for (const [name, W, H, long] of SIZES) {
+    const L = layout(W, H, { ...CONTENT, title: long ? CONTENT.titleLong : CONTENT.title }), scale = Math.min(230 / H, 300 / W, 1);
+    const f = document.createElement('figure'); f.append(render(L, scale)); f.insertAdjacentHTML('beforeend', `<figcaption><b>${name}</b>按 ${Math.round(scale * 100)}% 显示；${L.log.length ? L.log.length + ' 项调整' : '全部按首选值'}</figcaption>`); $('g').append(f);
+    const tr = $('t').insertRow(); [name, L.mode, `${L.titleSize.toFixed(0)} 像素`, L.log.join('；') || '—', `${L.ms.toFixed(1)} 毫秒`].forEach(v => tr.insertCell().textContent = v);
+    if (L.log.some(l => l.includes('冲突'))) tr.cells[3].className = 'bad'; else if (L.log.length) tr.cells[3].className = 'warn';
+    out.push({ name, mode: L.mode, size: L.titleSize, log: L.log, ms: L.ms });
+  }
+  window.__cs = out;
+});
+</script>
+</body>
+</html>

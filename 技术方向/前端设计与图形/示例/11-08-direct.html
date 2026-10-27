@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>直接操纵与所见即所得：画面、属性面板与代码共用一个数据模型</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .three { display: grid; grid-template-columns: minmax(0, 1.5fr) 230px minmax(0, 1fr); gap: 12px; align-items: start; }
+  #stage { width: 100%; height: auto; display: block; background: #f6f7f9; border-radius: 8px; touch-action: none; user-select: none; }
+  .props { display: grid; grid-template-columns: 52px 1fr; gap: 4px 8px; align-items: center; font-size: 12px; }
+  .props input { font: inherit; width: 100%; padding: 2px 6px; border: 1px solid #c3c9d3; border-radius: 4px; }
+  textarea { width: 100%; height: 300px; font: 11.5px/1.45 ui-monospace, "JetBrains Mono", monospace; border: 1px solid #c3c9d3; border-radius: 6px; padding: 6px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  button { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  .status { font-size: 12px; } .ok { color: #1f7a4d; font-weight: 700; } .bad { color: #b3261e; font-weight: 700; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  svg text { font-family: "Noto Sans SC", sans-serif; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>拖动、调整、创建：画面、属性面板、代码三处同时更新</h2>
+  <p class="sub">三个视图都只读写同一个数据模型；每次修改都是一条可撤销的命令。拖动时吸附到其他元素的边与中线，并画出参考线。在空白处拖动可以创建新的矩形。</p>
+  <div class="three">
+    <div style="display:grid;gap:6px">
+      <svg id="stage" viewBox="0 0 600 400" aria-label="编辑画布"></svg>
+      <div class="bar"><button type="button" id="undo">撤销</button><button type="button" id="redo">重做</button><span class="status" id="consistency" role="status"></span></div>
+    </div>
+    <div style="display:grid;gap:6px"><h2>属性面板</h2><div class="props" id="props"></div></div>
+    <div style="display:grid;gap:6px"><h2>代码（可以直接编辑）</h2><textarea id="code" spellcheck="false" aria-label="数据模型的 JSON"></textarea><span class="status" id="codeStatus" role="status"></span></div>
+  </div>
+</section>
+<section class="panel">
+  <h2>操作记录</h2>
+  <table id="t"><tr><th>操作</th><th>模型更新次数</th><th>撤销栈</th><th>三处是否一致</th></tr></table>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+// ---------- 唯一的数据模型 ----------
+const model = { elements: [
+  { id: 'title', type: 'text', x: 40, y: 40, w: 300, h: 44, text: '简历分析报告', fontSize: 30, fill: '#1d2330' },
+  { id: 'card', type: 'rect', x: 40, y: 110, w: 240, h: 150, fill: '#2f6fdb' },
+  { id: 'tag', type: 'rect', x: 330, y: 180, w: 160, h: 80, fill: '#f3b13b' }
+], selected: 'card' };
+let updates = 0;
+const undo = [], redo = [];
+function apply(cmd, merge = false) {   // 拖动中的连续修改合并成一条命令：撤销一次就回到拖动前
+  const last = undo[undo.length - 1];
+  if (merge && last && last.mergeKey === cmd.mergeKey) { last.after = cmd.after; } else { undo.push(cmd); redo.length = 0; }
+  setProps(cmd.id, cmd.after); renderAll();
+}
+function setProps(id, p) { Object.assign(model.elements.find(e => e.id === id), p); updates++; }
+$('undo').onclick = () => { const c = undo.pop(); if (!c) return; if (c.kind === 'create') { model.elements.splice(model.elements.findIndex(e => e.id === c.id), 1); if (model.selected === c.id) model.selected = model.elements[model.elements.length - 1].id; } else setProps(c.id, c.before); redo.push(c); renderAll(); record('撤销：' + c.name); };
+$('redo').onclick = () => { const c = redo.pop(); if (!c) return; if (c.kind === 'create') model.elements.push({ ...c.el }); else setProps(c.id, c.after); undo.push(c); renderAll(); record('重做：' + c.name); };
+// ---------- 视图 1：画布 ----------
+const svg = $('stage'), SNAP = 6;
+function renderCanvas(guides = []) {
+  let h = '';
+  for (const e of model.elements) {
+    h += e.type === 'rect' ? `<rect data-id="${e.id}" x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}" rx="10" fill="${e.fill}"/>` : `<text data-id="${e.id}" x="${e.x}" y="${e.y + e.fontSize}" font-size="${e.fontSize}" font-weight="700" fill="${e.fill}">${e.text}</text><rect data-id="${e.id}" x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}" fill="transparent"/>`;
+  }
+  const s = model.elements.find(e => e.id === model.selected);
+  if (s) h += `<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" fill="none" stroke="#e4572e" stroke-width="1.5" stroke-dasharray="4 3" pointer-events="none"/><rect data-handle="${s.id}" x="${s.x + s.w - 6}" y="${s.y + s.h - 6}" width="12" height="12" fill="#fff" stroke="#e4572e" stroke-width="2"/>`;
+  for (const g of guides) h += g.axis === 'x' ? `<line x1="${g.v}" y1="0" x2="${g.v}" y2="400" stroke="#e4572e" stroke-width="1"/>` : `<line x1="0" y1="${g.v}" x2="600" y2="${g.v}" stroke="#e4572e" stroke-width="1"/>`;
+  svg.innerHTML = h;
+}
+const toModel = ev => { const r = svg.getBoundingClientRect(); return { x: (ev.clientX - r.left) * 600 / r.width, y: (ev.clientY - r.top) * 400 / r.height }; };
+function snap(el, x, y) {   // 吸附到其他元素的左、中、右与上、中、下
+  const guides = []; let bx = x, by = y, best = { x: SNAP + 1, y: SNAP + 1 };
+  for (const o of model.elements) { if (o.id === el.id) continue;
+    for (const [mine, theirs] of [[0, o.x], [el.w / 2, o.x + o.w / 2], [el.w, o.x + o.w], [0, o.x + o.w], [el.w, o.x]]) { const d = Math.abs(x + mine - theirs); if (d < best.x) { best.x = d; bx = theirs - mine; guides[0] = { axis: 'x', v: theirs }; } }
+    for (const [mine, theirs] of [[0, o.y], [el.h / 2, o.y + o.h / 2], [el.h, o.y + o.h], [0, o.y + o.h], [el.h, o.y]]) { const d = Math.abs(y + mine - theirs); if (d < best.y) { best.y = d; by = theirs - mine; guides[1] = { axis: 'y', v: theirs }; } } }
+  return { x: Math.round(bx), y: Math.round(by), guides: guides.filter(Boolean) };
+}
+let drag = null;
+svg.addEventListener('pointerdown', ev => {
+  const p = toModel(ev), handle = ev.target.dataset.handle, id = ev.target.dataset.id;
+  if (handle) { const el = model.elements.find(e => e.id === handle); drag = { mode: 'resize', el, start: p, orig: { w: el.w, h: el.h }, key: 'resize' + Date.now() }; }
+  else if (id) { model.selected = id; const el = model.elements.find(e => e.id === id); drag = { mode: 'move', el, start: p, orig: { x: el.x, y: el.y }, key: 'move' + Date.now() }; renderAll(); }
+  else { const el = { id: 'r' + Date.now().toString(36), type: 'rect', x: Math.round(p.x), y: Math.round(p.y), w: 1, h: 1, fill: '#5b8c7a' }; model.elements.push(el); model.selected = el.id; drag = { mode: 'create', el, start: p, key: 'create' }; undo.push({ kind: 'create', id: el.id, el: { ...el }, name: '创建矩形' }); redo.length = 0; }
+  svg.setPointerCapture(ev.pointerId);
+});
+svg.addEventListener('pointermove', ev => {
+  if (!drag) return; const p = toModel(ev), el = drag.el;
+  if (drag.mode === 'move') { const s = snap(el, drag.orig.x + p.x - drag.start.x, drag.orig.y + p.y - drag.start.y); apply({ id: el.id, name: `移动 ${el.id}`, mergeKey: drag.key, before: drag.orig, after: { x: s.x, y: s.y } }, true); renderCanvas(s.guides); }
+  else { const w = Math.max(16, Math.round((drag.orig ? drag.orig.w : 0) + p.x - drag.start.x)), h = Math.max(16, Math.round((drag.orig ? drag.orig.h : 0) + p.y - drag.start.y));
+    if (drag.mode === 'create') { el.w = Math.max(1, Math.round(p.x - drag.start.x)); el.h = Math.max(1, Math.round(p.y - drag.start.y)); updates++; undo[undo.length - 1].el = { ...el }; renderAll(); }
+    else apply({ id: el.id, name: `调整 ${el.id} 大小`, mergeKey: drag.key, before: drag.orig, after: { w, h } }, true); }
+});
+svg.addEventListener('pointerup', () => { if (drag) record(drag.mode === 'move' ? (updates === lastUpdates ? `选中 ${drag.el.id}` : `拖动 ${drag.el.id}（吸附到其他元素的边）`) : drag.mode === 'resize' ? `调整 ${drag.el.id} 大小` : `在空白处拖出新矩形 ${drag.el.id}`); drag = null; renderCanvas(); });
+// ---------- 视图 2：属性面板 ----------
+function renderProps() {
+  const el = model.elements.find(e => e.id === model.selected); if (!el) { $('props').innerHTML = ''; return; }
+  const fields = ['x', 'y', 'w', 'h', 'fill', ...(el.type === 'text' ? ['text', 'fontSize'] : [])];
+  $('props').innerHTML = `<span>选中</span><b>${el.id}</b>` + fields.map(f => `<label for="p-${f}">${f}</label><input id="p-${f}" data-f="${f}" value="${el[f]}">`).join('');
+  $('props').querySelectorAll('input').forEach(inp => inp.addEventListener('change', () => { const f = inp.dataset.f, v = ['text', 'fill'].includes(f) ? inp.value : Number(inp.value); if (Number.isNaN(v)) { inp.value = el[f]; return; } apply({ id: el.id, name: `面板修改 ${el.id}.${f}`, before: { [f]: el[f] }, after: { [f]: v } }); record(`在属性面板把 ${el.id}.${f} 改为 ${v}`); }));
+}
+// ---------- 视图 3：代码 ----------
+let codeEditing = false, draftInvalid = false;
+function renderCode() { if (!codeEditing && !draftInvalid) $('code').value = JSON.stringify(model.elements, null, 1); }
+$('code').addEventListener('focus', () => codeEditing = true);
+$('code').addEventListener('blur', () => { codeEditing = false; commitCode(); });
+function commitCode() {
+  draftInvalid = false; let parsed; try { parsed = JSON.parse($('code').value); } catch (e) { $('codeStatus').innerHTML = `<span class="bad">JSON 有错误，模型保持不变：${e.message.slice(0, 50)}</span>`; draftInvalid = true; record('在代码中写了不合法的 JSON：模型保持不变，草稿留在编辑框中'); return false; }
+  const ids = new Set(model.elements.map(e => e.id)); let changed = 0;
+  for (const p of parsed) { const el = model.elements.find(e => e.id === p.id); if (!el) continue; const before = {}, after = {}; for (const k of Object.keys(p)) if (k !== 'id' && k !== 'type' && p[k] !== el[k]) { before[k] = el[k]; after[k] = p[k]; } if (Object.keys(after).length) { apply({ id: el.id, name: `代码修改 ${el.id}`, before, after }); changed++; } }
+  $('codeStatus').innerHTML = `<span class="ok">已应用 ${changed} 处修改</span>`; renderCode(); record(`在代码视图中修改了 ${changed} 个元素`); return true;
+}
+// ---------- 一致性检查：三处显示的值必须与模型相同 ----------
+function consistent() {
+  for (const e of model.elements) { const node = svg.querySelector(`rect[data-id="${e.id}"]`); if (!node || +node.getAttribute('x') !== e.x || +node.getAttribute('width') !== e.w) return false; }
+  let code; try { code = JSON.parse($('code').value); } catch (e) { return draftInvalid; }   // 不合法的草稿已明确标出，不算不一致
+  if (!codeEditing && !draftInvalid && JSON.stringify(code) !== JSON.stringify(model.elements)) return false;
+  const el = model.elements.find(e => e.id === model.selected); if (el) for (const inp of $('props').querySelectorAll('input')) if (String(el[inp.dataset.f]) !== inp.value) return false;
+  return true;
+}
+function renderAll() { renderCanvas(); renderProps(); renderCode(); const ok = consistent(); $('consistency').innerHTML = ok ? '<span class="ok">三处一致</span>' : '<span class="bad">不一致！</span>'; return ok; }
+const rows = []; let lastUpdates = 0;
+function record(name) { const tr = $('t').insertRow(), ok = consistent(); [name, updates - lastUpdates, undo.length, ok ? '一致' : '不一致'].forEach(v => tr.insertCell().textContent = v); tr.cells[3].className = ok ? 'ok' : 'bad'; rows.push({ name, updates: updates - lastUpdates, undo: undo.length, ok }); lastUpdates = updates; }
+renderAll();
+window.__dm = { rows, model, commitCode, setCode: v => { $('code').value = v; }, renderAll };
+</script>
+</body>
+</html>

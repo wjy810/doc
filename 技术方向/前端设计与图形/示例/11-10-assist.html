@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>生成式辅助创作：候选、比较、局部接受、撤销与追踪</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .row { display: grid; grid-template-columns: 210px repeat(4, minmax(0, 1fr)); gap: 10px; align-items: start; }
+  .cand { display: grid; gap: 4px; } .cand h3 { margin: 0; font-size: 12px; display: flex; justify-content: space-between; }
+  .cand ul { margin: 0; padding-left: 16px; font-size: 11.5px; } .cand li.bad { color: #b3261e; } .cand li.ok { color: #1f7a4d; } .cand li.diff { color: #5b6475; }
+  .cand.rejected .card { opacity: .45; }
+  .card { width: 100%; aspect-ratio: 4 / 3; border-radius: 10px; overflow: hidden; display: grid; font-size: 11px; position: relative; }
+  .card .img { background: linear-gradient(135deg, #8fb2f0, #5b8c7a); }
+  .card .txt { padding: 8px; display: grid; gap: 4px; align-content: start; }
+  .card .t { font-weight: 700; line-height: 1.3; } .card .b { justify-self: start; border-radius: 5px; padding: 2px 8px; font-size: 11px; }
+  .lock { font-size: 12px; display: grid; gap: 2px; } .lock label { display: flex; gap: 6px; align-items: center; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  .tag { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 11px; white-space: nowrap; } .tag.ai { background: #eef3ff; color: #2456b0; } .tag.me { background: #eef7f1; color: #1f7a4d; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 当前设计与四个候选：先检查，再比较，最后只接受想要的部分</h2>
+  <p class="sub">候选由一个带种子的规则生成器产生，用来代替真实的生成模型——这里关心的是人与生成结果之间的交互：约束、检查、比较、局部接受、撤销与记录。</p>
+  <div class="row" id="row"></div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>2 修改记录：每一处变化来自谁</h2><table id="hist"><tr><th>#</th><th>来源</th><th>修改</th><th>状态</th></tr></table></div>
+    <div style="display:grid;gap:6px"><h2>3 生成 40 个候选的统计</h2><table id="stats"><tr><th>检查项</th><th>未通过的候选</th></tr></table><p class="sub" id="statsNote"></p></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+// ---------- 设计模型 ----------
+let design = { layout: '上图下文', bg: '#ffffff', text: '#1d2330', accent: '#2f6fdb', title: '把简历变成学习计划', button: '开始分析', buttonH: 28, imageAlt: '学生在看职业能力画布' };
+const LOCKS = { accent: '#2f6fdb', titleTop: true };   // 用户锁定：品牌色不能变；标题必须在图片之后、文字区的最上方
+const history = [];
+// ---------- 生成器（规则模拟）：每个候选改动几个方面，有时会违反约束 ----------
+function rng(seed) { let s = (seed * 2654435761) % 2147483647 || 1; const r = () => (s = (s * 48271) % 2147483647) / 2147483647; r(); r(); return r; }   // 先打乱种子：相邻的小种子否则会得到相近的开头
+const LAYOUTS = ['上图下文', '左图右文', '全图叠字'], BGS = ['#ffffff', '#fbf7f0', '#0f172a', '#eef3ff', '#fff4e6'], TITLES = ['把简历变成学习计划', '三十秒看清你和目标岗位的差距，并得到一份按周拆好的学习计划', '下一步学什么？', '能力画布：从简历到计划'];
+function generate(seed) {
+  const r = rng(seed), c = { ...design };
+  c.layout = LAYOUTS[Math.floor(r() * 3)];
+  c.bg = BGS[Math.floor(r() * BGS.length)]; c.text = c.bg === '#0f172a' ? (r() < 0.5 ? '#f6f7f9' : '#5b6475') : (r() < 0.8 ? '#1d2330' : '#9aa3b2');
+  c.accent = r() < 0.7 ? design.accent : ['#e4572e', '#14b8a6'][Math.floor(r() * 2)];   // 有时会改掉品牌色
+  c.title = TITLES[Math.floor(r() * TITLES.length)];
+  c.buttonH = r() < 0.75 ? 28 : 18; c.imageAlt = r() < 0.85 ? design.imageAlt : '';
+  return c;
+}
+// ---------- 检查：约束与真实可用性 ----------
+const lum = hex => { const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+function validate(c) {
+  const out = [];
+  if (c.accent !== LOCKS.accent) out.push({ k: '违反锁定：品牌色被改成 ' + c.accent, type: 'lock', cat: '违反锁定：改了品牌色' });
+  if (c.layout === '全图叠字' && LOCKS.titleTop) out.push({ k: '违反锁定：标题压在图片上', type: 'lock', cat: '违反锁定：标题位置' });
+  const cr = ratio(c.text, c.layout === '全图叠字' ? '#5b8c7a' : c.bg); if (cr < 4.5) out.push({ k: `文字对比度 ${cr.toFixed(2)}:1，低于 4.5:1`, type: 'a11y', cat: '文字对比度不足' });
+  const br = ratio('#ffffff', c.accent); if (br < 4.5) out.push({ k: `按钮文字对比度 ${br.toFixed(2)}:1`, type: 'a11y', cat: '按钮文字对比度不足' });
+  if (c.buttonH < 24) out.push({ k: `按钮高 ${c.buttonH} 像素，小于 24`, type: 'a11y', cat: '按钮太小' });
+  if (!c.imageAlt) out.push({ k: '图片没有替代文字', type: 'a11y', cat: '缺少替代文字' });
+  if (c.title.length > 22) out.push({ k: `标题 ${c.title.length} 个字，在小卡片中会超过三行`, type: 'content', cat: '标题过长' });
+  return out;
+}
+function diffOf(c) { const names = { layout: '布局', bg: '背景', text: '文字色', accent: '强调色', title: '标题', buttonH: '按钮高度', imageAlt: '替代文字' }; return Object.keys(names).filter(k => c[k] !== design[k]).map(k => names[k]); }
+// ---------- 显示 ----------
+function card(c) {
+  const img = `<div class="img" role="img" aria-label="${c.imageAlt}"></div>`, txt = `<div class="txt" style="color:${c.text}"><div class="t" style="font-size:${c.title.length > 14 ? 12 : 15}px">${c.title}</div><div>上传简历，得到技能差距</div><button class="b" style="background:${c.accent};color:#fff;border:0;height:${c.buttonH}px" type="button">${c.button}</button></div>`;
+  const grid = c.layout === '左图右文' ? 'grid-template-columns:1fr 1.2fr' : c.layout === '上图下文' ? 'grid-template-rows:1fr 1.2fr' : '';
+  return c.layout === '全图叠字' ? `<div class="card" style="background:#5b8c7a"><div class="img" style="position:absolute;inset:0"></div><div style="position:relative">${txt}</div></div>` : `<div class="card" style="background:${c.bg};${grid}">${img}${txt}</div>`;
+}
+function renderRow(cands) {
+  const row = $('row'); row.innerHTML = `<div class="cand"><h3>当前设计<span class="tag me">已接受</span></h3>${card(design)}<div class="lock"><b>锁定的约束</b><label><input type="checkbox" checked disabled>品牌色 ${LOCKS.accent}</label><label><input type="checkbox" checked disabled>标题位于文字区顶部</label></div></div>`;
+  cands.forEach((c, i) => { const v = validate(c), d = diffOf(c);
+    row.insertAdjacentHTML('beforeend', `<div class="cand${v.some(x => x.type === 'lock') ? ' rejected' : ''}"><h3>候选 ${i + 1}<span class="tag ai">生成</span></h3>${card(c)}<ul>${d.length ? `<li class="diff">改动：${d.join('、')}</li>` : ''}${v.length ? v.map(x => `<li class="bad">${x.k}</li>`).join('') : '<li class="ok">全部检查通过</li>'}</ul></div>`); });
+}
+function log(source, change, status) { history.push({ source, change, status }); const tr = $('hist').insertRow(); tr.insertCell().textContent = history.length; tr.insertCell().innerHTML = `<span class="tag ${source === '生成' ? 'ai' : 'me'}">${source}</span>`; tr.insertCell().textContent = change; tr.insertCell().textContent = status; }
+// ---------- 交互流程（脚本化，便于重现） ----------
+const undoStack = [];
+function acceptParts(c, keys, note) {
+  const trial = { ...design, ...Object.fromEntries(keys.map(k => [k, c[k]])) }, locked = validate(trial).filter(v => v.type === 'lock');
+  if (locked.length) { log('生成', `尝试接受候选的 ${keys.join('、')}（${keys.map(k => c[k]).join('、')}）`, `被锁定阻止：${locked.map(v => v.k.replace('违反锁定：', '')).join('；')}`); return false; }
+  const before = Object.fromEntries(keys.map(k => [k, design[k]])); undoStack.push(before); keys.forEach(k => design[k] = c[k]); log('生成', `接受候选的 ${keys.join('、')}：${keys.map(k => `${before[k]} → ${c[k]}`).join('；')}`, note); return true; }
+function undoLast() { const b = undoStack.pop(); const keys = Object.keys(b); keys.forEach(k => design[k] = b[k]); log('人工', `撤销上一步（${keys.join('、')} 恢复）`, '已撤销'); }
+const SEEDS = [11, 4, 23, 8];
+let cands = SEEDS.map(generate);
+renderRow(cands);
+// 1）挑一个背景不同的候选，只接受它的背景
+const bgPick = cands.find(c => c.bg !== design.bg && c.bg !== '#0f172a') || cands[0]; acceptParts(bgPick, ['bg'], `只接受候选 ${cands.indexOf(bgPick) + 1} 的背景，其余不要`);
+// 2）局部重做：只重新生成标题，其他保持不变
+const titleOnly = rng(99), short = TITLES.filter(t => t.length <= 22 && t !== design.title); const newTitle = short[Math.floor(titleOnly() * short.length)];
+acceptParts({ ...design, title: newTitle }, ['title'], '局部重做：只生成了标题');
+// 3）接受候选 3 的布局，发现不合适，撤销
+const other = cands.find(c => c.layout !== design.layout) || { ...design, layout: '全图叠字' }; acceptParts(other, ['layout'], '试用');
+acceptParts({ ...design, layout: '左图右文' }, ['layout'], '试用左图右文');
+undoLast();
+// 4）人工修改按钮文字
+design.button = '上传简历'; log('人工', '按钮文字：开始分析 → 上传简历', '已接受');
+renderRow(cands);
+// ---------- 40 个候选的统计 ----------
+const counts = {}; let passAll = 0; const many = Array.from({ length: 40 }, (_, i) => generate(100 + i));
+for (const c of many) { const v = validate(c); if (!v.length) passAll++; for (const x of v) counts[x.cat] = (counts[x.cat] || 0) + 1; }
+for (const [k, n] of Object.entries(counts).sort((a, b) => b[1] - a[1])) { const tr = $('stats').insertRow(); [k, `${n} / 40`].forEach(v => tr.insertCell().textContent = v); }
+$('statsNote').textContent = `40 个候选中只有 ${passAll} 个通过全部检查。生成结果必须先检查，再给人看；违反锁定约束的候选应当直接标出或过滤。`;
+window.__as = { design, history, passAll, counts, cands: cands.map(c => ({ diff: diffOf(c), problems: validate(c).map(v => v.k) })) };
+</script>
+</body>
+</html>

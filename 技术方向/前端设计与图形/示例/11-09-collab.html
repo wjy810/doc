@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>版本、资产与协作：多人编辑、离线合并与组件迁移</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": {
+  "yjs": "https://cdn.jsdelivr.net/npm/yjs@13.6.33/dist/yjs.mjs",
+  "lib0/array": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/array.js", "lib0/binary": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/binary.js",
+  "lib0/buffer": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/buffer.js", "lib0/decoding": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/decoding.js",
+  "lib0/encoding": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/encoding.js", "lib0/environment": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/environment.js",
+  "lib0/error": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/error.js", "lib0/function": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/function.js",
+  "lib0/iterator": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/iterator.js", "lib0/logging": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/logging.js",
+  "lib0/map": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/map.js", "lib0/math": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/math.js",
+  "lib0/object": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/object.js", "lib0/observable": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/observable.js",
+  "lib0/promise": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/promise.js", "lib0/random": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/random.js",
+  "lib0/set": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/set.js", "lib0/string": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/string.js",
+  "lib0/time": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/time.js", "lib0/webcrypto": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/webcrypto.js"
+} }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --a: #2f6fdb; --b: #e4572e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .client { border: 1px solid var(--line); border-radius: 10px; padding: 8px; display: grid; gap: 6px; }
+  .client h3 { margin: 0; font-size: 13px; display: flex; justify-content: space-between; } .client h3 span { font-weight: 400; font-size: 12px; }
+  .canvas { position: relative; height: 150px; background: #f6f7f9; border-radius: 6px; overflow: hidden; }
+  .node { position: absolute; padding: 3px 8px; border-radius: 6px; background: #fff; border: 1px solid #c3c9d3; font-size: 12px; white-space: nowrap; }
+  .cursor { position: absolute; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 12px solid; transform: rotate(-30deg); }
+  .cursor b { position: absolute; top: 10px; left: 4px; font-size: 10px; color: #fff; padding: 0 4px; border-radius: 3px; transform: rotate(30deg); white-space: nowrap; }
+  .note { font-size: 12px; background: #fffaf0; border: 1px solid #f0dfbd; border-radius: 6px; padding: 4px 8px; min-height: 40px; }
+  .notice { font-size: 12px; color: #a15c00; min-height: 18px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  .ok { color: #1f7a4d; font-weight: 700; } .warn { color: #a15c00; font-weight: 700; } .bad { color: #b3261e; font-weight: 700; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 两个人同时编辑同一张能力画布（Yjs：一种无冲突复制数据类型）</h2>
+  <p class="sub">每个客户端都保存一份完整的文档。修改在本地立即生效，再把“更新”发给对方；无论更新以什么顺序到达，两份文档最终都会一样。</p>
+  <div class="two"><div class="client" id="A"></div><div class="client" id="B"></div></div>
+  <table id="steps"><tr><th>步骤</th><th>甲看到的</th><th>乙看到的</th><th>结果</th></tr></table>
+</section>
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px">
+      <h2>2 组件改版：找到所有引用，自动迁移，剩下的交给人工</h2>
+      <p class="sub">“技能标签”从第 1 版升级到第 2 版：属性 tone（blue／orange）改名为 variant（info／warning），并新增必填的 size。</p>
+      <table id="mig"><tr><th>文档</th><th>引用数</th><th>自动迁移</th><th>需要人工处理</th></tr></table>
+      <pre id="migNote" style="margin:0;font:11.5px/1.5 ui-monospace,monospace;background:#f6f7f9;border-radius:8px;padding:8px 10px;white-space:pre-wrap"></pre>
+    </div>
+    <div style="display:grid;gap:6px">
+      <h2>3 资产：谁在用这张图</h2>
+      <table id="assets"><tr><th>资产</th><th>版本</th><th>被引用</th><th>状态</th></tr></table>
+    </div>
+  </div>
+</section>
+<script type="module">
+import * as Y from 'yjs';
+const $ = id => document.getElementById(id);
+// ---------- 两个客户端与一个“网络” ----------
+function client(name, clientID, color) {
+  const doc = new Y.Doc(); doc.clientID = clientID;   // 固定编号，结果可以重现
+  return { name, color, doc, nodes: doc.getMap('nodes'), note: doc.getText('note'), online: true, outbox: [], cursor: { x: 20, y: 20 }, notice: '' };
+}
+const A = client('甲', 1, '#2f6fdb'), B = client('乙', 2, '#e4572e');
+for (const [me, other] of [[A, B], [B, A]]) me.doc.on('update', (u, origin) => { if (origin === 'remote') return; me.outbox.push(u); flush(me, other); });
+function flush(me, other) { if (!me.online || !other.online) return; while (me.outbox.length) Y.applyUpdate(other.doc, me.outbox.shift(), 'remote'); }
+const sync = () => { flush(A, B); flush(B, A); };
+// 初始内容（由甲创建，同步给乙）
+A.doc.transact(() => {
+  for (const [id, title, x, y] of [['n1', '数据可视化', 20, 30], ['n2', '前端工程', 170, 80], ['n3', '作品集项目', 60, 105]]) { const m = new Y.Map(); m.set('title', title); m.set('x', x); m.set('y', y); A.nodes.set(id, m); }
+  A.note.insert(0, '本周目标：完成图表组件');
+});
+// ---------- 显示 ----------
+function render(c) {
+  const other = c === A ? B : A, el = $(c === A ? 'A' : 'B');
+  let h = `<h3>${c.name}<span style="color:${c.online ? '#1f7a4d' : '#b3261e'}">${c.online ? '在线' : '离线'}</span></h3><div class="canvas">`;
+  c.nodes.forEach((m, id) => { h += `<div class="node" style="left:${m.get('x')}px;top:${m.get('y')}px">${m.get('title')}</div>`; });
+  if (c.online && other.online) h += `<div class="cursor" style="left:${other.cursor.x}px;top:${other.cursor.y}px;border-bottom-color:${other.color}"><b style="background:${other.color}">${other.name}</b></div>`;   // 对方的位置
+  h += `</div><div class="note">${c.note.toString()}</div><div class="notice">${c.notice}</div>`;
+  el.innerHTML = h;
+}
+const snapshot = c => ({ nodes: Object.fromEntries([...c.nodes.entries()].map(([k, m]) => [k, m.toJSON()])), note: c.note.toString() });
+const same = () => JSON.stringify(snapshot(A)) === JSON.stringify(snapshot(B));
+const steps = [];
+function step(name, fn, describe) { fn(); render(A); render(B); const s = { name, a: describe(A), b: describe(B), same: same() }; steps.push(s); const tr = $('steps').insertRow(); [name, s.a, s.b].forEach(v => tr.insertCell().textContent = v); const td = tr.insertCell(); td.textContent = s.same ? '两边一致' : '暂时不同（离线中）'; td.className = s.same ? 'ok' : 'warn'; }
+const t = id => c => `${c.nodes.get(id).get('title')} @(${c.nodes.get(id).get('x')}, ${c.nodes.get(id).get('y')})`;
+step('1 同时修改同一节点的不同属性：甲改名、乙移动', () => { A.nodes.get('n1').set('title', '数据可视化（D3）'); B.nodes.get('n1').set('x', 40); B.nodes.get('n1').set('y', 50); }, t('n1'));
+// 同一属性的冲突：先让两边离线各改一次，再同时上线
+step('2 两人离线时把同一节点改成不同的名字', () => { A.online = B.online = false; A.nodes.get('n2').set('title', '前端工程（React）'); B.nodes.get('n2').set('title', '前端工程（Vue）'); }, t('n2'));
+step('3 重新上线', () => { const before = { A: A.nodes.get('n2').get('title'), B: B.nodes.get('n2').get('title') }; A.online = B.online = true; sync();
+  for (const c of [A, B]) { const mine = before[c.name === '甲' ? 'A' : 'B'], now = c.nodes.get('n2').get('title'); c.notice = mine !== now ? `你把“前端工程”改成“${mine}”，被另一位的修改“${now}”覆盖；可以在历史中找回。` : ''; } }, t('n2'));
+step('4 离线时都在备注里输入文字', () => { B.online = false; A.note.insert(A.note.length, '；下周：写测试'); B.note.insert(0, '【乙】'); B.note.insert(B.note.length, '；先读 D3 文档'); }, c => c.note.toString());
+step('5 乙重新上线：文字合并，两人的输入都保留', () => { B.online = true; sync(); }, c => c.note.toString());
+// 保存失败时保护草稿：把本地状态编码成一段二进制，重试成功后服务器与本地一致
+let server = null, draft = null;
+step('6 甲保存到服务器失败，草稿保存在本地；重试成功', () => {
+  A.cursor = { x: 150, y: 30 }; B.cursor = { x: 30, y: 95 };
+  const update = Y.encodeStateAsUpdate(A.doc); draft = update;                    // 先存草稿
+  try { throw new Error('网络错误 503'); } catch (e) { A.notice += `<br>保存失败（${e.message}），草稿已保存在本机（${draft.length} 字节），稍后自动重试。`; }
+  server = new Y.Doc(); Y.applyUpdate(server, draft);                               // 重试成功
+  A.notice += ' 重试成功。';
+}, c => c === A ? `草稿 ${draft.length} 字节` : '—');
+const serverSame = JSON.stringify(server.getText('note').toString()) === JSON.stringify(A.note.toString());
+// ---------- 组件迁移 ----------
+const docs = {
+  '简历分析结果页': [{ c: '技能标签', tone: 'blue', text: 'D3' }, { c: '技能标签', tone: 'orange', text: '测试' }, { c: '按钮', text: '加入计划' }, { c: '技能标签', tone: 'blue', text: 'React' }],
+  '职业能力画布': [{ c: '技能标签', tone: 'blue', text: '可视化' }, { c: '技能标签', tone: 'green', text: '沟通' }, { c: '技能标签', tone: 'orange', text: '性能' }],
+  '岗位详情页': [{ c: '技能标签', tone: 'orange', text: 'TypeScript' }, { c: '技能标签', text: 'Git' }, { c: '卡片' }]
+};
+const MAP = { blue: 'info', orange: 'warning' }, report = [];
+for (const [doc, items] of Object.entries(docs)) {
+  let refs = 0, auto = 0; const manual = [];
+  for (const it of items) { if (it.c !== '技能标签') continue; refs++;
+    if (it.tone in MAP) { it.variant = MAP[it.tone]; delete it.tone; it.size = 'md'; auto++; }
+    else manual.push(it.tone ? `“${it.text}”的 tone＝${it.tone} 没有对应的新值` : `“${it.text}”没有 tone，无法判断 variant`); }
+  report.push({ doc, refs, auto, manual });
+  const tr = $('mig').insertRow(); [doc, refs, auto, manual.length ? manual.join('；') : '—'].forEach(v => tr.insertCell().textContent = v); if (manual.length) tr.cells[3].className = 'warn';
+}
+$('migNote').textContent = `// 迁移脚本（节选）\nconst MAP = { blue: 'info', orange: 'warning' };\nif (tag.tone in MAP) { tag.variant = MAP[tag.tone]; delete tag.tone; tag.size = 'md'; }\nelse reportForReview(tag);   // 不猜：没有对应关系的交给人`;
+const assets = [['岗位插图-数据.png', 'v3', 4], ['岗位插图-前端.png', 'v2', 2], ['旧版标志.svg', 'v1', 0], ['画布背景.webp', 'v5', 1]];
+for (const [n, v, r] of assets) { const tr = $('assets').insertRow(); [n, v, r ? `${r} 处` : '0 处', r ? '使用中' : '没有引用：确认后可以归档'].forEach(x => tr.insertCell().textContent = x); tr.cells[3].className = r ? 'ok' : 'warn'; }
+render(A); render(B);
+window.__co = { steps, serverSame, report, finalNote: A.note.toString(), n2: A.nodes.get('n2').get('title') };
+</script>
+</body>
+</html>

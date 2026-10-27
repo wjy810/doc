@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>设计令牌：三层结构、多主题、构建与检查</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  pre { margin: 0; padding: 8px 10px; background: #f6f7f9; border-radius: 8px; font: 11px/1.45 ui-monospace, "JetBrains Mono", monospace; white-space: pre-wrap; max-height: 300px; overflow: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  .ok { color: #1f7a4d; font-weight: 700; } .bad { color: #b3261e; font-weight: 700; } .warn { color: #a15c00; font-weight: 700; }
+  /* 预览卡片：只使用令牌生成的变量 */
+  .preview { background: var(--color-bg-canvas); border-radius: 10px; padding: 14px; }
+  .card { background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: var(--card-radius); padding: var(--card-padding); display: grid; gap: var(--space-2); color: var(--color-text-default); }
+  .card h3 { margin: 0; font-size: var(--font-size-title); } .card p { margin: 0; color: var(--color-text-muted); font-size: var(--font-size-body); }
+  .card .err { color: var(--color-feedback-error-text); font-size: var(--font-size-small); }
+  .card .actions { display: flex; gap: var(--space-2); }
+  .btn { font: inherit; font-size: var(--font-size-body); border-radius: var(--button-radius); padding: var(--space-1) var(--space-3); border: 1px solid transparent; }
+  .btn.primary { background: var(--button-primary-bg); color: var(--button-primary-text); }
+  .btn.secondary { background: transparent; color: var(--color-text-default); border-color: var(--color-border-default); }
+  .btn:focus-visible { outline: 3px solid var(--color-focus-ring); outline-offset: 2px; }
+  .tag { font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 同一张卡片，三套主题：页面只引用组件令牌，主题只改语义层</h2>
+  <div class="three" id="previews"></div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:8px">
+      <h2>2 令牌源文件（Design Tokens 格式，节选）</h2>
+      <pre id="source"></pre>
+      <h2>令牌的三层</h2>
+      <table id="layers"><tr><th>层</th><th>例子</th><th>含义</th><th>数量</th></tr></table>
+    </div>
+    <div style="display:grid;gap:8px">
+      <h2>3 构建结果：同一份源文件生成不同平台的代码</h2>
+      <pre id="css"></pre>
+      <pre id="js"></pre>
+    </div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:8px">
+      <h2>4 检查：每套主题的颜色搭配是否达到对比度要求</h2>
+      <table id="contrast"><tr><th>搭配</th><th>要求</th><th>亮色</th><th>暗色</th><th>品牌 B</th></tr></table>
+    </div>
+    <div style="display:grid;gap:8px">
+      <h2>5 检查：结构问题</h2>
+      <table id="lint"><tr><th>问题</th><th>位置</th><th>说明</th></tr></table>
+    </div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+// ---------- 令牌源文件：基础值 → 语义 → 组件，引用写成 {路径} ----------
+const tokens = {
+  color: {
+    $type: 'color',
+    white: { $value: '#ffffff' }, black: { $value: '#0b0d12' },
+    gray: { 50: { $value: '#f6f7f9' }, 100: { $value: '#eceef2' }, 300: { $value: '#c3c9d3' }, 500: { $value: '#7d8696' }, 600: { $value: '#5b6475' }, 700: { $value: '#3c4454' }, 800: { $value: '#262c38' }, 900: { $value: '#1d2330' } },
+    blue: { 300: { $value: '#8fb2f0' }, 500: { $value: '#3b7be0' }, 600: { $value: '#2f6fdb' }, 700: { $value: '#2456b0' } },
+    orange: { 400: { $value: '#fb923c' }, 500: { $value: '#f97316' }, 700: { $value: '#b4500d' } },
+    red: { 400: { $value: '#f87171' }, 600: { $value: '#c62828' } },
+    teal: { 500: { $value: '#14b8a6' } }
+  },
+  space: { $type: 'dimension', 1: { $value: '4px' }, 2: { $value: '8px' }, 3: { $value: '12px' }, 4: { $value: '16px' }, 5: { $value: '24px' } },
+  radius: { $type: 'dimension', control: { $value: '6px' }, card: { $value: '12px' } },
+  'font-size': { $type: 'dimension', small: { $value: '12px' }, body: { $value: '14px' }, title: { $value: '18px' } }
+};
+// 语义层：每套主题一份映射（只引用基础值）
+const themes = {
+  亮色: { 'color.text.default': '{color.gray.900}', 'color.text.muted': '{color.gray.600}', 'color.bg.canvas': '{color.gray.100}', 'color.bg.surface': '{color.white}', 'color.border.default': '{color.gray.500}', 'color.action.primary.bg': '{color.blue.600}', 'color.action.primary.text': '{color.white}', 'color.feedback.error.text': '{color.red.600}', 'color.focus.ring': '{color.blue.600}' },
+  暗色: { 'color.text.default': '{color.gray.50}', 'color.text.muted': '{color.gray.300}', 'color.bg.canvas': '{color.black}', 'color.bg.surface': '{color.gray.800}', 'color.border.default': '{color.gray.500}', 'color.action.primary.bg': '{color.blue.300}', 'color.action.primary.text': '{color.gray.900}', 'color.feedback.error.text': '{color.red.400}', 'color.focus.ring': '{color.blue.300}' },
+  品牌B: { 'color.text.default': '{color.gray.900}', 'color.text.muted': '{color.gray.600}', 'color.bg.canvas': '{color.gray.50}', 'color.bg.surface': '{color.white}', 'color.border.default': '{color.gray.300}', 'color.action.primary.bg': '{color.orange.500}', 'color.action.primary.text': '{color.white}', 'color.feedback.error.text': '{color.red.600}', 'color.focus.ring': '#f97316' }
+};
+// 组件层：只引用语义层或尺寸
+const components = { 'button.primary.bg': '{color.action.primary.bg}', 'button.primary.text': '{color.action.primary.text}', 'button.radius': '{radius.control}', 'card.radius': '{radius.card}', 'card.padding': '{space.4}', 'badge.bg': '{badge.bg}' };   // 最后一条故意写成自己引用自己
+
+// ---------- 解析：把引用展开成最终值，并发现循环与缺失 ----------
+function flatten(obj, prefix = '', out = {}) { for (const [k, v] of Object.entries(obj)) { if (k.startsWith('$')) continue; const p = prefix ? `${prefix}.${k}` : k; if (v && typeof v === 'object' && '$value' in v) out[p] = v.$value; else if (v && typeof v === 'object') flatten(v, p, out); } return out; }
+const primitives = flatten(tokens);
+const problems = [];
+function resolveAll(theme) {
+  const all = { ...primitives, ...themes[theme], ...components }, out = {}, used = new Set();
+  const resolve = (name, stack = []) => {
+    if (out[name] !== undefined) return out[name];
+    if (stack.includes(name)) { problems.push({ kind: '循环引用', where: [...stack, name].join(' → '), note: '引用链回到了自己，无法得到值', theme }); return null; }
+    const v = all[name]; if (v === undefined) { problems.push({ kind: '引用不存在', where: stack[stack.length - 1] + ' → ' + name, note: '检查拼写或是否已删除', theme }); return null; }
+    const m = typeof v === 'string' && v.match(/^\{(.+)\}$/);
+    const r = m ? (used.add(m[1]), resolve(m[1], [...stack, name])) : v;
+    out[name] = r; return r;
+  };
+  for (const n of Object.keys(all)) resolve(n);
+  return { values: out, used };
+}
+const resolved = {}; for (const t of Object.keys(themes)) resolved[t] = resolveAll(t);
+// ---------- 构建：生成 CSS 变量与 JavaScript 对象 ----------
+const cssName = n => '--' + n.replace(/\./g, '-');
+function buildCSS(theme, selector) { const v = resolved[theme].values, names = [...Object.keys(themes[theme]), ...Object.keys(components)].filter(n => v[n] != null); return `${selector} {\n${names.map(n => `  ${cssName(n)}: ${v[n]};`).join('\n')}\n}`; }
+const baseCSS = `:root {\n${Object.keys(primitives).filter(n => !n.startsWith('color')).map(n => `  ${cssName(n)}: ${primitives[n]};`).join('\n')}\n}`;
+const css = [baseCSS, buildCSS('亮色', '[data-theme="light"]'), buildCSS('暗色', '[data-theme="dark"]'), buildCSS('品牌B', '[data-theme="brand-b"]')].join('\n');
+const style = document.createElement('style'); style.textContent = css; document.head.append(style);
+$('css').textContent = '/* 生成的 tokens.css（节选） */\n' + css.split('\n').slice(0, 26).join('\n') + '\n  …';
+const jsObj = {}; for (const [n, val] of Object.entries(resolved['亮色'].values)) if (val != null && !n.startsWith('color.gray') && !n.startsWith('color.blue') && !n.startsWith('color.orange') && !n.startsWith('color.red') && !n.startsWith('color.teal')) n.split('.').reduce((o, k, i, arr) => (o[k] ??= i === arr.length - 1 ? val : {}), jsObj);
+$('js').textContent = '// 生成的 tokens.light.js（节选，供图表或画布等不能读 CSS 变量的代码使用）\nexport default ' + JSON.stringify(jsObj, null, 1).split('\n').slice(0, 18).join('\n') + '\n …';
+$('source').textContent = JSON.stringify({ color: { $type: 'color', blue: { 600: { $value: '#2f6fdb' } }, gray: { 900: { $value: '#1d2330' } } }, semantic: { 亮色: { 'color.action.primary.bg': '{color.blue.600}' }, 暗色: { 'color.action.primary.bg': '{color.blue.300}' } }, component: { 'button.primary.bg': '{color.action.primary.bg}' } }, null, 2);
+const nPrim = Object.keys(primitives).length, nSem = Object.keys(themes['亮色']).length, nComp = Object.keys(components).length;
+for (const r of [['基础值', 'color.blue.600 ＝ #2f6fdb', '只描述“是什么”，不说明用途', nPrim], ['语义', 'color.action.primary.bg', '说明用途；主题切换只改这一层', `${nSem} × 3 套主题`], ['组件', 'button.primary.bg', '某个组件的某个部位；引用语义层', nComp]]) { const tr = $('layers').insertRow(); r.forEach(v => tr.insertCell().textContent = v); }
+// ---------- 预览 ----------
+const themeAttr = { 亮色: 'light', 暗色: 'dark', 品牌B: 'brand-b' };
+for (const t of Object.keys(themes)) {
+  const d = document.createElement('div'); d.className = 'preview'; d.dataset.theme = themeAttr[t];
+  d.innerHTML = `<div class="card"><span class="tag" style="color:var(--color-text-muted)">${t}</span><h3>简历分析完成</h3><p>匹配度最高的三个岗位已经按技能差距排序，可以直接加入学习计划。</p><p class="err">有 1 个附件无法读取，请重新上传。</p><div class="actions"><button class="btn primary" type="button">查看结果</button><button class="btn secondary" type="button">稍后</button></div></div>`;
+  $('previews').append(d);
+}
+// ---------- 对比度检查（WCAG 相对亮度） ----------
+const lum = hex => { const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+const pairs = [['正文 / 卡片背景', 'color.text.default', 'color.bg.surface', 4.5], ['次要文字 / 卡片背景', 'color.text.muted', 'color.bg.surface', 4.5], ['错误提示 / 卡片背景', 'color.feedback.error.text', 'color.bg.surface', 4.5], ['主按钮文字 / 主按钮', 'color.action.primary.text', 'color.action.primary.bg', 4.5], ['边框 / 卡片背景（非文字）', 'color.border.default', 'color.bg.surface', 3], ['焦点框 / 页面背景（非文字）', 'color.focus.ring', 'color.bg.canvas', 3]];
+const contrastResults = [];
+for (const [label, fg, bg, need] of pairs) {
+  const tr = $('contrast').insertRow(); tr.insertCell().textContent = label; tr.insertCell().textContent = `≥ ${need}:1`;
+  for (const t of Object.keys(themes)) { const v = resolved[t].values, r = ratio(v[fg], v[bg]), td = tr.insertCell(); td.textContent = `${r.toFixed(2)}:1`; td.className = r >= need ? 'ok' : 'bad'; contrastResults.push({ label, theme: t, r, pass: r >= need }); }
+}
+// ---------- 结构检查 ----------
+for (const [t, map] of Object.entries(themes)) for (const [n, v] of Object.entries(map)) if (!/^\{.+\}$/.test(v)) problems.push({ kind: '语义层写死了颜色', where: `${t}：${n} ＝ ${v}`, note: '应引用基础值，否则改调色板时会漏掉', theme: t });
+const usedAll = new Set(); Object.values(resolved).forEach(r => r.used.forEach(u => usedAll.add(u)));
+const unused = Object.keys(primitives).filter(n => n.startsWith('color.') && !usedAll.has(n));   // 尺寸类基础值直接给页面使用，这里只检查调色板
+problems.push({ kind: '未被引用的调色板颜色', where: unused.join('、'), note: '确认是否为预留；长期不用应删除', theme: '全部' });
+const seen = new Set();
+for (const p of problems) { const key = p.kind + p.where; if (seen.has(key)) continue; seen.add(key); const tr = $('lint').insertRow(); [p.kind, p.where, p.note].forEach(v => tr.insertCell().textContent = v); tr.cells[0].className = p.kind === '未被引用的调色板颜色' ? 'warn' : 'bad'; }
+window.__tk = { contrast: contrastResults, problems: [...seen], counts: { nPrim, nSem, nComp, unused: unused.length }, cssLines: css.split('\n').length };
+</script>
+</body>
+</html>

@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>节点式编辑：类型、连接、执行顺序、错误定位与规模</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --num: #2f6fdb; --col: #e4572e; --str: #5b8c7a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .two { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  #board { width: 100%; height: 420px; display: block; background: #f6f7f9; border-radius: 8px; background-image: radial-gradient(#d4d8df 1px, transparent 1px); background-size: 20px 20px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  button { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  #log { margin: 0; padding: 8px 10px; background: #1d2330; color: #e6e9ef; border-radius: 8px; font: 11.5px/1.5 ui-monospace, "JetBrains Mono", monospace; height: 240px; overflow: auto; white-space: pre-wrap; }
+  #log .e { color: #ff9a8f; } #log .i { color: #9fd3a8; } #log .c { color: #9fb7ff; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  .legend { display: flex; gap: 12px; font-size: 12px; color: var(--muted); } .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+  svg text { font-family: "Noto Sans SC", sans-serif; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:8px">
+      <h2>一张生成“技能卡片配色”的节点图</h2>
+      <svg id="board" viewBox="0 0 900 420" role="img" aria-label="节点图：数字、运算、颜色与输出节点用曲线连接"></svg>
+      <div class="bar"><span class="legend"><span><i style="background:var(--num)"></i>数字</span><span><i style="background:var(--col)"></i>颜色</span><span><i style="background:var(--str)"></i>文字</span></span>
+        <button type="button" id="undo">撤销</button><button type="button" id="redo">重做</button><button type="button" id="fit">适应窗口</button></div>
+    </div>
+    <div style="display:grid;gap:8px">
+      <h2>操作日志</h2>
+      <pre id="log" aria-live="polite"></pre>
+    </div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>编辑器的检查</h2><table id="checks"><tr><th>场景</th><th>结果</th></tr></table></div>
+    <div style="display:grid;gap:6px"><h2>图的规模：随机生成的大图</h2><table id="scale"><tr><th>节点数</th><th>连线数</th><th>全部重算</th><th>改最前面的一个输入</th><th>改靠后的一个节点</th></tr></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const logEl = $('log'); const log = (k, t) => { const s = document.createElement('span'); s.className = k; s.textContent = t + '\n'; logEl.append(s); logEl.scrollTop = 1e9; };
+// ---------- 节点类型：端口带类型，执行函数只看输入 ----------
+const TYPES = {
+  number: { label: '数字', ins: [], outs: [['值', 'num']], run: (_, p) => [p.value] },
+  add: { label: '相加', ins: [['a', 'num'], ['b', 'num']], outs: [['和', 'num']], run: ([a, b]) => [a + b] },
+  divide: { label: '相除', ins: [['a', 'num'], ['b', 'num']], outs: [['商', 'num']], run: ([a, b]) => { if (b === 0) throw new Error('除数为 0'); return [a / b]; } },
+  hsl: { label: 'HSL 颜色', ins: [['色相', 'num'], ['饱和', 'num'], ['亮度', 'num']], outs: [['颜色', 'col']], run: ([h, s, l]) => [`hsl(${h % 360}, ${s}%, ${l}%)`] },
+  mix: { label: '混合', ins: [['甲', 'col'], ['乙', 'col'], ['比例', 'num']], outs: [['颜色', 'col']], run: ([a, b, t]) => [`color-mix(in oklab, ${a} ${Math.round((1 - t) * 100)}%, ${b})`] },
+  text: { label: '文字', ins: [], outs: [['文字', 'str']], run: (_, p) => [p.value] },
+  format: { label: '格式化', ins: [['模板', 'str'], ['数值', 'num']], outs: [['文字', 'str']], run: ([s, n]) => [s.replace('{}', n.toFixed(0))] },
+  card: { label: '卡片输出', ins: [['背景', 'col'], ['强调', 'col'], ['标题', 'str']], outs: [], run: v => { lastCard = v; return []; } }
+};
+let lastCard = null, uid = 0;
+const graph = { nodes: new Map(), edges: [] };   // 边：{ from: [节点, 输出序号], to: [节点, 输入序号] }
+function addNode(type, x, y, params = {}) { const id = 'n' + (++uid); graph.nodes.set(id, { id, type, x, y, params, out: null, err: null, dirty: true }); return id; }
+// ---------- 连接检查：类型匹配、不能成环、每个输入只能接一条 ----------
+function reach(from, to) { const st = [from], seen = new Set(); while (st.length) { const n = st.pop(); if (n === to) return true; if (seen.has(n)) continue; seen.add(n); for (const e of graph.edges) if (e.from[0] === n) st.push(e.to[0]); } return false; }
+function canConnect(a, ai, b, bi) {
+  const ta = TYPES[graph.nodes.get(a).type].outs[ai][1], tb = TYPES[graph.nodes.get(b).type].ins[bi][1];
+  if (ta !== tb) return `类型不匹配：${({ num: '数字', col: '颜色', str: '文字' })[ta]} 不能接到 ${({ num: '数字', col: '颜色', str: '文字' })[tb]} 输入`;
+  if (a === b || reach(b, a)) return '会形成循环：数据会无限地流回自己';
+  return null;
+}
+// ---------- 命令：所有修改都通过命令，才能撤销与重做 ----------
+const undoStack = [], redoStack = [];
+function exec(cmd, record = true) { cmd.do(); if (record) { undoStack.push(cmd); redoStack.length = 0; } evaluate(); draw(); }
+const connect = (a, ai, b, bi) => { const err = canConnect(a, ai, b, bi); if (err) { log('e', `拒绝连接 ${a}.${ai} → ${b}.${bi}：${err}`); return false; }
+  const old = graph.edges.find(e => e.to[0] === b && e.to[1] === bi), edge = { from: [a, ai], to: [b, bi] };
+  exec({ name: `连接 ${a} → ${b}`, do: () => { if (old) graph.edges.splice(graph.edges.indexOf(old), 1); graph.edges.push(edge); markDirty(b); }, undo: () => { graph.edges.splice(graph.edges.indexOf(edge), 1); if (old) graph.edges.push(old); markDirty(b); } });
+  log('c', `连接 ${a}.${ai} → ${b}.${bi}${old ? '（替换了原来的连接）' : ''}`); return true; };
+const setParam = (n, v) => { const node = graph.nodes.get(n), before = node.params.value; exec({ name: `修改 ${n}`, do: () => { node.params.value = v; markDirty(n); }, undo: () => { node.params.value = before; markDirty(n); } }); log('c', `修改 ${n}（${TYPES[node.type].label}）：${before} → ${v}`); };
+const move = (n, x, y) => { const node = graph.nodes.get(n), bx = node.x, by = node.y; exec({ name: `移动 ${n}`, do: () => { node.x = x; node.y = y; }, undo: () => { node.x = bx; node.y = by; } }); };
+$('undo').onclick = () => { const c = undoStack.pop(); if (!c) return; c.undo(); redoStack.push(c); log('i', `撤销：${c.name}`); evaluate(); draw(); };
+$('redo').onclick = () => { const c = redoStack.pop(); if (!c) return; c.do(); undoStack.push(c); log('i', `重做：${c.name}`); evaluate(); draw(); };
+// ---------- 执行：拓扑排序，只重算“脏”节点，错误向下游传递 ----------
+function markDirty(n) { const st = [n]; while (st.length) { const x = st.pop(), node = graph.nodes.get(x); if (node.dirty && x !== n) continue; node.dirty = true; for (const e of graph.edges) if (e.from[0] === x) st.push(e.to[0]); } }
+function topo() { const indeg = new Map([...graph.nodes.keys()].map(k => [k, 0])); for (const e of graph.edges) indeg.set(e.to[0], indeg.get(e.to[0]) + 1); const q = [...indeg].filter(([, d]) => d === 0).map(([k]) => k), order = []; while (q.length) { const n = q.shift(); order.push(n); for (const e of graph.edges) if (e.from[0] === n) { indeg.set(e.to[0], indeg.get(e.to[0]) - 1); if (indeg.get(e.to[0]) === 0) q.push(e.to[0]); } } return order; }
+let lastOrder = [], recomputed = 0;
+function evaluate() {
+  lastOrder = topo(); recomputed = 0;
+  for (const n of lastOrder) {
+    const node = graph.nodes.get(n); if (!node.dirty) continue; node.dirty = false; recomputed++;
+    const T = TYPES[node.type], ins = T.ins.map((_, i) => graph.edges.find(e => e.to[0] === n && e.to[1] === i));
+    const missing = ins.findIndex(e => !e); if (missing >= 0) { node.err = { msg: `输入“${T.ins[missing][0]}”没有连接`, own: true }; node.out = null; continue; }
+    const up = ins.map(e => graph.nodes.get(e.from[0])), bad = up.find(u => u.err); if (bad) { node.err = { msg: `上游 ${bad.id} 出错`, own: false }; node.out = null; continue; }
+    try { node.out = T.run(ins.map((e, i) => up[i].out[e.from[1]]), node.params); node.err = null; } catch (ex) { node.err = { msg: ex.message, own: true }; node.out = null; }
+  }
+}
+// ---------- 绘制（SVG） ----------
+let view = { x: 0, y: 0, k: 1 };
+const NW = 128, portY = i => 34 + i * 18, nodeH = t => 30 + Math.max(TYPES[t].ins.length, TYPES[t].outs.length, 1) * 18 + 8;
+const COLORS = { num: '#2f6fdb', col: '#e4572e', str: '#5b8c7a' };
+function draw() {
+  const svg = $('board'), order = new Map(lastOrder.map((n, i) => [n, i + 1])); let h = `<g transform="translate(${view.x},${view.y}) scale(${view.k})">`;
+  for (const e of graph.edges) { const a = graph.nodes.get(e.from[0]), b = graph.nodes.get(e.to[0]); const x1 = a.x + NW, y1 = a.y + portY(e.from[1]), x2 = b.x, y2 = b.y + portY(e.to[1]); h += `<path d="M${x1},${y1} C${x1 + 50},${y1} ${x2 - 50},${y2} ${x2},${y2}" fill="none" stroke="${COLORS[TYPES[a.type].outs[e.from[1]][1]]}" stroke-width="2" opacity=".7"/>`; }
+  for (const n of graph.nodes.values()) {
+    const T = TYPES[n.type], H = nodeH(n.type), errOwn = n.err && n.err.own, errUp = n.err && !n.err.own;
+    h += `<g transform="translate(${n.x},${n.y})"><rect width="${NW}" height="${H}" rx="8" fill="#fff" stroke="${errOwn ? '#b3261e' : errUp ? '#e8a33a' : '#c3c9d3'}" stroke-width="${n.err ? 2 : 1}" ${errUp ? 'stroke-dasharray="4 3"' : ''}/>`;
+    h += `<text x="8" y="18" font-size="12" font-weight="700" fill="#1d2330">${T.label}</text><text x="${NW - 6}" y="18" font-size="10" text-anchor="end" fill="#7d8696">#${order.get(n.id) || '?'}</text>`;
+    T.ins.forEach(([nm, t], i) => { h += `<circle cx="0" cy="${portY(i)}" r="5" fill="${COLORS[t]}"/><text x="9" y="${portY(i) + 4}" font-size="10" fill="#5b6475">${nm}</text>`; });
+    T.outs.forEach(([nm, t], i) => { h += `<circle cx="${NW}" cy="${portY(i)}" r="5" fill="${COLORS[t]}"/><text x="${NW - 9}" y="${portY(i) + 4}" font-size="10" text-anchor="end" fill="#5b6475">${nm}</text>`; });
+    const val = n.err ? (n.err.own ? '⚠ ' : '↑ ') + n.err.msg : n.params.value !== undefined ? String(n.params.value) : n.out && n.out[0] !== undefined ? (typeof n.out[0] === 'number' ? n.out[0].toFixed(2) : '') : '';
+    h += `<text x="8" y="${H - 6}" font-size="10" fill="${errOwn ? '#b3261e' : errUp ? '#a15c00' : '#7d8696'}">${val}</text>`;
+    if (n.type === 'card' && !n.err && lastCard) h += `<rect x="${NW + 12}" y="0" width="150" height="80" rx="10" fill="${lastCard[0]}"/><rect x="${NW + 24}" y="52" width="60" height="18" rx="5" fill="${lastCard[1]}"/><text x="${NW + 24}" y="28" font-size="13" font-weight="700" fill="#1d2330">${lastCard[2]}</text>`;
+    h += '</g>';
+  }
+  svg.innerHTML = h + '</g>';
+}
+$('fit').onclick = () => { let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const n of graph.nodes.values()) { x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y); x1 = Math.max(x1, n.x + NW + 170); y1 = Math.max(y1, n.y + nodeH(n.type)); } const k = Math.min(880 / (x1 - x0), 400 / (y1 - y0), 1.5); view = { k, x: 10 - x0 * k, y: 10 - y0 * k }; draw(); log('i', `适应窗口：缩放 ${k.toFixed(2)}`); };
+// ---------- 搭建示例图并逐项检查 ----------
+const N = {};
+N.hue = addNode('number', 20, 20, { value: 210 }); N.sat = addNode('number', 20, 100, { value: 60 }); N.light = addNode('number', 20, 180, { value: 92 });
+N.offset = addNode('number', 20, 260, { value: 180 }); N.add = addNode('add', 190, 230); N.hsl1 = addNode('hsl', 190, 40); N.hsl2 = addNode('hsl', 360, 230);
+N.ratio = addNode('number', 190, 330, { value: 0.3 }); N.mix = addNode('mix', 530, 120); N.tpl = addNode('text', 360, 20, { value: '匹配度 {}%' }); N.score = addNode('number', 360, 340, { value: 86 }); N.fmt = addNode('format', 530, 260); N.card = addNode('card', 700, 120);
+N.div = addNode('divide', 530, 340);
+const checks = [];
+const C = (scene, result) => { checks.push([scene, result]); };
+connect(N.hue, 0, N.hsl1, 0); connect(N.sat, 0, N.hsl1, 1); connect(N.light, 0, N.hsl1, 2);
+connect(N.hue, 0, N.add, 0); connect(N.offset, 0, N.add, 1); connect(N.add, 0, N.hsl2, 0); connect(N.sat, 0, N.hsl2, 1);
+const l2 = addNode('number', 190, 400, { value: 50 }); graph.nodes.get(l2).y = 150; graph.nodes.get(l2).x = 190; connect(l2, 0, N.hsl2, 2);
+connect(N.hsl1, 0, N.mix, 0); connect(N.hsl2, 0, N.mix, 1); connect(N.ratio, 0, N.mix, 2);
+connect(N.tpl, 0, N.fmt, 0); connect(N.score, 0, N.fmt, 1);
+connect(N.mix, 0, N.card, 0); connect(N.hsl2, 0, N.card, 1); connect(N.fmt, 0, N.card, 2);
+C(`搭建：${graph.nodes.size} 个节点、${graph.edges.length} 条连线`, `执行顺序由拓扑排序得到：${lastOrder.length} 个节点全部有序号（节点右上角的 #）`);
+const ok1 = connect(N.hsl1, 0, N.add, 1); C('把“颜色”接到“相加”的数字输入', ok1 ? '被接受（错误）' : '被拒绝：类型不匹配');
+const ok2 = connect(N.add, 0, N.add, 1); C('把“相加”的输出接回它自己的输入', ok2 ? '被接受（错误）' : '被拒绝：会形成循环');
+connect(N.score, 0, N.div, 0); const zero = addNode('number', 360, 400, { value: 0 }); graph.nodes.get(zero).y = 410; connect(zero, 0, N.div, 1);
+const divErr = graph.nodes.get(N.div).err; C('“相除”的除数为 0', divErr ? `错误定位在节点本身：“${divErr.msg}”` : '没有报错（错误）');
+connect(N.div, 0, N.fmt, 1); const fmtErr = graph.nodes.get(N.fmt).err, cardErr = graph.nodes.get(N.card).err;
+C('把出错的节点接到下游', `下游显示“${fmtErr && fmtErr.msg}”、“${cardErr && cardErr.msg}”，用虚线框区分，不重复报告原因`);
+exec({ name: '（撤销点）', do: () => {}, undo: () => {} }, false);
+$('undo').click(); const fixed = !graph.nodes.get(N.fmt).err; C('撤销最后一次连接', fixed ? '下游恢复正常，卡片重新生成' : '仍然出错（错误）');
+for (const nd of graph.nodes.values()) nd.dirty = true; evaluate(); const all = recomputed; setParam(N.ratio, 0.15); const inc = recomputed;
+C('修改“比例”节点后的增量重算', `只重算 ${inc} 个节点（全部重算为 ${all} 个）`);
+$('undo').click(); const afterUndo = graph.nodes.get(N.ratio).params.value; $('redo').click(); C('撤销与重做“修改比例”', `撤销后比例回到 ${afterUndo}，重做后为 ${graph.nodes.get(N.ratio).params.value}；撤销栈共 ${undoStack.length} 项`);
+move(N.card, 700, 140); $('fit').click(); C('适应窗口', `缩放 ${view.k.toFixed(2)}，全部节点可见`);
+for (const [a, b] of checks) { const tr = $('checks').insertRow(); [a, b].forEach(v => tr.insertCell().textContent = v); }
+// ---------- 规模：随机大图 ----------
+function bigGraph(n) {
+  const nodes = [], edges = []; let s = 7; const r = () => (s = (s * 48271) % 2147483647) / 2147483647;
+  for (let i = 0; i < n; i++) nodes.push({ id: i, val: 0, dirty: true, ins: [] });
+  for (let i = 8; i < n; i++) { const k = 1 + Math.floor(r() * 2); for (let j = 0; j < k; j++) { const from = Math.floor(r() * i); edges.push([from, i]); nodes[i].ins.push(from); } }
+  const outs = Array.from({ length: n }, () => []); for (const [a, b] of edges) outs[a].push(b);
+  const order = nodes.map(x => x.id);   // 生成方式保证编号即拓扑序
+  const run = () => { let c = 0; for (const i of order) { const nd = nodes[i]; if (!nd.dirty) continue; nd.dirty = false; c++; nd.val = nd.ins.length ? nd.ins.reduce((t, j) => t + nodes[j].val, 0) * 0.5 : i; } return c; };
+  const t0 = performance.now(); run(); const full = performance.now() - t0;
+  const change = pick => { const st = [pick]; while (st.length) { const x = st.pop(); if (nodes[x].dirty) continue; nodes[x].dirty = true; st.push(...outs[x]); } const t = performance.now(), c = run(); return { c, ms: performance.now() - t }; };
+  const late = change(n - 40), early = change(3);   // 改一个靠后的节点、一个最前面的输入节点
+  return { n, e: edges.length, full, late, early };
+}
+for (const n of [1000, 10000, 100000]) { const r = bigGraph(n); const tr = $('scale').insertRow(); [r.n.toLocaleString(), r.e.toLocaleString(), `${r.full.toFixed(1)} 毫秒`, `${r.early.ms.toFixed(2)} 毫秒（${r.early.c.toLocaleString()} 个）`, `${r.late.ms.toFixed(2)} 毫秒（${r.late.c} 个）`].forEach(v => tr.insertCell().textContent = v); }
+window.__nd = { checks, order: lastOrder.length };
+</script>
+</body>
+</html>

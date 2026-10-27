@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>参数化设计：有意义的控制量、范围与依赖、可预测与可恢复</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .top { display: grid; grid-template-columns: 240px minmax(0, 1fr) minmax(0, 1.2fr); gap: 14px; align-items: start; }
+  #poster { width: 240px; height: 320px; border-radius: 6px; display: block; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+  .ctl { display: grid; grid-template-columns: 70px minmax(0, 1fr) 54px; gap: 4px 8px; align-items: center; font-size: 12px; }
+  .ctl input[type=range] { width: 100%; } .ctl select { font: inherit; }
+  .ctl .v { font-variant-numeric: tabular-nums; color: var(--muted); }
+  .note { font-size: 12px; color: #a15c00; min-height: 18px; }
+  .strip { display: grid; grid-template-columns: 64px repeat(5, minmax(0, 1fr)); gap: 4px; align-items: center; font-size: 11px; color: var(--muted); }
+  .strip canvas { width: 100%; height: auto; border-radius: 3px; display: block; }
+  button { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  pre { margin: 0; padding: 8px 10px; background: #f6f7f9; border-radius: 8px; font: 11px/1.45 ui-monospace, "JetBrains Mono", monospace; white-space: pre-wrap; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  .ok { color: #1f7a4d; font-weight: 700; } .warn { color: #a15c00; font-weight: 700; }
+  #restore td:first-child { width: 46%; } #restore td:last-child { word-break: break-all; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>“职业能力画布”系列海报：七个控制量生成一张海报</h2>
+  <div class="top">
+    <canvas id="poster" width="480" height="640" role="img" aria-label="参数生成的几何海报"></canvas>
+    <div style="display:grid;gap:8px">
+      <div class="ctl" id="ctls"></div>
+      <p class="note" id="note" role="status"></p>
+      <div style="display:flex;gap:6px;flex-wrap:wrap" id="presets"></div>
+      <pre id="json"></pre>
+    </div>
+    <div style="display:grid;gap:6px">
+      <h2>改动方向预览：每个参数取五个值，其余不变</h2>
+      <div id="strips" style="display:grid;gap:4px"></div>
+    </div>
+  </div>
+</section>
+<section class="panel">
+  <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:14px;align-items:start">
+    <div style="display:grid;gap:6px">
+      <h2>参数的灵敏度：每次只把一个参数改动范围的 5%，画面变了多少</h2>
+      <table id="sens"><tr><th>参数</th><th>范围</th><th>平均像素变化</th><th>判断</th></tr></table>
+    </div>
+    <div style="display:grid;gap:6px">
+      <h2>保存与恢复</h2>
+      <table id="restore"><tr><th>检查</th><th>结果</th></tr></table>
+    </div>
+  </div>
+</section>
+<script type="module">
+const $ = id => document.getElementById(id);
+// ---------- 参数定义：名字用设计者的语言，写明范围、步长与依赖 ----------
+const PARAMS = [
+  { key: 'density', label: '密度', min: 4, max: 20, step: 1, def: 9, unit: '行' },
+  { key: 'rotation', label: '旋转', min: 0, max: 90, step: 1, def: 30, unit: '°' },
+  { key: 'hue', label: '主色相', min: 0, max: 359, step: 1, def: 215, unit: '°' },
+  { key: 'harmony', label: '配色关系', options: ['类似色', '互补色', '三等分'], def: '互补色' },
+  { key: 'jitter', label: '自由度', min: 0, max: 1, step: 0.05, def: 0.3, unit: '' },
+  { key: 'weight', label: '线条粗细', min: 1, max: 24, step: 0.5, def: 6, unit: 'px', dependsOn: 'density' },
+  { key: 'seed', label: '随机种子', min: 1, max: 999, step: 1, def: 7, unit: '' }
+];
+const state = Object.fromEntries(PARAMS.map(p => [p.key, p.def]));
+const W = 480, H = 640;
+const maxWeight = s => Math.floor((W / s.density) * 0.35 * 2) / 2;   // 依赖：线条最粗不超过格子宽度的 35%
+function rng(seed) { let x = seed >>> 0 || 1; return () => (x = (x * 48271) % 2147483647) / 2147483647; }
+function palette(s) {
+  const h = s.hue, hs = s.harmony === '类似色' ? [h, h + 30, h - 30] : s.harmony === '互补色' ? [h, h + 180, h + 10] : [h, h + 120, h + 240];
+  return { bg: `hsl(${h}, 30%, 94%)`, ink: `hsl(${h}, 40%, 16%)`, marks: hs.map((x, i) => `hsl(${((x % 360) + 360) % 360}, ${i ? 70 : 60}%, ${i ? 52 : 45}%)`) };
+}
+function draw(s, ctx) {
+  const r = rng(s.seed), pal = palette(s), cell = W / s.density, rows = Math.ceil((H - 140) / cell);
+  ctx.fillStyle = pal.bg; ctx.fillRect(0, 0, W, H);
+  ctx.lineCap = 'round';
+  for (let j = 0; j < rows; j++) for (let i = 0; i < s.density; i++) {
+    const cx = (i + 0.5) * cell + (r() - 0.5) * cell * s.jitter, cy = 140 + (j + 0.5) * cell + (r() - 0.5) * cell * s.jitter;
+    const a = (s.rotation + (i + j) * s.rotation * 0.15 + (r() - 0.5) * 120 * s.jitter) * Math.PI / 180, len = cell * 0.36;
+    ctx.strokeStyle = pal.marks[(i + j * 2) % 3]; ctx.lineWidth = Math.min(s.weight, maxWeight(s));
+    ctx.beginPath(); ctx.moveTo(cx - Math.cos(a) * len, cy - Math.sin(a) * len); ctx.lineTo(cx + Math.cos(a) * len, cy + Math.sin(a) * len); ctx.stroke();
+  }
+  ctx.fillStyle = pal.ink; ctx.font = '700 44px "Noto Sans SC", sans-serif'; ctx.fillText('职业能力画布', 28, 70);
+  ctx.font = '400 20px "Noto Sans SC", sans-serif'; ctx.fillText('目标 · 技能 · 学习任务', 30, 108);
+}
+// ---------- 控件 ----------
+const main = $('poster').getContext('2d');
+function sync() {
+  const mw = maxWeight(state); let note = '';
+  if (state.weight > mw) { note = `密度为 ${state.density} 行时，线条最粗只能到 ${mw} px（格子宽度的 35%），已自动按 ${mw} px 绘制；参数值保留，降低密度后恢复。`; }
+  $('note').textContent = note;
+  for (const p of PARAMS) { const el = document.getElementById('c-' + p.key); if (el && el.value != state[p.key]) el.value = state[p.key]; const v = document.getElementById('v-' + p.key); if (v) v.textContent = p.options ? '' : `${state[p.key]}${p.unit}`; }
+  const wEl = $('c-weight'); wEl.max = 24; wEl.style.accentColor = state.weight > mw ? '#a15c00' : '';
+  draw(state, main); $('json').textContent = JSON.stringify(state); strips();
+}
+for (const p of PARAMS) {
+  $('ctls').insertAdjacentHTML('beforeend', `<label for="c-${p.key}">${p.label}</label>` + (p.options ? `<select id="c-${p.key}">${p.options.map(o => `<option>${o}</option>`).join('')}</select><span></span>` : `<input type="range" id="c-${p.key}" min="${p.min}" max="${p.max}" step="${p.step}"><span class="v" id="v-${p.key}"></span>`));
+  document.getElementById('c-' + p.key).addEventListener('input', e => { state[p.key] = p.options ? e.target.value : Number(e.target.value); sync(); });
+}
+// ---------- 改动方向预览 ----------
+function thumb(s) { const c = document.createElement('canvas'); c.width = W; c.height = H; draw(s, c.getContext('2d')); const t = document.createElement('canvas'); t.width = 96; t.height = 128; t.getContext('2d').drawImage(c, 0, 0, 96, 128); return t; }
+function strips() {
+  $('strips').innerHTML = '';
+  for (const p of PARAMS.filter(p => ['density', 'rotation', 'hue', 'jitter', 'seed'].includes(p.key))) {
+    const row = document.createElement('div'); row.className = 'strip'; row.insertAdjacentHTML('beforeend', `<span>${p.label}</span>`);
+    for (let k = 0; k < 5; k++) { const v = p.key === 'seed' ? state.seed + k - 2 : +(p.min + (p.max - p.min) * k / 4).toFixed(2); row.append(thumb({ ...state, [p.key]: p.step >= 1 ? Math.round(v) : v })); }
+    $('strips').append(row);
+  }
+}
+// ---------- 预设、保存与恢复 ----------
+const PRESETS = { 稳重: { density: 7, rotation: 0, hue: 215, harmony: '类似色', jitter: 0, weight: 8, seed: 3 }, 活泼: { density: 12, rotation: 45, hue: 18, harmony: '三等分', jitter: 0.6, weight: 5, seed: 41 }, 安静: { density: 16, rotation: 80, hue: 160, harmony: '类似色', jitter: 0.15, weight: 2, seed: 9 } };
+for (const [name, cfg] of Object.entries(PRESETS)) { const b = document.createElement('button'); b.type = 'button'; b.textContent = name; b.onclick = () => { Object.assign(state, cfg); sync(); }; $('presets').append(b); }
+async function pixelHash(s) { const c = document.createElement('canvas'); c.width = W; c.height = H; draw(s, c.getContext('2d')); const d = c.getContext('2d').getImageData(0, 0, W, H).data; const h = await crypto.subtle.digest('SHA-256', d); return [...new Uint8Array(h)].slice(0, 6).map(b => b.toString(16).padStart(2, '0')).join(''); }
+// ---------- 灵敏度：改动范围的 5%，平均每个像素变化多少 ----------
+function pixels(s) { const c = document.createElement('canvas'); c.width = W / 2; c.height = H / 2; const g = c.getContext('2d'); g.scale(0.5, 0.5); draw(s, g); return g.getImageData(0, 0, W / 2, H / 2).data; }
+function diff(a, b) { let t = 0; for (let k = 0; k < a.length; k += 4) t += Math.abs(a[k] - b[k]) + Math.abs(a[k + 1] - b[k + 1]) + Math.abs(a[k + 2] - b[k + 2]); return t / (a.length / 4) / 3; }
+async function analyse() {
+  await document.fonts.ready;
+  Object.assign(state, Object.fromEntries(PARAMS.map(p => [p.key, p.def]))); sync();
+  const base = pixels(state), rows = [];
+  for (const p of PARAMS) {
+    if (p.options) { const alt = p.options.find(o => o !== state[p.key]); rows.push({ p, d: diff(base, pixels({ ...state, [p.key]: alt })), range: p.options.join('／') }); continue; }
+    const step = Math.max(p.step, (p.max - p.min) * 0.05), v = Math.min(p.max, state[p.key] + step);
+    rows.push({ p, d: diff(base, pixels({ ...state, [p.key]: p.step >= 1 ? Math.round(v) : v })), range: `${p.min}—${p.max}${p.unit}` });
+  }
+  // 依赖：在密度最大时改粗细，看看是否“无效”
+  const dense = { ...state, density: 20 }, w1 = pixels({ ...dense, weight: 10 }), w2 = pixels({ ...dense, weight: 11.5 });
+  rows.push({ p: { label: '线条粗细（密度 20 行时）' }, d: diff(w1, w2), range: '超过上限后', dep: true });
+  for (const r of rows) {
+    const tr = $('sens').insertRow(), verdict = r.dep ? (r.d < 0.05 ? ['超过依赖上限后不再起作用：界面应当提示', 'warn'] : ['仍然起作用', 'ok']) : r.p.key === 'seed' ? ['跳变：种子只用来“换一个”，不能微调', 'warn'] : r.d < 0.3 ? ['几乎看不出变化：步长或范围太小', 'warn'] : r.d > 25 ? ['变化过大：考虑缩小范围或改为分档', 'warn'] : ['变化可以预期', 'ok'];
+    [r.p.label, r.range, r.d.toFixed(2), verdict[0]].forEach(v => tr.insertCell().textContent = v); tr.cells[3].className = verdict[1];
+  }
+  // 保存与恢复：导出 JSON → 清空 → 导入，像素哈希应完全相同
+  const saved = JSON.stringify(PRESETS['活泼']), h1 = await pixelHash(JSON.parse(saved));
+  Object.assign(state, PARAMS.reduce((o, p) => ({ ...o, [p.key]: p.def }), {})); const h2 = await pixelHash(JSON.parse(saved));
+  const url = new URL(location.href); url.hash = new URLSearchParams(JSON.parse(saved)).toString();
+  const fromUrl = Object.fromEntries(new URLSearchParams(url.hash.slice(1))); PARAMS.forEach(p => { if (!p.options) fromUrl[p.key] = Number(fromUrl[p.key]); });
+  const h3 = await pixelHash(fromUrl);
+  for (const [k, v, ok] of [['预设“活泼”的像素哈希', h1, true], ['导出为 JSON 再导入', h2 === h1 ? `${h2}（相同）` : `${h2}（不同！）`, h2 === h1], ['写进网址再读出', h3 === h1 ? `${h3}（相同）` : `${h3}（不同！）`, h3 === h1], ['网址片段', url.hash.slice(0, 60) + '…', true]]) { const tr = $('restore').insertRow(); [k, v].forEach(x => tr.insertCell().textContent = x); if (!ok) tr.cells[1].className = 'warn'; }
+  Object.assign(state, PRESETS['活泼'], { weight: 22 }); sync();   // 截图状态：故意把粗细调到超过上限，显示依赖提示
+  return { sens: rows.map(r => ({ label: r.p.label, d: r.d })), restore: [h1, h2, h3] };
+}
+window.__pm = { done: analyse() };
+</script>
+</body>
+</html>

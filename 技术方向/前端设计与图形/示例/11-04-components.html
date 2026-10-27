@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>组件与模式库：状态矩阵与自动验收</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --primary: #2f6fdb; --danger: #c62828; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .matrix { display: grid; grid-template-columns: 110px repeat(6, minmax(0, 1fr)); gap: 6px; align-items: stretch; }
+  .matrix .h { font-size: 12px; color: var(--muted); align-self: end; } .matrix .rowh { font-weight: 700; font-size: 12px; align-self: center; }
+  .cell { border: 1px dashed #d4d8df; border-radius: 8px; padding: 8px; display: grid; gap: 4px; align-content: start; min-height: 74px; position: relative; }
+  .cell .mark { position: absolute; top: 4px; right: 6px; font-size: 11px; font-weight: 700; }
+  .cell.pass .mark { color: #1f7a4d; } .cell.fail { border-color: #e8a49c; background: #fff6f5; } .cell.fail .mark { color: #b3261e; }
+  /* ---- 组件 ---- */
+  .btn { font: inherit; border-radius: 6px; padding: 5px 12px; border: 1px solid transparent; cursor: pointer; min-height: 32px; display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
+  .btn.primary { background: var(--primary); color: #fff; } .btn.secondary { background: #fff; color: var(--ink); border-color: #7d8696; } .btn.danger { background: var(--danger); color: #fff; }
+  .btn.is-hover.primary { background: #2456b0; } .btn.is-hover.secondary { background: #f1f3f6; }
+  .btn.is-focus { outline: 3px solid #e4572e; outline-offset: 2px; }
+  .btn:disabled { background: #e3e6eb; color: #7d8696; border-color: #e3e6eb; cursor: not-allowed; }
+  .btn .spin { width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; }
+  .icon-btn { width: 20px; height: 20px; min-height: 0; padding: 0; justify-content: center; background: #fff; border-color: #7d8696; }
+  .field { display: grid; gap: 2px; font-size: 12px; } .field input { font: inherit; padding: 4px 8px; border: 1px solid #7d8696; border-radius: 6px; width: 100%; }
+  .field.error input { border-color: var(--danger); } .field .help { color: var(--muted); } .field.error .help { color: var(--danger); }
+  .card { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; display: grid; font-size: 12px; }
+  .card .img { height: 40px; background: linear-gradient(135deg, #8fb2f0, #5b8c7a); display: grid; place-items: center; color: #fff; font-size: 11px; }
+  .card .img.missing { background: #eceef2; color: #5b6475; }
+  .card .t { padding: 4px 8px; font-weight: 700; } .card .t.nowrap { white-space: nowrap; overflow: hidden; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  .flow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+  .step { border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: grid; gap: 4px; align-content: start; font-size: 12px; } .step b { font-size: 12px; }
+  .bar { height: 6px; background: #eceef2; border-radius: 3px; overflow: hidden; } .bar i { display: block; height: 100%; background: var(--primary); }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 状态矩阵：每个组件在每种状态下都画出来，并自动检查</h2>
+  <p class="sub">右上角的 ✓／✗ 来自自动检查：可访问名称、角色、文字对比度（≥ 4.5:1）、点击目标（≥ 24 × 24 像素）、文字是否被截断、焦点是否可见、禁用时是否仍可聚焦、加载时是否标记忙碌。</p>
+  <div class="matrix" id="matrix"></div>
+</section>
+<section class="panel">
+  <h2>2 检查发现的问题</h2>
+  <table id="fails"><tr><th>组件 · 状态</th><th>检查项</th><th>实际</th><th>怎样修</th></tr></table>
+</section>
+<section class="panel">
+  <h2>3 模式：上传简历——一个完整任务需要哪些组件与状态</h2>
+  <p class="sub">组件库回答“按钮长什么样”；模式库回答“上传、搜索、筛选、编辑这些完整任务怎样做”。下面是上传模式的五个步骤，每一步都只用组件库中的组件。</p>
+  <div class="flow" id="flow"></div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const STATES = ['默认', '悬停', '键盘焦点', '禁用', '加载中', '长内容'];
+const LONG = '把这份简历同时投递到所有匹配度超过百分之八十的岗位并通知我';
+const comps = {
+  '主按钮': s => `<button type="button" class="btn primary${s === '悬停' ? ' is-hover' : ''}${s === '键盘焦点' ? ' is-focus' : ''}" ${s === '禁用' ? 'disabled' : ''} ${s === '加载中' ? 'aria-busy="true"' : ''}>${s === '加载中' ? '<span class="spin" aria-hidden="true"></span>提交中' : s === '长内容' ? LONG : '提交'}</button>`,
+  '次按钮': s => `<button type="button" class="btn secondary${s === '悬停' ? ' is-hover' : ''}${s === '键盘焦点' ? ' is-focus' : ''}" ${s === '禁用' ? 'disabled' : ''}>${s === '加载中' ? '<span class="spin" aria-hidden="true"></span>保存中' : s === '长内容' ? LONG : '取消'}</button>`,
+  '图标按钮': s => `<button type="button" class="btn icon-btn${s === '键盘焦点' ? ' is-focus' : ''}" ${s === '禁用' ? 'disabled' : ''}>✕</button>`,   // 故意没有可访问名称，尺寸也太小
+  '输入框': s => s === '加载中' ? `<div class="field"><label for="f-l">邮箱</label><input id="f-l" value="li@example.com" aria-busy="true" readonly><span class="help">正在检查是否已注册…</span></div>`
+    : s === '长内容' ? `<div class="field error"><label for="f-x">邮箱</label><input id="f-x" value="this.is.a.very.long.email.address@example.com" aria-invalid="true" aria-describedby="h-x"><span class="help" id="h-x">邮箱格式不正确：缺少顶级域名之外的部分</span></div>`
+    : `<div class="field"><label for="f-${s}">邮箱</label><input id="f-${s}" ${s === '禁用' ? 'disabled' : ''} class="${s === '键盘焦点' ? 'is-focus' : ''}" style="${s === '键盘焦点' ? 'outline:3px solid #e4572e;outline-offset:1px' : ''}" placeholder="name@example.com"></div>`,
+  '只有占位符的输入框': s => `<div class="field"><input placeholder="请输入邮箱" ${s === '禁用' ? 'disabled' : ''}></div>`,   // 故意没有标签
+  '岗位卡片': s => `<article class="card"><div class="img${s === '长内容' ? ' missing' : ''}" role="img" aria-label="${s === '长内容' ? '图片缺失' : '公司环境照片'}">${s === '长内容' ? '图片缺失' : ''}</div><div class="t${s === '长内容' ? ' nowrap' : ''}">${s === '长内容' ? '高级前端工程师（数据可视化方向，负责职业能力画布与简历分析结果页）' : '前端工程师'}</div></article>`
+};
+// ---------- 自动检查 ----------
+const rgb = c => c.match(/[\d.]+/g).slice(0, 3).map(Number);
+const lumOf = ([r, g, b]) => { const f = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+const contrast = (a, b) => { const [x, y] = [lumOf(a), lumOf(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+function bgOf(el) { while (el) { const c = getComputedStyle(el).backgroundColor; if (c && !c.startsWith('rgba(0, 0, 0, 0)') && c !== 'transparent') return rgb(c); el = el.parentElement; } return [255, 255, 255]; }
+function nameOf(el) { if (el.getAttribute('aria-label')) return el.getAttribute('aria-label'); if (el.id && document.querySelector(`label[for="${el.id}"]`)) return document.querySelector(`label[for="${el.id}"]`).textContent; if (el.tagName === 'BUTTON') return el.textContent.replace('✕', '').trim(); return ''; }
+function check(cell, comp, state) {
+  const out = [], ctl = cell.querySelector('button, input, article');
+  const fail = (item, actual, fix) => out.push({ item, actual, fix });
+  if (ctl.matches('button, input')) {
+    if (!nameOf(ctl)) fail('可访问名称', '读屏软件只能读出“按钮”或“编辑框”', ctl.tagName === 'BUTTON' ? '加 aria-label="关闭"' : '加可见的 <label>；占位符不能代替标签');
+    const r = ctl.getBoundingClientRect(); if (ctl.tagName === 'BUTTON' && (r.width < 24 || r.height < 24)) fail('点击目标', `${r.width.toFixed(0)} × ${r.height.toFixed(0)} 像素`, '至少 24 × 24，或与相邻目标留出间距（WCAG 2.5.8）');
+    if (!ctl.disabled) { const c = contrast(rgb(getComputedStyle(ctl).color), bgOf(ctl)); if (c < 4.5) fail('文字对比度', `${c.toFixed(2)}:1`, '加深文字或背景'); }
+    if (state === '键盘焦点' && (getComputedStyle(ctl).outlineStyle === 'none' || parseFloat(getComputedStyle(ctl).outlineWidth) === 0)) fail('焦点可见', '没有焦点样式', '用 :focus-visible 画出清楚的焦点框');
+    if (state === '禁用' && ctl.disabled === false && !ctl.matches('[aria-disabled]')) fail('禁用', '仍然可以操作', '使用 disabled 或 aria-disabled');
+    if (state === '加载中' && ctl.tagName === 'BUTTON' && comp !== '图标按钮' && !ctl.matches('[aria-busy="true"]')) fail('加载状态', '没有告诉辅助技术“正在处理”', '加 aria-busy="true"，并在完成后移除');
+    if (state === '长内容' && ctl.tagName === 'BUTTON' && ctl.scrollWidth > ctl.clientWidth + 1) fail('长文本', '文字被截断', '允许换行或限制文案长度');
+  } else {
+    const t = cell.querySelector('.t'); if (t.scrollWidth > t.clientWidth + 1) fail('长文本', '标题被截断，且没有完整标题的提示', '允许两行显示；截断时用 title 或详情页提供全文');
+  }
+  return out;
+}
+const matrix = $('matrix'); matrix.insertAdjacentHTML('beforeend', '<div></div>' + STATES.map(s => `<div class="h">${s}</div>`).join(''));
+const failures = []; let total = 0, failed = 0;
+for (const [name, render] of Object.entries(comps)) {
+  matrix.insertAdjacentHTML('beforeend', `<div class="rowh">${name}</div>`);
+  for (const s of STATES) {
+    const cell = document.createElement('div'); cell.className = 'cell'; cell.innerHTML = render(s) + '<span class="mark"></span>'; matrix.append(cell);
+    const res = check(cell, name, s); total++; if (res.length) failed++;
+    cell.classList.add(res.length ? 'fail' : 'pass'); cell.querySelector('.mark').textContent = res.length ? `✗ ${res.length}` : '✓';
+    for (const r of res) failures.push({ where: `${name} · ${s}`, ...r });
+  }
+}
+// 同一问题在多个状态重复出现时合并显示
+const merged = new Map(); for (const f of failures) { const k = f.where.split(' · ')[0] + f.item; if (!merged.has(k)) merged.set(k, { ...f, states: [] }); merged.get(k).states.push(f.where.split(' · ')[1]); }
+for (const f of merged.values()) { const tr = $('fails').insertRow(); [`${f.where.split(' · ')[0]} · ${f.states.join('、')}`, f.item, f.actual, f.fix].forEach(v => tr.insertCell().textContent = v); }
+// ---------- 上传模式 ----------
+const steps = [
+  ['1 选择文件', '<button type="button" class="btn primary">选择简历</button><span class="sub">支持 PDF、Word，不超过 10 MB</span>'],
+  ['2 立即校验', '<div class="field error"><label for="u1">已选择</label><input id="u1" value="简历.pages" aria-invalid="true" aria-describedby="u1h" readonly><span class="help" id="u1h">不支持这种格式，请导出为 PDF</span></div>'],
+  ['3 上传中', '<div class="bar" role="progressbar" aria-label="上传进度" aria-valuenow="64" aria-valuemin="0" aria-valuemax="100"><i style="width:64%"></i></div><span class="sub">64%，可以继续浏览其他页面</span><button type="button" class="btn secondary">取消上传</button>'],
+  ['4 失败与重试', '<span style="color:#c62828">网络中断，已保存到本机，恢复后可继续</span><button type="button" class="btn primary">重试</button>'],
+  ['5 成功', '<span>简历.pdf 已上传，正在分析（约 30 秒）</span><button type="button" class="btn secondary">查看分析</button>']
+];
+for (const [t, html] of steps) $('flow').insertAdjacentHTML('beforeend', `<div class="step"><b>${t}</b>${html}</div>`);
+window.__cp = { total, failed, issues: [...merged.values()].map(f => ({ where: f.where.split(' · ')[0], states: f.states, item: f.item, actual: f.actual })) };
+</script>
+</body>
+</html>
