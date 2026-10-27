@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>综合项目：在固定条件下比较两种阴影方案</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+  figure { margin: 0; display: grid; gap: 2px; } figure canvas { width: 100%; height: auto; display: block; border-radius: 6px; background: #ddd; }
+  figcaption { font-size: 12px; color: var(--muted); } figcaption b { color: var(--ink); }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+  button { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; } a.btn { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; color: inherit; text-decoration: none; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  pre { margin: 0; padding: 8px 10px; background: #f6f7f9; border-radius: 8px; font: 11.5px/1.5 ui-monospace, "JetBrains Mono", monospace; white-space: pre-wrap; }
+  .conclusion { background: #fff8e6; border-left: 4px solid #e8a33a; padding: 8px 12px; border-radius: 6px; }
+  .conclusion p { margin: 0 0 4px; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section>
+  <h2>方案 A：实时阴影贴图（PCF，2048 × 2048）　方案 B：烘焙的接触阴影（512 × 512，加载时计算一次）</h2>
+  <p class="sub">同一个场景、同样的灯光与材质、三个固定机位。第三列是差异图：灰色是 A 的画面，红色越深表示两张图在这里差得越多。</p>
+  <div class="grid3" id="views"></div>
+  <div class="bar"><button type="button" id="run">重新测量</button><a class="btn" id="export" download="阴影方案比较报告.json" href="#">导出报告（JSON）</a></div>
+</section>
+<section>
+  <div class="two">
+    <div style="display:grid;gap:8px;align-content:start">
+      <h2>调试视图：数据来自哪一步</h2>
+      <div class="two" id="debug"></div>
+    </div>
+    <div style="display:grid;gap:8px;align-content:start">
+      <h2>测量结果</h2>
+      <table id="metrics"><tr><th>项目</th><th>方案 A</th><th>方案 B</th></tr></table>
+      <table id="diffs"><tr><th>机位</th><th>平均差异（0—255）</th><th>差异超过 8 的像素</th><th>PSNR</th></tr></table>
+    </div>
+  </div>
+</section>
+<section>
+  <div class="two">
+    <div style="display:grid;gap:8px;align-content:start"><h2>测试条件（随报告一起保存）</h2><pre id="cond"></pre></div>
+    <div style="display:grid;gap:8px;align-content:start"><h2>结论（只在这些条件下成立）</h2><div class="conclusion" id="conclusion"></div></div>
+  </div>
+</section>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
+import { HorizontalBlurShader } from 'three/addons/shaders/HorizontalBlurShader.js';
+import { VerticalBlurShader } from 'three/addons/shaders/VerticalBlurShader.js';
+const $ = id => document.getElementById(id);
+const W = 480, H = 300, FRAMES = 30;
+const CAMERAS = [
+  { name: '正面', pos: [0, 1.6, 6.2], target: [0, 0.8, 0] },
+  { name: '俯视', pos: [2.6, 5.4, 3.4], target: [0, 0.3, 0] },
+  { name: '低角度', pos: [-4.8, 0.7, 3.2], target: [0, 0.9, 0] }
+];
+const LIGHT_POS = [-4, 4.5, 2.5];   // 光线较斜，阴影方向清楚
+
+// ---------- 同一个场景：用同一个函数构建两次，保证资源与参数完全相同 ----------
+function buildScene(renderer) {
+  const scene = new THREE.Scene(); scene.background = new THREE.Color('#e9e6df');
+  const pmrem = new THREE.PMREMGenerator(renderer), room = new RoomEnvironment();
+  scene.environment = pmrem.fromScene(room, 0.04).texture; scene.environmentIntensity = 0.25; pmrem.dispose(); room.dispose();
+  const sun = new THREE.DirectionalLight('#fff3e0', 2.8); sun.position.set(...LIGHT_POS); scene.add(sun);
+  scene.add(new THREE.HemisphereLight('#eef3ff', '#8a8378', 0.35));
+  const mat = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.55, ...o });
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(12, 12).rotateX(-Math.PI / 2), mat('#e3ddd2', { roughness: 0.95 }));
+  floor.receiveShadow = true; floor.name = 'floor'; scene.add(floor);
+  const objs = new THREE.Group(); scene.add(objs);
+  const add = (geo, m, pos, rot) => { const o = new THREE.Mesh(geo, m); o.position.set(...pos); if (rot) o.rotation.set(...rot); o.castShadow = o.receiveShadow = true; objs.add(o); return o; };
+  // 台灯：底座、灯杆、灯罩
+  add(new THREE.CylinderGeometry(0.45, 0.5, 0.08, 48), mat('#2b2f36', { metalness: 0.6, roughness: 0.35 }), [-0.9, 0.04, 0]);
+  add(new THREE.CylinderGeometry(0.035, 0.035, 1.5, 16), mat('#2b2f36', { metalness: 0.6, roughness: 0.35 }), [-0.9, 0.8, 0]);
+  add(new THREE.ConeGeometry(0.5, 0.55, 48, 1, true), mat('#e4572e', { side: THREE.DoubleSide }), [-0.9, 1.7, 0]);
+  // 花瓶：旋转曲线生成
+  const pts = []; for (let i = 0; i <= 24; i++) { const t = i / 24; pts.push(new THREE.Vector2(0.18 + 0.22 * Math.sin(t * Math.PI * 0.9 + 0.3) - 0.08 * t, t * 1.1)); }
+  add(new THREE.LatheGeometry(pts, 64), mat('#2f6fdb', { roughness: 0.3 }), [0.6, 0, 0.3]);
+  add(new THREE.BoxGeometry(0.7, 0.4, 0.5), mat('#f3b13b'), [1.3, 0.2, -0.6], [0, 0.4, 0]);
+  add(new THREE.TorusKnotGeometry(0.22, 0.07, 128, 16), mat('#5b8c7a'), [0.1, 0.5, -0.9]);
+  return { scene, sun, floor, objs };
+}
+
+// ---------- 方案 A：实时阴影贴图 ----------
+function makeA() {
+  const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+  renderer.toneMapping = THREE.AgXToneMapping;
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
+  const s = buildScene(renderer);
+  s.sun.castShadow = true; s.sun.shadow.mapSize.set(2048, 2048); s.sun.shadow.bias = -0.0004; s.sun.shadow.normalBias = 0.02;
+  Object.assign(s.sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: 3, far: 11 });   // 远近范围贴合场景，深度精度更高
+  return { name: 'A', renderer, ...s, memMB: 2048 * 2048 * 4 / 1048576, bake: () => 0 };
+}
+
+// ---------- 方案 B：从上往下看一次，离地越近越暗，再模糊两次 ----------
+function makeB() {
+  const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+  renderer.toneMapping = THREE.AgXToneMapping;
+  const s = buildScene(renderer);
+  const SIZE = 512, AREA = 6, HEIGHT = 1.2;
+  const rt = new THREE.WebGLRenderTarget(SIZE, SIZE), rtBlur = new THREE.WebGLRenderTarget(SIZE, SIZE);
+  const cam = new THREE.OrthographicCamera(-AREA / 2, AREA / 2, AREA / 2, -AREA / 2, 0, HEIGHT + 0.01);
+  cam.position.set(0, HEIGHT, 0); cam.rotation.x = -Math.PI / 2;
+  const heightMat = new THREE.ShaderMaterial({
+    side: THREE.DoubleSide, depthTest: false, depthWrite: false, transparent: true,
+    blending: THREE.CustomBlending, blendEquation: THREE.MaxEquation, blendEquationAlpha: THREE.MaxEquation,   // 多层重叠时取最暗，而不是越叠越黑
+    vertexShader: 'varying float vY; void main() { vec4 w = modelMatrix * vec4(position, 1.0); vY = w.y; gl_Position = projectionMatrix * viewMatrix * w; }',
+    fragmentShader: `varying float vY; void main() { float a = pow(1.0 - clamp(vY / ${HEIGHT.toFixed(2)}, 0.0, 1.0), 2.2) * 0.85; gl_FragColor = vec4(0.0, 0.0, 0.0, a); }`
+  });
+  const hBlur = new FullScreenQuad(new THREE.ShaderMaterial(HorizontalBlurShader)), vBlur = new FullScreenQuad(new THREE.ShaderMaterial(VerticalBlurShader));
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(AREA, AREA).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: rt.texture, transparent: true, depthWrite: false }));
+  plane.position.y = 0.002; plane.renderOrder = 1; s.scene.add(plane);
+  function blur(amount) {
+    hBlur.material.uniforms.tDiffuse.value = rt.texture; hBlur.material.uniforms.h.value = amount / SIZE; renderer.setRenderTarget(rtBlur); hBlur.render(renderer);
+    vBlur.material.uniforms.tDiffuse.value = rtBlur.texture; vBlur.material.uniforms.v.value = amount / SIZE; renderer.setRenderTarget(rt); vBlur.render(renderer);
+  }
+  function bake() {
+    const t0 = performance.now();
+    const bg = s.scene.background; s.scene.background = null; s.floor.visible = plane.visible = false;
+    s.scene.overrideMaterial = heightMat; renderer.setClearColor(0x000000, 0);
+    renderer.setRenderTarget(rt); renderer.clear(); renderer.render(s.scene, cam);
+    s.scene.overrideMaterial = null; blur(3); blur(1.5);
+    renderer.setRenderTarget(null); renderer.setClearColor(0x000000, 1);
+    s.scene.background = bg; s.floor.visible = plane.visible = true;
+    return performance.now() - t0;
+  }
+  const bakeMs = bake();
+  return { name: 'B', renderer, ...s, rt, plane, bake, firstBakeMs: bakeMs, memMB: 2 * SIZE * SIZE * 4 / 1048576 };
+}
+
+const A = makeA(), B = makeB();
+const camera = new THREE.PerspectiveCamera(40, W / H, 0.1, 50);
+function setCam(c) { camera.position.set(...c.pos); camera.lookAt(...c.target); }
+function grab(sys) { const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'); g.drawImage(sys.renderer.domElement, 0, 0); return { c, data: g.getImageData(0, 0, W, H).data }; }
+function diffImage(a, b) {
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'), out = g.createImageData(W, H);
+  let sum = 0, over = 0, sq = 0;
+  for (let i = 0; i < a.length; i += 4) {
+    const la = 0.2126 * a[i] + 0.7152 * a[i + 1] + 0.0722 * a[i + 2], lb = 0.2126 * b[i] + 0.7152 * b[i + 1] + 0.0722 * b[i + 2];
+    const d = Math.abs(la - lb); sum += d; sq += d * d; if (d > 8) over++;
+    const k = Math.min(1, d / 48), base = 150 + la * 0.35;
+    out.data[i] = base * (1 - k) + 220 * k; out.data[i + 1] = base * (1 - k) + 30 * k; out.data[i + 2] = base * (1 - k) + 30 * k; out.data[i + 3] = 255;
+  }
+  g.putImageData(out, 0, 0);
+  const n = a.length / 4, mse = sq / n;
+  return { c, mean: sum / n, overPct: over / n * 100, psnr: mse === 0 ? Infinity : 10 * Math.log10(255 * 255 / mse) };
+}
+const px = new Uint8Array(4);
+function timeFrames(sys, perFrame) {
+  const gl = sys.renderer.getContext(), times = [];
+  for (let i = 0; i < FRAMES + 5; i++) {
+    const t0 = performance.now(); if (perFrame) perFrame(); sys.renderer.render(sys.scene, camera); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    if (i >= 5) times.push(performance.now() - t0);                   // 前 5 帧是预热，不计入
+  }
+  times.sort((x, y) => x - y);
+  return { median: times[Math.floor(times.length / 2)], p95: times[Math.floor(times.length * 0.95)] };
+}
+function figure(parent, canvas, caption) { const f = document.createElement('figure'); f.append(canvas); f.insertAdjacentHTML('beforeend', `<figcaption>${caption}</figcaption>`); parent.append(f); }
+
+// ---------- 调试视图 ----------
+function debugViews() {
+  $('debug').innerHTML = '';
+  // A：从光源看到的深度——这就是“阴影贴图”这一步看到的东西
+  const r = A.renderer, depthMat = new THREE.MeshDepthMaterial(), floorVis = A.floor.visible;
+  A.scene.overrideMaterial = depthMat; const bg = A.scene.background; A.scene.background = new THREE.Color('#ffffff');
+  A.sun.shadow.camera.position.copy(A.sun.position); A.sun.shadow.camera.lookAt(0, 0, 0); A.sun.shadow.camera.updateProjectionMatrix();
+  r.setClearColor('#ffffff'); r.clear(); r.setViewport((W - H) / 2, 0, H, H); r.render(A.scene, A.sun.shadow.camera); r.setViewport(0, 0, W, H);   // 阴影相机是正方形，画在中间的正方形区域
+  const a = grab(A).c; A.scene.overrideMaterial = null; A.scene.background = bg; A.floor.visible = floorVis; depthMat.dispose();
+  figure($('debug'), a, '<b>A · 阴影贴图这一步</b>：从光源看到的深度，离光源越近越亮。物体或光源一动就要每帧重画。');
+  // B：烘焙结果——接触阴影贴图本身
+  const show = new FullScreenQuad(new THREE.ShaderMaterial({ uniforms: { t: { value: B.rt.texture } }, vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }', fragmentShader: 'uniform sampler2D t; varying vec2 vUv; void main() { float a = texture2D(t, vUv).a; gl_FragColor = vec4(vec3(1.0 - a), 1.0); }' }));
+  B.renderer.setRenderTarget(null); B.renderer.setClearColor('#ffffff'); B.renderer.clear(); B.renderer.setViewport((W - H) / 2, 0, H, H); show.render(B.renderer); B.renderer.setViewport(0, 0, W, H);
+  const b = grab(B).c; show.dispose();
+  figure($('debug'), b, '<b>B · 烘焙这一步</b>：从上往下看到的接触阴影，离地越近越暗。只在加载时算一次。');
+}
+
+// ---------- 测量与报告 ----------
+function conditions() {
+  const gl = A.renderer.getContext(), info = gl.getExtension('WEBGL_debug_renderer_info');
+  return {
+    日期: new Date().toISOString().slice(0, 10),
+    设备: info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : '浏览器未公开',
+    浏览器: navigator.userAgent.match(/(Chrome|Firefox|Safari)\/[\d.]+/)?.[0] || navigator.userAgent.slice(0, 40),
+    'three.js': THREE.REVISION,
+    画面: `${W} × ${H}，像素比 1，色调映射 AgX`,
+    机位: CAMERAS.map(c => c.name).join('、'),
+    每个数据: `${FRAMES} 帧的中位数（另有 5 帧预热），每帧读回一个像素等 GPU 完成`,
+    场景: '6 个物体、1 盏平行光、1 张环境贴图；两种方案用同一个函数构建'
+  };
+}
+function run() {
+  $('views').innerHTML = ''; const diffs = [], times = { A: [], B: [], Bmove: [] };
+  for (const c of CAMERAS) {
+    setCam(c);
+    A.renderer.render(A.scene, camera); const a = grab(A);
+    B.renderer.render(B.scene, camera); const b = grab(B);
+    const d = diffImage(a.data, b.data); diffs.push({ name: c.name, ...d });
+    figure($('views'), a.c, `<b>A · ${c.name}</b>`); figure($('views'), b.c, `<b>B · ${c.name}</b>`); figure($('views'), d.c, `<b>差异 · ${c.name}</b>：平均 ${d.mean.toFixed(1)}，${d.overPct.toFixed(1)}% 的像素差异超过 8`);
+    times.A.push(timeFrames(A)); times.B.push(timeFrames(B)); times.Bmove.push(timeFrames(B, () => B.bake()));
+  }
+  const avg = (arr, k) => arr.reduce((s, v) => s + v[k], 0) / arr.length;
+  const m = { A: avg(times.A, 'median'), B: avg(times.B, 'median'), Bmove: avg(times.Bmove, 'median'), Ap95: avg(times.A, 'p95'), Bp95: avg(times.B, 'p95') };
+  const t = $('metrics'); while (t.rows.length > 1) t.deleteRow(1);
+  for (const row of [
+    ['每帧耗时（三个机位中位数的平均）', `${m.A.toFixed(1)} 毫秒`, `${m.B.toFixed(1)} 毫秒`],
+    ['第 95 百分位', `${m.Ap95.toFixed(1)} 毫秒`, `${m.Bp95.toFixed(1)} 毫秒`],
+    ['物体会动时（B 每帧重新烘焙）', `${m.A.toFixed(1)} 毫秒（不变）`, `${m.Bmove.toFixed(1)} 毫秒`],
+    ['阴影相关显存（估计）', `${A.memMB.toFixed(1)} MB（2048² 深度）`, `${B.memMB.toFixed(1)} MB（两张 512² RGBA）`],
+    ['物体自身的阴影', '有（灯罩投在灯杆上）', '没有'],
+    ['阴影方向', '随光源方向', '永远在物体正下方']]) { const tr = t.insertRow(); row.forEach(v => tr.insertCell().textContent = v); }
+  const dt = $('diffs'); while (dt.rows.length > 1) dt.deleteRow(1);
+  for (const d of diffs) { const tr = dt.insertRow(); [d.name, d.mean.toFixed(1), `${d.overPct.toFixed(1)}%`, `${d.psnr.toFixed(1)} dB`].forEach(v => tr.insertCell().textContent = v); }
+  debugViews();
+  const cond = conditions(); $('cond').textContent = JSON.stringify(cond, null, 2);
+  const faster = (1 - m.B / m.A) * 100;
+  $('conclusion').innerHTML = `
+    <p><b>在上面的设备与设置下</b>：静止场景中，B 每帧比 A ${faster >= 0 ? '少' : '多'} ${Math.abs(faster).toFixed(0)}%（${m.A.toFixed(1)} → ${m.B.toFixed(1)} 毫秒），阴影相关显存从约 ${A.memMB.toFixed(0)} MB 降到约 ${B.memMB.toFixed(0)} MB。</p>
+    <p><b>画面不等价</b>：差异集中在 A 的斜向投影与物体自身的阴影处（平均差异 ${Math.min(...diffs.map(d => d.mean)).toFixed(1)}—${Math.max(...diffs.map(d => d.mean)).toFixed(1)}）。B 适合“产品放在桌上”的柔和落地感，不适合需要表现光源方向的画面。</p>
+    <p><b>条件变化时结论会变</b>：物体会动时 B 要每帧重新烘焙，耗时变为 ${m.Bmove.toFixed(1)} 毫秒；在独立显卡、移动设备或更高分辨率下比例也会不同。请在目标设备上重新运行本页，并导出报告附在评审记录里。</p>`;
+  const report = { 条件: cond, 结果: { 每帧毫秒: { A: +m.A.toFixed(2), B: +m.B.toFixed(2), B每帧重新烘焙: +m.Bmove.toFixed(2) }, 显存MB: { A: A.memMB, B: B.memMB }, 差异: diffs.map(d => ({ 机位: d.name, 平均: +d.mean.toFixed(2), 超过8的像素百分比: +d.overPct.toFixed(2), PSNR: +d.psnr.toFixed(2) })) } };
+  $('export').href = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }));   // 先生成好，点击时直接下载
+  return { m, diffs: diffs.map(d => ({ name: d.name, mean: d.mean, overPct: d.overPct, psnr: d.psnr })), firstBakeMs: B.firstBakeMs, cond };
+}
+$('run').addEventListener('click', run);
+const first = run();
+window.__cmp = { first, run };
+</script>
+</body>
+</html>

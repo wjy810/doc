@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>实时与离线：光栅化与渐进式路径追踪</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --a: #2f6fdb; --b: #e4572e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .row5 { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+  .row3 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.6fr); gap: 12px; align-items: start; }
+  figure { margin: 0; display: grid; gap: 2px; } figure canvas { width: 100%; height: auto; display: block; border-radius: 6px; background: #111; image-rendering: auto; }
+  figcaption { font-size: 12px; color: var(--muted); } figcaption b { color: var(--ink); display: block; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+  button { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; } th { color: var(--muted); font-weight: 400; }
+  #chart { width: 100%; height: auto; display: block; }
+  .legend { display: flex; gap: 12px; color: var(--muted); font-size: 12px; } .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section>
+  <h2>同一个房间：实时光栅化一帧，与路径追踪逐步累积</h2>
+  <p class="sub">路径追踪让光线在房间里反弹，自然得到软阴影、墙面的颜色渗染和镜面里的反射；代价是每个像素需要大量随机采样（spp：每像素采样数）才能消除噪点。光栅化一帧就画完，但间接光、软阴影和反射都要用近似方法补。</p>
+  <div class="row5" id="progress"></div>
+  <p class="sub" id="status" role="status">正在渲染……</p>
+</section>
+<section>
+  <h2>同样的采样数，换一种采样方法：噪点大不一样</h2>
+  <div class="row3">
+    <div id="cmpA"></div><div id="cmpB"></div>
+    <div style="display:grid;gap:6px">
+      <canvas id="chart" width="560" height="300" aria-label="噪声随采样数下降的双对数图"></canvas>
+      <div class="legend"><span><i style="background:var(--a)"></i>直接对灯采样</span><span><i style="background:var(--b)"></i>只靠随机碰到灯</span><span>虚线：斜率 −1/2（采样数翻 4 倍，噪声减半）</span></div>
+    </div>
+  </div>
+  <table id="t"><tr><th>每像素采样数</th><th>累计时间（直接对灯采样）</th><th>噪声 RMSE（直接对灯采样）</th><th>噪声 RMSE（只靠随机碰到灯）</th></tr></table>
+</section>
+<script type="module">
+import * as THREE from 'three';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
+const $ = id => document.getElementById(id);
+const S = 256;                                        // 画面 256 × 256，软件渲染下也能在一两分钟内收敛
+const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
+renderer.setSize(S, S, false);
+
+// ---------------- 路径追踪着色器：一个康奈尔盒子 ----------------
+const PT = `
+precision highp float; precision highp int;
+uniform sampler2D prevTex; uniform float frame; uniform int nee; uniform float spp;
+varying vec2 vUv;
+const float PI = 3.14159265;
+uint state;
+uint pcg() { state = state * 747796405u + 2891336453u; uint w = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u; return (w >> 22u) ^ w; }
+float rnd() { return float(pcg()) / 4294967296.0; }
+// 材质：0 漫反射，1 镜面，2 发光
+struct Hit { float t; vec3 n; vec3 c; int m; };
+const vec3 LE = vec3(17.0, 15.0, 12.0);               // 灯的辐亮度
+const float LY = 0.998, LS = 0.28;                     // 灯：y = 0.998 处、边长 0.56 的正方形，朝下
+void plane(vec3 ro, vec3 rd, int axis, float d, vec3 n, vec3 c, inout Hit h) {
+  float denom = rd[axis]; if (abs(denom) < 1e-6) return;
+  float t = (d - ro[axis]) / denom; if (t < 1e-4 || t > h.t) return;
+  vec3 p = ro + rd * t; if (any(greaterThan(abs(p), vec3(1.0001)))) return;
+  h = Hit(t, n, c, 0);
+}
+void sphere(vec3 ro, vec3 rd, vec3 ce, float r, vec3 c, int m, inout Hit h) {
+  vec3 oc = ro - ce; float b = dot(oc, rd), q = dot(oc, oc) - r * r, disc = b * b - q; if (disc < 0.0) return;
+  float s = sqrt(disc), t = -b - s; if (t < 1e-4) t = -b + s; if (t < 1e-4 || t > h.t) return;
+  h = Hit(t, normalize(ro + rd * t - ce), c, m);
+}
+Hit scene(vec3 ro, vec3 rd) {
+  Hit h = Hit(1e9, vec3(0), vec3(0), -1);
+  plane(ro, rd, 0, -1.0, vec3(1, 0, 0), vec3(0.63, 0.07, 0.05), h);   // 左墙：红
+  plane(ro, rd, 0,  1.0, vec3(-1, 0, 0), vec3(0.12, 0.45, 0.10), h);  // 右墙：绿
+  plane(ro, rd, 1, -1.0, vec3(0, 1, 0), vec3(0.73), h);               // 地面
+  plane(ro, rd, 1,  1.0, vec3(0, -1, 0), vec3(0.73), h);              // 天花板
+  plane(ro, rd, 2, -1.0, vec3(0, 0, 1), vec3(0.73), h);               // 后墙
+  sphere(ro, rd, vec3(-0.42, -0.6, -0.3), 0.4, vec3(0.92), 1, h);     // 镜面球
+  sphere(ro, rd, vec3(0.45, -0.65, 0.3), 0.35, vec3(0.75), 0, h);     // 漫反射球
+  if (abs(rd.y) > 1e-6) { float t = (LY - ro.y) / rd.y; vec3 p = ro + rd * t;   // 灯
+    if (t > 1e-4 && t < h.t && abs(p.x) < LS && abs(p.z) < LS && rd.y > 0.0) h = Hit(t, vec3(0, -1, 0), vec3(0), 2); }
+  return h;
+}
+vec3 cosineDir(vec3 n) {                                // 按余弦分布在半球上取方向
+  float u = rnd(), v = rnd(), r = sqrt(u), a = 2.0 * PI * v;
+  vec3 t = normalize(abs(n.x) > 0.5 ? cross(n, vec3(0, 1, 0)) : cross(n, vec3(1, 0, 0))), b = cross(n, t);
+  return normalize(t * r * cos(a) + b * r * sin(a) + n * sqrt(1.0 - u));
+}
+vec3 trace(vec3 ro, vec3 rd) {
+  vec3 col = vec3(0), thr = vec3(1); bool specular = true;
+  for (int bounce = 0; bounce < 6; bounce++) {
+    Hit h = scene(ro, rd); if (h.m < 0) break;
+    if (h.m == 2) { if (nee == 0 || specular) col += thr * LE; break; }   // 用了直接光采样时，漫反射之后碰到灯不再重复计算
+    vec3 p = ro + rd * h.t, n = h.n;
+    if (h.m == 1) { ro = p + n * 1e-4; rd = reflect(rd, n); thr *= h.c; specular = true; continue; }
+    if (nee == 1) {                                      // 直接光采样：在灯上随机取一点，检查是否被挡住
+      vec3 lp = vec3((rnd() * 2.0 - 1.0) * LS, LY, (rnd() * 2.0 - 1.0) * LS), d = lp - p;
+      float d2 = dot(d, d); vec3 wi = d / sqrt(d2); float cs = dot(n, wi), cl = wi.y;
+      if (cs > 0.0 && cl > 0.0) { Hit s = scene(p + n * 1e-4, wi); if (s.m == 2) col += thr * h.c / PI * LE * cs * cl / d2 * (4.0 * LS * LS); }
+    }
+    ro = p + n * 1e-4; rd = cosineDir(n); thr *= h.c; specular = false;
+    if (bounce >= 2) { float q = max(thr.r, max(thr.g, thr.b)); if (rnd() > q) break; thr /= q; }   // 俄罗斯轮盘：贡献小的路径提前结束
+  }
+  return col;
+}
+void main() {
+  vec2 px = vUv * ${S.toFixed(1)};
+  state = uint(px.x) * 1973u + uint(px.y) * 9277u + uint(frame) * 26699u + 1u; pcg();
+  vec3 sum = vec3(0);
+  for (int k = 0; k < SPP; k++) {
+    vec2 uv = (px - fract(px) + vec2(rnd(), rnd())) / ${S.toFixed(1)} * 2.0 - 1.0;   // 像素内随机抖动，顺带抗锯齿
+    vec3 rd = normalize(vec3(uv * tan(radians(19.5)), -1.0));
+    sum += trace(vec3(0.0, 0.0, 3.9), rd);
+  }
+  gl_FragColor = texture2D(prevTex, vUv) + vec4(sum, float(SPP));
+}`;
+const DISPLAY = `
+uniform sampler2D tex; varying vec2 vUv;
+vec3 aces(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+void main() { vec4 a = texture2D(tex, vUv); vec3 c = aces(a.rgb / max(a.a, 1.0)); gl_FragColor = vec4(pow(c, vec3(1.0 / 2.2)), 1.0); }`;
+const VS = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
+const SPP_PER_PASS = 4;
+function makeTracer(nee) {
+  const rts = [0, 1].map(() => new THREE.WebGLRenderTarget(S, S, { type: THREE.FloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false }));
+  const quad = new FullScreenQuad(new THREE.ShaderMaterial({ defines: { SPP: SPP_PER_PASS }, uniforms: { prevTex: { value: null }, frame: { value: 0 }, nee: { value: nee }, spp: { value: 0 } }, vertexShader: VS, fragmentShader: PT }));
+  const show = new FullScreenQuad(new THREE.ShaderMaterial({ uniforms: { tex: { value: null } }, vertexShader: VS, fragmentShader: DISPLAY }));
+  const ldr = new THREE.WebGLRenderTarget(S, S);
+  let i = 0, spp = 0;
+  return {
+    get spp() { return spp; },
+    pass() { const src = rts[i % 2], dst = rts[(i + 1) % 2]; quad.material.uniforms.prevTex.value = src.texture; quad.material.uniforms.frame.value = i; renderer.setRenderTarget(dst); quad.render(renderer); i++; spp += SPP_PER_PASS; },
+    reset() { for (const rt of rts) { renderer.setRenderTarget(rt); renderer.setClearColor(0, 0); renderer.clear(); } i = 0; spp = 0; },
+    pixels() { show.material.uniforms.tex.value = rts[i % 2].texture; renderer.setRenderTarget(ldr); show.render(renderer); const buf = new Uint8Array(S * S * 4); renderer.readRenderTargetPixels(ldr, 0, 0, S, S, buf); return buf; },
+    toCanvas() { show.material.uniforms.tex.value = rts[i % 2].texture; renderer.setRenderTarget(null); show.render(renderer); const c = document.createElement('canvas'); c.width = c.height = S; c.getContext('2d').drawImage(renderer.domElement, 0, 0); return c; }
+  };
+}
+function rmse(a, b) { let s = 0; for (let k = 0; k < a.length; k += 4) for (let j = 0; j < 3; j++) { const d = (a[k + j] - b[k + j]) / 255; s += d * d; } return Math.sqrt(s / (a.length / 4 * 3)); }
+function figure(parent, canvas, title, note) { const f = document.createElement('figure'); f.append(canvas); f.insertAdjacentHTML('beforeend', `<figcaption><b>${title}</b>${note}</figcaption>`); $(parent).append(f); }
+const tick = () => new Promise(r => setTimeout(r));
+const gl = renderer.getContext(), px = new Uint8Array(4);
+const fpx = new Float32Array(4);
+const sync = () => gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);             // 画到屏幕时：读一个像素等 GPU 完成
+const syncFloat = () => gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, fpx);            // 画到浮点目标时要用浮点格式读
+
+// ---------------- 实时光栅化：同一个房间 ----------------
+function raster() {
+  const scene = new THREE.Scene(), cam = new THREE.PerspectiveCamera(39, 1, 0.1, 20); cam.position.set(0, 0, 3.9);
+  const mat = c => new THREE.MeshStandardMaterial({ color: c, roughness: 1 });
+  const wall = (c, pos, rot) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat(c)); m.position.set(...pos); m.rotation.set(...rot); m.receiveShadow = true; scene.add(m); };
+  const lin = (r, g, b) => new THREE.Color().setRGB(r, g, b, THREE.LinearSRGBColorSpace);
+  wall(lin(0.63, 0.07, 0.05), [-1, 0, 0], [0, Math.PI / 2, 0]); wall(lin(0.12, 0.45, 0.10), [1, 0, 0], [0, -Math.PI / 2, 0]);
+  wall(lin(0.73, 0.73, 0.73), [0, -1, 0], [-Math.PI / 2, 0, 0]); wall(lin(0.73, 0.73, 0.73), [0, 1, 0], [Math.PI / 2, 0, 0]); wall(lin(0.73, 0.73, 0.73), [0, 0, -1], [0, 0, 0]);
+  const s1 = new THREE.Mesh(new THREE.SphereGeometry(0.4, 64, 32), new THREE.MeshStandardMaterial({ color: lin(0.92, 0.92, 0.92), metalness: 1, roughness: 0.02 })); s1.position.set(-0.42, -0.6, -0.3);
+  const s2 = new THREE.Mesh(new THREE.SphereGeometry(0.35, 64, 32), mat(lin(0.75, 0.75, 0.75))); s2.position.set(0.45, -0.65, 0.3);
+  [s1, s2].forEach(s => { s.castShadow = s.receiveShadow = true; scene.add(s); });
+  const lamp = new THREE.Mesh(new THREE.PlaneGeometry(0.56, 0.56), new THREE.MeshBasicMaterial({ color: '#ffffff' })); lamp.rotation.x = Math.PI / 2; lamp.position.y = 0.997; scene.add(lamp);
+  const light = new THREE.PointLight('#fff2e0', 2.2, 0, 2); light.position.set(0, 0.9, 0); light.castShadow = true; light.shadow.mapSize.set(1024, 1024); scene.add(light);
+  scene.add(new THREE.AmbientLight('#ffffff', 0.35));                   // 用一个常数近似所有间接光
+  // 镜面球需要“周围的样子”：先把房间渲染成环境贴图
+  const pm = new THREE.PMREMGenerator(renderer); scene.environment = pm.fromScene(scene, 0, 0.1, 10, { position: new THREE.Vector3(-0.42, -0.6, -0.3) }).texture; scene.environmentIntensity = 0.6; pm.dispose();
+  renderer.shadowMap.enabled = true; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.setRenderTarget(null);
+  renderer.render(scene, cam); sync();
+  const times = []; for (let k = 0; k < 10; k++) { const t0 = performance.now(); renderer.render(scene, cam); sync(); times.push(performance.now() - t0); }
+  times.sort((a, b) => a - b);
+  const c = document.createElement('canvas'); c.width = c.height = S; c.getContext('2d').drawImage(renderer.domElement, 0, 0);
+  renderer.toneMapping = THREE.NoToneMapping; renderer.shadowMap.enabled = false;
+  return { canvas: c, ms: times[5] };
+}
+
+async function run() {
+  const r = raster();
+  figure('progress', r.canvas, '实时光栅化：一帧', `${r.ms.toFixed(1)} 毫秒；间接光用常数近似，阴影是硬的点光源阴影，墙面没有颜色渗染`);
+  const MILESTONES = [16, 64, 256, 1024, 4096];
+  const shows = new Set([4, 64, 1024, 4096]), CMP = 64;
+  const neeT = makeTracer(1), naive = makeTracer(0); neeT.reset(); naive.reset();
+  const snaps = { nee: {}, naive: {} }, times = {};
+  let t0 = performance.now(), acc = 0;
+  // 1）直接对灯采样：一路累积到 4096 spp，最后一张作为“参考答案”
+  while (neeT.spp < MILESTONES[MILESTONES.length - 1]) {
+    const a = performance.now(); neeT.pass(); syncFloat(); acc += performance.now() - a;
+    const s = neeT.spp;
+    if (MILESTONES.includes(s) || s === SPP_PER_PASS || shows.has(s)) { snaps.nee[s] = neeT.pixels(); times[s] = acc; if (shows.has(s)) figure('progress', neeT.toCanvas(), `路径追踪：${s} spp`, `累计 ${(acc / 1000).toFixed(1)} 秒`); }
+    if (s % 64 === 0) { $('status').textContent = `直接对灯采样：${s} / 4096 spp，已用 ${(acc / 1000).toFixed(1)} 秒`; await tick(); }
+  }
+  const ref = snaps.nee[4096];
+  // 2）只靠随机碰到灯：累积到 1024 spp
+  while (naive.spp < 1024) {
+    naive.pass(); const s = naive.spp;
+    if (MILESTONES.includes(s) || s === SPP_PER_PASS) snaps.naive[s] = naive.pixels();
+    if (s === CMP) figure('cmpB', naive.toCanvas(), `只靠随机碰到灯：${CMP} spp`, '光线要碰巧打中灯才有贡献，灯很小时大多数路径什么也没带回来');
+    if (s % 64 === 0) { $('status').textContent = `只靠随机碰到灯：${s} / 1024 spp`; await tick(); }
+  }
+  const neeCmp = makeTracer(1); neeCmp.reset(); while (neeCmp.spp < CMP) neeCmp.pass();
+  figure('cmpA', neeCmp.toCanvas(), `直接对灯采样：${CMP} spp`, '每次反弹都主动向灯取一个点，检查有没有被挡住');
+  const rows = [];
+  for (const s of [SPP_PER_PASS, 16, 64, 256, 1024]) rows.push({ spp: s, time: times[s], nee: rmse(snaps.nee[s], ref), naive: rmse(snaps.naive[s], ref) });
+  const t = $('t'); for (const row of rows) { const tr = t.insertRow(); [row.spp, `${(row.time / 1000).toFixed(2)} 秒`, row.nee.toFixed(4), row.naive.toFixed(4)].forEach(v => tr.insertCell().textContent = v); }
+  drawChart(rows);
+  $('status').textContent = `完成。参考图为直接对灯采样 4096 spp（累计 ${(times[4096] / 1000).toFixed(1)} 秒）；实时一帧 ${r.ms.toFixed(1)} 毫秒。`;
+  return { rasterMs: r.ms, rows, refTime: times[4096] };
+}
+function drawChart(rows) {
+  const c = $('chart'), g = c.getContext('2d'), W = c.width, H = c.height, L = 54, B = 34;
+  const xs = rows.map(r => Math.log2(r.spp)), all = rows.flatMap(r => [r.nee, r.naive]).filter(v => v > 0);
+  const ymin = Math.log10(Math.min(...all)) - 0.15, ymax = Math.log10(Math.max(...all)) + 0.15;
+  const X = v => L + (v - xs[0]) / (xs[xs.length - 1] - xs[0]) * (W - L - 36), Y = v => 10 + (ymax - Math.log10(v)) / (ymax - ymin) * (H - 10 - B);
+  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.strokeStyle = '#dde1e7'; g.fillStyle = '#5b6475'; g.font = '11px "Noto Sans SC", sans-serif';
+  for (const r of rows) { g.beginPath(); g.moveTo(X(Math.log2(r.spp)), 10); g.lineTo(X(Math.log2(r.spp)), H - B); g.stroke(); g.fillText(r.spp, X(Math.log2(r.spp)) - 10, H - B + 14); }
+  for (let e = Math.ceil(ymin * 2) / 2; e <= ymax; e += 0.5) { g.beginPath(); g.moveTo(L, Y(10 ** e)); g.lineTo(W - 36, Y(10 ** e)); g.stroke(); g.fillText((10 ** e).toFixed(3), 4, Y(10 ** e) + 4); }
+  g.fillText('每像素采样数（对数）', W / 2 - 50, H - 4);
+  const line = (k, color, dash) => { g.strokeStyle = color; g.lineWidth = 2; g.setLineDash(dash || []); g.beginPath(); rows.forEach((r, i) => { const x = X(Math.log2(r.spp)), y = Y(r[k]); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke(); g.setLineDash([]); rows.forEach(r => { g.fillStyle = color; g.beginPath(); g.arc(X(Math.log2(r.spp)), Y(r[k]), 3, 0, 7); g.fill(); }); };
+  line('nee', '#2f6fdb'); line('naive', '#e4572e');
+  // 斜率 −1/2 的参考线（从第一个点出发）
+  g.strokeStyle = '#9aa3b2'; g.setLineDash([4, 4]); g.lineWidth = 1; g.beginPath(); const r0 = rows[0];
+  rows.forEach((r, i) => { const v = r0.nee * Math.sqrt(r0.spp / r.spp); i ? g.lineTo(X(Math.log2(r.spp)), Y(v)) : g.moveTo(X(Math.log2(r.spp)), Y(v)); }); g.stroke(); g.setLineDash([]);
+}
+window.__pt = { done: run() };
+</script>
+</body>
+</html>
