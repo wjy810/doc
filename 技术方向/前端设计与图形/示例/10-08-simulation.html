@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>高效模拟：稳定性、精度与速度的取舍</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .row7 { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+  figure { margin: 0; display: grid; gap: 2px; } figure canvas { width: 100%; height: auto; display: block; border-radius: 4px; image-rendering: pixelated; }
+  figcaption { font-size: 11.5px; color: var(--muted); } figcaption b { color: var(--ink); display: block; font-size: 12px; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  canvas.chart { width: 100%; height: auto; display: block; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 12px; } .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  .bad { color: #b3261e; font-weight: 700; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section>
+  <h2>热扩散：一团热量向四周散开（有精确解，可以算出每种方法的误差）</h2>
+  <p class="sub">128 × 128 的网格，初始值带有万分之一量级的噪声，模拟到 t ＝ 0.05。显式方法的时间步长有上限（Δt ≤ h²／4D，这里约 0.00061）；隐式方法每一步要解一个方程组，步长可以很大。</p>
+  <div class="row7" id="imgs"></div>
+</section>
+<section>
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>中线上的温度：与精确解比较</h2><canvas class="chart" id="profile" width="540" height="280"></canvas><div class="legend" id="leg1"></div></div>
+    <div style="display:grid;gap:6px"><h2>隐式方法的一步：两种解方程的方法谁收敛得快</h2><canvas class="chart" id="resid" width="540" height="280"></canvas><div class="legend"><span><i style="background:#e4572e"></i>雅可比迭代</span><span><i style="background:#2f6fdb"></i>共轭梯度</span></div></div>
+  </div>
+  <table id="t"><tr><th>方法</th><th>步长（相对上限）</th><th>步数</th><th>每步迭代</th><th>用时</th><th>相对误差</th><th>看起来</th></tr></table>
+  <p class="sub">相对误差：与精确解之差的均方根 ÷ 精确解的均方根。</p>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const N = 128, L = 2, h = L / N, D = 0.1, T = 0.05, SIG = 0.1, LIMIT = h * h / (4 * D);
+const X = i => -L / 2 + (i + 0.5) * h;
+function initial() {   // 初始温度：高斯形的热团，加上万分之一量级的测量噪声（真实数据总有噪声）
+  let s = 5; const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
+  const u = new Float64Array(N * N); for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) u[j * N + i] = Math.exp(-(X(i) ** 2 + X(j) ** 2) / (2 * SIG * SIG)) + (rnd() - 0.5) * 2e-4; return u; }
+function exact(t) { const s2 = SIG * SIG + 2 * D * t, u = new Float64Array(N * N); for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) u[j * N + i] = SIG * SIG / s2 * Math.exp(-(X(i) ** 2 + X(j) ** 2) / (2 * s2)); return u; }
+// 离散拉普拉斯算子：边界处镜像（热量不流出）
+const nb = (u, i, j) => u[j * N + Math.max(0, i - 1)] + u[j * N + Math.min(N - 1, i + 1)] + u[Math.max(0, j - 1) * N + i] + u[Math.min(N - 1, j + 1) * N + i];
+function explicitStep(u, dt) { const a = D * dt / (h * h), v = new Float64Array(N * N); for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const k = j * N + i; v[k] = u[k] + a * (nb(u, i, j) - 4 * u[k]); } return v; }
+// 隐式（向后欧拉）：解 (1 ＋ 4a) x − a·邻居之和 ＝ u
+function applyA(x, a) { const y = new Float64Array(N * N); for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const k = j * N + i; y[k] = (1 + 4 * a) * x[k] - a * nb(x, i, j); } return y; }
+function residual(x, b, a) { const Ax = applyA(x, a); let s = 0, sb = 0; for (let k = 0; k < N * N; k++) { s += (b[k] - Ax[k]) ** 2; sb += b[k] ** 2; } return Math.sqrt(s / sb); }
+function jacobi(b, a, iters, log) { let x = b.slice(); for (let it = 0; it < iters; it++) { const y = new Float64Array(N * N); for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const k = j * N + i; y[k] = (b[k] + a * nb(x, i, j)) / (1 + 4 * a); } x = y; if (log) log.push(residual(x, b, a)); } return { x, iters }; }
+function cg(b, a, tol, log) {   // 共轭梯度：矩阵对称正定时，比雅可比快得多
+  let x = b.slice(); const Ax0 = applyA(x, a); let r = b.map((v, k) => v - Ax0[k]); const bn = Math.sqrt(b.reduce((s, v) => s + v * v, 0));
+  let p = r.slice(), rr = r.reduce((s, v) => s + v * v, 0), it = 0;
+  while (Math.sqrt(rr) / bn > tol && it < 500) {
+    const Ap = applyA(p, a); let pAp = 0; for (let k = 0; k < N * N; k++) pAp += p[k] * Ap[k];
+    const alpha = rr / pAp; for (let k = 0; k < N * N; k++) { x[k] += alpha * p[k]; r[k] -= alpha * Ap[k]; }
+    const rr2 = r.reduce((s, v) => s + v * v, 0); for (let k = 0; k < N * N; k++) p[k] = r[k] + rr2 / rr * p[k]; rr = rr2; it++;
+    if (log) log.push(Math.sqrt(rr) / bn);
+  }
+  return { x, iters: it };
+}
+function simulate(m) {
+  let u = initial(); const dt0 = m.ratio * LIMIT, steps = Math.round(T / dt0), dt = T / steps, a = D * dt / (h * h); let iters = 0;
+  const t0 = performance.now();
+  for (let s = 0; s < steps; s++) {
+    if (m.kind === 'explicit') u = explicitStep(u, dt);
+    else if (m.kind === 'jacobi') { const r = jacobi(u, a, m.iters); u = r.x; iters += r.iters; }
+    else { const r = cg(u, a, m.tol); u = r.x; iters += r.iters; }
+    if (!Number.isFinite(u[0]) || Math.abs(u[N * N / 2]) > 1e6) break;
+  }
+  const ms = performance.now() - t0, ex = exact(T); let e = 0, en = 0, maxv = 0;
+  for (let k = 0; k < N * N; k++) { e += (u[k] - ex[k]) ** 2; en += ex[k] ** 2; maxv = Math.max(maxv, Math.abs(u[k])); }
+  return { ...m, u, steps, ms, err: Math.sqrt(e / en), maxv, itersPerStep: m.kind === 'explicit' ? '—' : (iters / steps).toFixed(0) };
+}
+const methods = [
+  { name: '显式', kind: 'explicit', ratio: 0.9, color: '#5b8c7a' },
+  { name: '显式，步长超过上限', kind: 'explicit', ratio: 1.1, color: '#9b59b6' },
+  { name: '隐式 · 雅可比 5 次', kind: 'jacobi', ratio: 10, iters: 5, color: '#e4572e' },
+  { name: '隐式 · 雅可比 200 次', kind: 'jacobi', ratio: 10, iters: 200, color: '#f3b13b' },
+  { name: '隐式 · 共轭梯度', kind: 'cg', ratio: 10, tol: 1e-6, color: '#2f6fdb' },
+  { name: '隐式 · 共轭梯度，小步长', kind: 'cg', ratio: 1, tol: 1e-6, color: '#1d2330' }
+];
+// ---------- 显示 ----------
+function heat(u) {
+  const c = document.createElement('canvas'); c.width = c.height = N; const g = c.getContext('2d'), im = g.createImageData(N, N);
+  for (let k = 0; k < N * N; k++) { const v = u[k], t = Number.isFinite(v) ? Math.max(0, Math.min(1, v / 0.55)) : 1, bad = !Number.isFinite(v) || v < -0.02 || v > 1.2;
+    const col = bad ? [255, 0, 255] : [20 + 235 * t, 30 + 160 * t * t, 60 + 60 * (1 - t)]; im.data.set([...col.map(x => x | 0), 255], 4 * k); }
+  g.putImageData(im, 0, 0); return c;
+}
+function figure(canvas, title, note) { const f = document.createElement('figure'); f.append(canvas); f.insertAdjacentHTML('beforeend', `<figcaption><b>${title}</b>${note}</figcaption>`); $('imgs').append(f); }
+figure(heat(exact(T)), '精确解', 't ＝ 0.05');
+const res = methods.map(simulate);
+for (const r of res) figure(heat(r.u), r.name, r.maxv > 10 ? '数值爆炸（品红色）' : `误差 ${(r.err * 100).toFixed(1)}%`);
+for (const r of res) { const tr = $('t').insertRow(); [r.name, `${r.ratio}×`, r.steps, r.itersPerStep, `${r.ms.toFixed(0)} 毫秒`, r.maxv > 10 ? `发散（最大值 ${r.maxv.toExponential(1)}）` : `${(r.err * 100).toFixed(2)}%`, r.maxv > 10 ? '噪声被逐步放大，最后爆炸' : r.err > 0.1 ? '平滑，但扩散得不够' : r.err > 0.005 ? '接近，略有偏差（步长大）' : '与精确解一致'].forEach(v => tr.insertCell().textContent = v); if (r.maxv > 10 || r.err > 0.1) tr.cells[5].className = 'bad'; }
+// 中线剖面
+(function () {
+  const c = $('profile'), g = c.getContext('2d'), W = c.width, H = c.height, Lm = 36, B = 22, ex = exact(T), row = N / 2;
+  const Xc = i => Lm + i / (N - 1) * (W - Lm - 8), Y = v => 8 + (0.8 - v) / 0.82 * (H - 8 - B);
+  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.strokeStyle = '#dde1e7'; g.fillStyle = '#5b6475'; g.font = '11px sans-serif';
+  for (const v of [0, 0.2, 0.4, 0.6, 0.8]) { g.beginPath(); g.moveTo(Lm, Y(v)); g.lineTo(W - 8, Y(v)); g.stroke(); g.fillText(v.toFixed(1), 6, Y(v) + 4); }
+  const line = (u, color, w, dash) => { g.strokeStyle = color; g.lineWidth = w; g.setLineDash(dash || []); g.beginPath(); for (let i = 0; i < N; i++) { const v = Math.max(-0.02, Math.min(0.8, u[row * N + i])); i ? g.lineTo(Xc(i), Y(v)) : g.moveTo(Xc(i), Y(v)); } g.stroke(); g.setLineDash([]); };
+  for (const r of res) if (r.maxv < 10) line(r.u, r.color, 1.6);
+  line(ex, '#000', 2.5, [5, 4]);
+  $('leg1').innerHTML = '<span><i style="background:#000"></i>精确解（虚线）</span>' + res.filter(r => r.maxv < 10).map(r => `<span><i style="background:${r.color}"></i>${r.name}</span>`).join('');
+})();
+// 一步的收敛曲线
+const conv = (() => {
+  const u = initial(), a = D * (10 * LIMIT) / (h * h), lj = [], lc = []; jacobi(u, a, 200, lj); cg(u, a, 1e-10, lc);
+  const c = $('resid'), g = c.getContext('2d'), W = c.width, H = c.height, Lm = 44, B = 22, all = [...lj, ...lc], lo = Math.log10(Math.min(...all)) - 0.2, hi = 0.2;
+  const Xc = i => Lm + i / 200 * (W - Lm - 8), Y = v => 8 + (hi - Math.log10(v)) / (hi - lo) * (H - 8 - B);
+  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.strokeStyle = '#dde1e7'; g.fillStyle = '#5b6475'; g.font = '11px sans-serif';
+  for (let e = Math.ceil(lo); e <= 0; e += 2) { g.beginPath(); g.moveTo(Lm, Y(10 ** e)); g.lineTo(W - 8, Y(10 ** e)); g.stroke(); g.fillText(`1e${e}`, 4, Y(10 ** e) + 4); }
+  g.fillText('迭代次数', W / 2 - 20, H - 4); g.fillText('200', W - 30, H - B + 14);
+  for (const [l, col] of [[lj, '#e4572e'], [lc, '#2f6fdb']]) { g.strokeStyle = col; g.lineWidth = 2; g.beginPath(); l.forEach((v, i) => i ? g.lineTo(Xc(i + 1), Y(v)) : g.moveTo(Xc(i + 1), Y(v))); g.stroke(); }
+  return { jacobi200: lj[199], jacobi5: lj[4], cgIters: lc.findIndex(v => v < 1e-6) + 1, cgFinal: lc[lc.length - 1] };
+})();
+window.__sim = { res: res.map(r => ({ name: r.name, ratio: r.ratio, steps: r.steps, it: r.itersPerStep, ms: r.ms, err: r.err, maxv: r.maxv })), conv, LIMIT };
+</script>
+</body>
+</html>

@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>图像生成与编辑：纹理合成、可控性与来源记录</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .row { display: grid; grid-template-columns: 0.5fr repeat(3, minmax(0, 1fr)); gap: 10px; align-items: start; }
+  .row3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: start; }
+  .two { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  figure { margin: 0; display: grid; gap: 2px; } figure canvas { width: 100%; height: auto; display: block; border-radius: 4px; image-rendering: pixelated; }
+  figcaption { font-size: 12px; color: var(--muted); } figcaption b { color: var(--ink); display: block; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  pre { margin: 0; padding: 8px 10px; background: #f6f7f9; border-radius: 8px; font: 11.5px/1.5 ui-monospace, "JetBrains Mono", monospace; white-space: pre-wrap; word-break: break-all; }
+  .ok { color: #1f7a4d; font-weight: 700; } .bad { color: #b3261e; font-weight: 700; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section>
+  <h2>1 从一小块样图生成大图：拼块怎样衔接，决定了接缝是否可见</h2>
+  <p class="sub">样图 128 × 128，生成 256 × 256。每次从样图中取一块 32 × 32 的方块放上去，方块之间重叠 6 个像素。</p>
+  <div class="row" id="row1"></div>
+</section>
+<section>
+  <h2>2 可控性：方块大小是最重要的参数</h2>
+  <p class="sub">方块太小，砖块的结构被打碎；方块太大，输出只是在重复样图的大片区域，与直接平铺差别不大。</p>
+  <div class="row" id="row2"><p class="sub">三张图都用最小误差切线，只改变方块大小（重叠约为方块的五分之一）。</p></div>
+</section>
+<section>
+  <div class="two">
+    <div style="display:grid;gap:8px">
+      <h2>3 评价：不止一个数字</h2>
+      <table id="t"><tr><th>结果</th><th>接缝误差</th><th>颜色分布差异</th><th>重复使用同一来源</th><th>用时</th></tr></table>
+      <p class="sub">接缝误差：在拼块交界处，新块的内容与“旧块如果继续延伸”的内容之间的平均亮度差（0—255），越小越看不出接缝。颜色分布差异：输出与样图的亮度直方图之间的距离，越小越接近。重复使用：来源位置相同（相差不超过 4 像素）的方块所占比例。</p>
+      <h2>重复性</h2>
+      <table id="rep"><tr><th>运行</th><th>输出图像的 SHA-256（前 16 位）</th><th>结论</th></tr></table>
+    </div>
+    <div style="display:grid;gap:8px">
+      <h2>来源与编辑记录（随图保存）</h2>
+      <pre id="prov"></pre>
+    </div>
+  </div>
+</section>
+<script type="module">
+const $ = id => document.getElementById(id);
+const E = 128, OUT = 256;
+function rng(seed) { let s = seed >>> 0 || 1; return () => (s = (s * 16807) % 2147483647) / 2147483647; }
+// ---------- 样图：砖墙（程序生成，可以自由使用） ----------
+function makeExemplar() {
+  const c = document.createElement('canvas'); c.width = c.height = E; const g = c.getContext('2d'), r = rng(42);
+  g.fillStyle = '#cfc6b6'; g.fillRect(0, 0, E, E);   // 灰缝
+  const bw = 30, bh = 14;
+  for (let row = 0; row * (bh + 3) < E + bh; row++) for (let col = -1; col * (bw + 3) < E + bw; col++) {
+    const x = col * (bw + 3) + (row % 2 ? 16 : 0), y = row * (bh + 3), t = r();
+    g.fillStyle = `rgb(${150 + t * 50 | 0},${70 + t * 25 | 0},${50 + t * 15 | 0})`; g.fillRect(x, y, bw, bh);
+  }
+  const im = g.getImageData(0, 0, E, E);
+  for (let k = 0; k < E * E; k++) { const n = (r() - 0.5) * 26; for (let ch = 0; ch < 3; ch++) im.data[4 * k + ch] = Math.max(0, Math.min(255, im.data[4 * k + ch] + n)); }
+  return im.data;
+}
+const EX = makeExemplar();
+const lum = (d, k) => 0.299 * d[4 * k] + 0.587 * d[4 * k + 1] + 0.114 * d[4 * k + 2];
+
+// ---------- 图像缝合（Efros 与 Freeman，2001）的三个版本 ----------
+function quilt({ B = 32, O = 6, mode = 'cut', seed = 1, tol = 0.1 }) {
+  const r = rng(seed), out = new Uint8ClampedArray(OUT * OUT * 4), step = B - O, n = Math.ceil((OUT - O) / step), src = [], label = new Int32Array(OUT * OUT).fill(-1);
+  const errAt = (sx, sy, ox, oy) => {   // 候选块与已放内容在重叠区的平方差之和
+    let e = 0;
+    for (let y = 0; y < B; y++) { const xmax = oy > 0 && y < O ? B : ox > 0 ? O : 0; for (let x = 0; x < xmax; x++) {   // 只遍历重叠区
+      const X = ox + x, Y = oy + y; if (X >= OUT || Y >= OUT) continue;
+      const a = 4 * (Y * OUT + X), b = 4 * ((sy + y) * E + sx + x);
+      for (let c = 0; c < 3; c++) { const d = out[a + c] - EX[b + c]; e += d * d; }
+    } }
+    return e;
+  };
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const ox = i * step, oy = j * step; let sx, sy;
+    if (mode === 'random' || (i === 0 && j === 0)) { sx = Math.floor(r() * (E - B)); sy = Math.floor(r() * (E - B)); }
+    else {   // 在所有候选位置中找误差最小的，再从“误差不超过最小值 (1 ＋ tol) 倍”的候选里随机选一个
+      const cand = []; let best = Infinity;
+      for (let y = 0; y <= E - B; y += 2) for (let x = 0; x <= E - B; x += 2) { const e = errAt(x, y, ox, oy); cand.push([e, x, y]); if (e < best) best = e; }
+      const ok = cand.filter(c => c[0] <= best * (1 + tol)); const pick = ok[Math.floor(r() * ok.length)]; sx = pick[1]; sy = pick[2];
+    }
+    src.push([sx, sy, ox, oy]);
+    // 最小误差边界：在重叠区用动态规划找一条误差最小的切线，切线一侧保留旧内容
+    const keepOld = new Uint8Array(B * B);
+    if (mode === 'cut') {
+      const cut = (vertical) => {
+        if (!(vertical ? ox > 0 : oy > 0)) return;
+        const L = B, Wd = O, cost = new Float32Array(L * Wd), back = new Int8Array(L * Wd);
+        for (let a = 0; a < L; a++) for (let w = 0; w < Wd; w++) {
+          const x = vertical ? w : a, y = vertical ? a : w, X = ox + x, Y = oy + y;
+          let e = 0; if (X < OUT && Y < OUT) { const p = 4 * (Y * OUT + X), q = 4 * ((sy + y) * E + sx + x); for (let c = 0; c < 3; c++) { const d = out[p + c] - EX[q + c]; e += d * d; } }
+          if (a === 0) { cost[w] = e; continue; }
+          let bestPrev = Infinity, bw = 0; for (let dw = -1; dw <= 1; dw++) { const ww = w + dw; if (ww < 0 || ww >= Wd) continue; const v = cost[(a - 1) * Wd + ww]; if (v < bestPrev) { bestPrev = v; bw = dw; } }
+          cost[a * Wd + w] = e + bestPrev; back[a * Wd + w] = bw;
+        }
+        let w = 0; for (let k = 1; k < Wd; k++) if (cost[(L - 1) * Wd + k] < cost[(L - 1) * Wd + w]) w = k;
+        for (let a = L - 1; a >= 0; a--) { for (let k = 0; k < w; k++) { const x = vertical ? k : a, y = vertical ? a : k; keepOld[y * B + x] = 1; } w += back[a * Wd + w]; }
+      };
+      cut(true); cut(false);
+    }
+    for (let y = 0; y < B; y++) for (let x = 0; x < B; x++) {
+      const X = ox + x, Y = oy + y; if (X >= OUT || Y >= OUT || keepOld[y * B + x]) continue;
+      const a = 4 * (Y * OUT + X), b = 4 * ((sy + y) * E + sx + x); out[a] = EX[b]; out[a + 1] = EX[b + 1]; out[a + 2] = EX[b + 2]; out[a + 3] = 255; label[Y * OUT + X] = src.length - 1;
+    }
+  }
+  return { img: out, src, B, O, label };
+}
+// ---------- 评价 ----------
+function seamEnergy({ img, label, src }) {   // 接缝误差：相邻两个像素来自不同的块 A、B 时，比较 B 在这里的内容与“如果 A 继续延伸过来”的内容
+  let sum = 0, n = 0;
+  const check = (pk, qx, qy) => { const a = label[pk], b = label[qy * OUT + qx]; if (a < 0 || b < 0 || a === b) return;
+    const [sx, sy, ox, oy] = src[a], ex = sx + qx - ox, ey = sy + qy - oy; if (ex < 0 || ey < 0 || ex >= E || ey >= E) return;
+    sum += Math.abs(lum(img, qy * OUT + qx) - lum(EX, ey * E + ex)); n++; };
+  for (let y = 0; y < OUT; y++) for (let x = 0; x < OUT; x++) { const k = y * OUT + x; if (x + 1 < OUT) check(k, x + 1, y); if (y + 1 < OUT) check(k, x, y + 1); }
+  return sum / n;
+}
+function histDist(img) {
+  const h = (d, n) => { const b = new Float32Array(32); for (let k = 0; k < n; k++) b[Math.min(31, Math.floor(lum(d, k) / 8))]++; return b.map(v => v / n); };
+  const a = h(img, OUT * OUT), b = h(EX, E * E); let s = 0; for (let k = 0; k < 32; k++) s += Math.abs(a[k] - b[k]); return s / 2;   // 总变差距离，0—1
+}
+function reuse(src) { let same = 0; src.forEach((p, i) => { if (src.some((q, j) => j !== i && Math.abs(p[0] - q[0]) <= 4 && Math.abs(p[1] - q[1]) <= 4)) same++; }); return same / src.length; }
+async function sha256(bytes) { const h = await crypto.subtle.digest('SHA-256', bytes); return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join(''); }
+// ---------- 显示 ----------
+function toCanvas(data, size) { const c = document.createElement('canvas'); c.width = c.height = size; const g = c.getContext('2d'), im = g.createImageData(size, size); im.data.set(data); g.putImageData(im, 0, 0); return c; }
+function figure(parent, canvas, title, note) { const f = document.createElement('figure'); f.append(canvas); f.insertAdjacentHTML('beforeend', `<figcaption><b>${title}</b>${note}</figcaption>`); $(parent).append(f); }
+const results = [];
+function runCase(parent, title, opts) {
+  const t0 = performance.now(), q = quilt(opts), ms = performance.now() - t0;
+  const r = { title, opts, q, ms, seam: seamEnergy(q), hist: histDist(q.img), reuse: reuse(q.src) };
+  results.push(r); figure(parent, toCanvas(q.img, OUT), title, `接缝误差 ${r.seam.toFixed(1)}`); return r;
+}
+figure('row1', toCanvas(EX, E), '样图', '128 × 128');
+runCase('row1', '随机取块', { mode: 'random', seed: 1 });
+runCase('row1', '按重叠区挑选', { mode: 'match', seed: 1 });
+const main = runCase('row1', '挑选 ＋ 最小误差切线', { mode: 'cut', seed: 1 });
+runCase('row2', '方块 12 × 12', { mode: 'cut', seed: 1, B: 12, O: 3 });
+runCase('row2', '方块 32 × 32（同上）', { mode: 'cut', seed: 1, B: 32, O: 6 });
+runCase('row2', '方块 64 × 64', { mode: 'cut', seed: 1, B: 64, O: 10 });
+for (const r of results) { const tr = $('t').insertRow(); [r.title, r.seam.toFixed(1), r.hist.toFixed(3), `${(r.reuse * 100).toFixed(0)}%`, `${r.ms.toFixed(0)} 毫秒`].forEach(v => tr.insertCell().textContent = v); }
+// 重复性：同一种子再运行一次，以及换一个种子
+const h1 = await sha256(main.q.img), h2 = await sha256(quilt({ mode: 'cut', seed: 1 }).img), h3 = await sha256(quilt({ mode: 'cut', seed: 2 }).img);
+for (const [name, h, ok] of [['种子 1，第一次', h1, '—'], ['种子 1，再运行一次', h2, h2 === h1 ? '与第一次完全相同' : '不同！'], ['种子 2', h3, h3 !== h1 ? '不同（换种子得到新结果）' : '相同？']]) { const tr = $('rep').insertRow(); [name, h.slice(0, 16), ok].forEach(v => tr.insertCell().textContent = v); }
+// 来源与编辑记录
+const exHash = await sha256(EX);
+const record = {
+  输出: { 尺寸: `${OUT}×${OUT}`, sha256: h1 },
+  来源: { 样图: '程序生成的砖墙（本页 makeExemplar，种子 42）', 样图sha256: exHash, 使用条件: '自行生成，无第三方素材' },
+  方法: { 名称: '图像缝合（Efros 与 Freeman，2001）', 方块: 32, 重叠: 6, 候选容差: 0.1, 切线: '最小误差边界（动态规划）', 种子: 1 },
+  编辑记录: [
+    { 步骤: 1, 操作: '生成', 参数: '方块 12、32、64 三档比较后选择 32' },
+    { 步骤: 2, 操作: '人工检查', 说明: '接缝误差在三种拼法中最低；左上角首块为随机选取' }
+  ],
+  环境: { 浏览器: navigator.userAgent.match(/(Chrome|Firefox|Safari)\/[\d.]+/)?.[0] || '未知', 日期: new Date().toISOString().slice(0, 10) }
+};
+$('prov').textContent = JSON.stringify(record, null, 2);
+window.__syn = { results: results.map(r => ({ title: r.title, seam: r.seam, hist: r.hist, reuse: r.reuse, ms: r.ms })), same: h1 === h2, diff: h1 !== h3, h1: h1.slice(0, 16), h3: h3.slice(0, 16) };
+</script>
+</body>
+</html>

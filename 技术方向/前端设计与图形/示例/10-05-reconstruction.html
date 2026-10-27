@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>重建与新视角：从轮廓雕刻出形状</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .row4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  figure { margin: 0; display: grid; gap: 2px; } figure canvas { width: 100%; height: auto; display: block; border-radius: 6px; background: #f6f7f9; }
+  figcaption { font-size: 12px; color: var(--muted); } figcaption b { color: var(--ink); display: block; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; color: var(--muted); font-size: 12px; } .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; } th { color: var(--muted); font-weight: 400; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section>
+  <h2>1 相机越多，雕刻出的形状越接近——但凹进去的地方永远补不回来</h2>
+  <p class="sub">相机围成一圈，每台只拍到一条“剪影”（哪些方向被物体挡住）。把每台相机看来是空的地方挖掉，剩下的就是“视觉外壳”。</p>
+  <div class="row4" id="rowN"></div>
+  <div class="legend"><span><i style="background:#2f6fdb"></i>重建出的、正确的部分</span><span><i style="background:#f3b13b"></i>多出来的（实际是空的）</span><span><i style="background:#e4572e"></i>漏掉的（实际有东西）</span><span>黑线：真实形状</span><span>灰色小三角：相机</span></div>
+</section>
+<section>
+  <h2>2 相机位置估计不准：36 台相机，朝向带有随机误差</h2>
+  <p class="sub">剪影是按真实朝向拍的，雕刻时却用了估计的朝向。误差越大，越多真实存在的部分被错误地挖掉。</p>
+  <div class="row4" id="rowNoise"></div>
+</section>
+<section>
+  <h2>3 结果</h2>
+  <table id="t"><tr><th>设置</th><th>面积重合（IoU）</th><th>多出来的面积</th><th>漏掉的面积</th><th>新视角剪影的重合度</th></tr></table>
+  <p class="sub">“新视角”是一台不在输入中的相机（位于两台输入相机之间）。面积以真实形状面积的百分比表示。</p>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+// ---------- 真实场景：一个开口向右的“C”和一个小圆 ----------
+const circle = (x, y, cx, cy, r) => Math.hypot(x - cx, y - cy) - r;
+function box(x, y, cx, cy, hx, hy) { const dx = Math.abs(x - cx) - hx, dy = Math.abs(y - cy) - hy; return Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) + Math.min(Math.max(dx, dy), 0); }
+function scene(x, y) {
+  let c = Math.max(circle(x, y, -0.2, 0.05, 0.55), -circle(x, y, -0.12, 0.05, 0.36));   // 圆环
+  c = Math.max(c, -box(x, y, 0.35, 0.05, 0.3, 0.14));                                   // 在右侧切开一个窄口，形成很深的凹槽
+  return Math.min(c, circle(x, y, 0.62, -0.5, 0.16));                                   // 另一个小物体
+}
+// ---------- 一维相机 ----------
+const RES = 600, FOV = 70 * Math.PI / 180, DIST = 2.3;
+function camera(theta, yawError = 0) { const px = Math.cos(theta) * DIST, py = Math.sin(theta) * DIST, fwd = Math.atan2(-py, -px); return { px, py, fwd, assumedFwd: fwd + yawError, theta }; }
+function rayHits(ox, oy, a) {   // 沿射线做球体追踪（每步走“到表面的距离”那么远）
+  const dx = Math.cos(a), dy = Math.sin(a); let t = 0;
+  for (let k = 0; k < 200 && t < 5; k++) { const d = scene(ox + dx * t, oy + dy * t); if (d < 1e-3) return true; t += Math.max(d, 2e-3); }
+  return false;
+}
+function silhouette(cam) { const s = new Uint8Array(RES); for (let i = 0; i < RES; i++) { const a = cam.fwd + Math.atan(Math.tan(FOV / 2) * ((i + 0.5) / RES * 2 - 1)); s[i] = rayHits(cam.px, cam.py, a); } return s; }
+function pixelOf(cam, x, y, fwd) { let a = Math.atan2(y - cam.py, x - cam.px) - fwd; a = Math.atan2(Math.sin(a), Math.cos(a)); if (Math.abs(a) >= FOV / 2) return -1; return Math.floor((Math.tan(a) / Math.tan(FOV / 2) * 0.5 + 0.5) * RES); }
+// ---------- 雕刻 ----------
+const G = 260, cellX = i => -1.05 + 2.1 * (i + 0.5) / G;
+const truthGrid = new Uint8Array(G * G); for (let j = 0; j < G; j++) for (let i = 0; i < G; i++) truthGrid[j * G + i] = scene(cellX(i), cellX(j)) < 0;
+const truthArea = truthGrid.reduce((s, v) => s + v, 0);
+function carve(cams, sils) {
+  const g = new Uint8Array(G * G).fill(1);
+  for (let j = 0; j < G; j++) for (let i = 0; i < G; i++) {
+    const x = cellX(i), y = cellX(j);
+    for (let k = 0; k < cams.length; k++) { const p = pixelOf(cams[k], x, y, cams[k].assumedFwd); if (p < 0 || !sils[k][p]) { g[j * G + i] = 0; break; } }
+  }
+  return g;
+}
+function silhouetteOfGrid(g, cam) {   // 用重建结果从新视角拍一张剪影
+  const s = new Uint8Array(RES);
+  for (let i = 0; i < RES; i++) { const a = cam.fwd + Math.atan(Math.tan(FOV / 2) * ((i + 0.5) / RES * 2 - 1)), dx = Math.cos(a), dy = Math.sin(a);
+    for (let t = 1.0; t < 3.6; t += 0.004) { const x = cam.px + dx * t, y = cam.py + dy * t, ii = Math.floor((x + 1.05) / 2.1 * G), jj = Math.floor((y + 1.05) / 2.1 * G);
+      if (ii >= 0 && jj >= 0 && ii < G && jj < G && g[jj * G + ii]) { s[i] = 1; break; } } }
+  return s;
+}
+let seed = 3; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const gauss = () => Math.sqrt(-2 * Math.log(rnd() + 1e-12)) * Math.cos(2 * Math.PI * rnd());
+function run(N, sigmaDeg) {
+  seed = 3; const off = 0.3;
+  const cams = Array.from({ length: N }, (_, k) => camera(off + 2 * Math.PI * k / N, gauss() * sigmaDeg * Math.PI / 180));
+  const sils = cams.map(c => silhouette(c)), g = carve(cams, sils);
+  let inter = 0, uni = 0, extra = 0, miss = 0;
+  for (let k = 0; k < G * G; k++) { inter += g[k] & truthGrid[k]; uni += g[k] | truthGrid[k]; if (g[k] && !truthGrid[k]) extra++; if (!g[k] && truthGrid[k]) miss++; }
+  const nv = camera(off + Math.PI / N + 0.05), ts = silhouette(nv), rs = silhouetteOfGrid(g, nv);
+  let si = 0, su = 0; for (let i = 0; i < RES; i++) { si += ts[i] & rs[i]; su += ts[i] | rs[i]; }
+  return { N, sigmaDeg, cams, g, iou: inter / uni, extra: extra / truthArea, miss: miss / truthArea, novel: si / su, nv };
+}
+// ---------- 绘制 ----------
+const S = 270;
+function draw(r) {
+  const c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d'), im = g.createImageData(S, S);
+  const toW = v => -1.25 + 2.5 * v / S;
+  for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
+    const x = toW(i + 0.5), y = -toW(j + 0.5), ii = Math.floor((x + 1.05) / 2.1 * G), jj = Math.floor((y + 1.05) / 2.1 * G), k = (j * S + i) * 4;
+    const inside = ii >= 0 && jj >= 0 && ii < G && jj < G, rec = inside && r.g[jj * G + ii], tru = scene(x, y) < 0;
+    const col = rec && tru ? [47, 111, 219] : rec ? [243, 177, 59] : tru ? [228, 87, 46] : [246, 247, 249];
+    im.data.set([...col, 255], k);
+  }
+  g.putImageData(im, 0, 0);
+  const P = (x, y) => [(x + 1.25) / 2.5 * S, (1.25 - y) / 2.5 * S];
+  g.strokeStyle = '#1d2330'; g.lineWidth = 1.2;   // 真实轮廓
+  for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) { const x = toW(i + 0.5), y = -toW(j + 0.5); if ((scene(x, y) < 0) !== (scene(toW(i + 1.5), y) < 0) || (scene(x, y) < 0) !== (scene(x, -toW(j + 1.5)) < 0)) { g.fillStyle = '#1d2330'; g.fillRect(i, j, 1, 1); } }
+  // 相机：画在场景边缘的方向上
+  for (const cam of r.cams) { const a = Math.atan2(cam.py, cam.px), [cx, cy] = P(Math.cos(a) * 1.18, Math.sin(a) * 1.18); g.save(); g.translate(cx, cy); g.rotate(-cam.assumedFwd); g.fillStyle = '#7d8696'; g.beginPath(); g.moveTo(6, 0); g.lineTo(-4, -4); g.lineTo(-4, 4); g.fill(); g.restore(); }
+  const a = Math.atan2(r.nv.py, r.nv.px), [nx, ny] = P(Math.cos(a) * 1.18, Math.sin(a) * 1.18); g.strokeStyle = '#1f7a4d'; g.lineWidth = 2; g.beginPath(); g.arc(nx, ny, 6, 0, 7); g.stroke();
+  return c;
+}
+function figure(parent, canvas, title, note) { const f = document.createElement('figure'); f.append(canvas); f.insertAdjacentHTML('beforeend', `<figcaption><b>${title}</b>${note}</figcaption>`); $(parent).append(f); }
+const results = [];
+for (const N of [3, 6, 12, 36]) { const r = run(N, 0); results.push(r); figure('rowN', draw(r), `${N} 台相机`, `IoU ${r.iou.toFixed(3)}，多出 ${(r.extra * 100).toFixed(1)}%`); }
+for (const s of [0, 0.5, 1, 3]) { const r = run(36, s); results.push(r); figure('rowNoise', draw(r), `朝向误差 ${s}°`, `IoU ${r.iou.toFixed(3)}，漏掉 ${(r.miss * 100).toFixed(1)}%`); }
+for (const r of results) { const tr = $('t').insertRow(); [`${r.N} 台相机，朝向误差 ${r.sigmaDeg}°`, r.iou.toFixed(3), `${(r.extra * 100).toFixed(1)}%`, `${(r.miss * 100).toFixed(1)}%`, r.novel.toFixed(3)].forEach(v => tr.insertCell().textContent = v); }
+window.__rec = results.map(r => ({ N: r.N, sigma: r.sigmaDeg, iou: r.iou, extra: r.extra, miss: r.miss, novel: r.novel }));
+</script>
+</body>
+</html>

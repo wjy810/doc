@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>场景表示：同一个形状的五种存法</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .grid { display: grid; grid-template-columns: 70px repeat(6, minmax(0, 1fr)); gap: 8px; align-items: center; }
+  .grid .lab { font-size: 12px; color: var(--muted); }
+  .grid .head { font-weight: 700; font-size: 12px; }
+  canvas { width: 100%; height: auto; display: block; border-radius: 4px; background: #f6f7f9; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  .na { color: #9aa3b2; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section>
+  <h2>同一个形状，五种表示，每种都只用约 1.2 KB</h2>
+  <p class="sub">形状有一个洞和一根很细的柄（最细处约为画面宽度的 3.5%）。第二行放大细柄附近的区域；第三行在右上角并上一个圆，看哪种表示容易编辑。</p>
+  <div class="grid" id="grid"></div>
+  <table id="t"><tr><th>表示</th><th>存储内容</th><th>大小</th><th>面积重合（IoU）</th><th>边界误差</th><th>细柄</th><th>并上一个圆</th></tr></table>
+  <p class="sub" id="note"></p>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+// ---------- 真实形状：用有向距离函数描述（负数在内部） ----------
+const circle = (x, y, cx, cy, r) => Math.hypot(x - cx, y - cy) - r;
+function segment(x, y, ax, ay, bx, by, r) { const px = x - ax, py = y - ay, dx = bx - ax, dy = by - ay, h = Math.max(0, Math.min(1, (px * dx + py * dy) / (dx * dx + dy * dy))); return Math.hypot(px - dx * h, py - dy * h) - r; }
+function smin(a, b, k) { const h = Math.max(0, Math.min(1, 0.5 + 0.5 * (b - a) / k)); return b * (1 - h) + a * h - k * h * (1 - h); }
+function truth(x, y) {
+  let d = smin(circle(x, y, -0.18, 0.02, 0.52), circle(x, y, 0.42, 0.28, 0.32), 0.18);
+  d = Math.max(d, -circle(x, y, -0.22, 0.06, 0.17));                      // 挖一个洞
+  d = Math.min(d, segment(x, y, 0.32, -0.25, 0.80, -0.68, 0.035));        // 一根细柄
+  return d;
+}
+const EDIT = (x, y) => circle(x, y, 0.62, 0.62, 0.2);                    // 编辑：并上这个圆
+const truthEdited = (x, y) => Math.min(truth(x, y), EDIT(x, y));
+
+// ---------- 等值线提取（行进方块），用于多边形与点 ----------
+function contours(f, N) {
+  const v = new Float32Array((N + 1) * (N + 1)), P = (i) => -1 + 2 * i / N;
+  for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) v[j * (N + 1) + i] = f(P(i), P(j));
+  const segs = [], interp = (x0, y0, a, x1, y1, b) => { const t = a / (a - b); return [x0 + (x1 - x0) * t, y0 + (y1 - y0) * t]; };
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const a = v[j * (N + 1) + i], b = v[j * (N + 1) + i + 1], c = v[(j + 1) * (N + 1) + i + 1], d = v[(j + 1) * (N + 1) + i];
+    const x0 = P(i), x1 = P(i + 1), y0 = P(j), y1 = P(j + 1), pts = [];
+    if ((a < 0) !== (b < 0)) pts.push(interp(x0, y0, a, x1, y0, b));
+    if ((b < 0) !== (c < 0)) pts.push(interp(x1, y0, b, x1, y1, c));
+    if ((c < 0) !== (d < 0)) pts.push(interp(x1, y1, c, x0, y1, d));
+    if ((d < 0) !== (a < 0)) pts.push(interp(x0, y1, d, x0, y0, a));
+    if (pts.length === 2) segs.push(pts); else if (pts.length === 4) { segs.push([pts[0], pts[1]]); segs.push([pts[2], pts[3]]); }
+  }
+  // 把线段按端点串成闭合环
+  const key = p => `${p[0].toFixed(6)},${p[1].toFixed(6)}`, adj = new Map();
+  segs.forEach((s, k) => { for (const p of s) { const kk = key(p); if (!adj.has(kk)) adj.set(kk, []); adj.get(kk).push(k); } });
+  const used = new Uint8Array(segs.length), loops = [];
+  for (let k = 0; k < segs.length; k++) {
+    if (used[k]) continue; used[k] = 1; const loop = [segs[k][0], segs[k][1]];
+    for (;;) { const end = loop[loop.length - 1], nxt = (adj.get(key(end)) || []).find(m => !used[m]); if (nxt === undefined) break; used[nxt] = 1; const s = segs[nxt]; loop.push(key(s[0]) === key(end) ? s[1] : s[0]); }
+    loops.push(loop);
+  }
+  return loops;
+}
+function douglasPeucker(pts, eps) {   // 道格拉斯—普克：去掉偏离不超过 eps 的点
+  if (pts.length < 3) return pts;
+  const [ax, ay] = pts[0], [bx, by] = pts[pts.length - 1]; let idx = 0, dmax = 0;
+  for (let i = 1; i < pts.length - 1; i++) { const [px, py] = pts[i], L = Math.hypot(bx - ax, by - ay) || 1e-9, d = Math.abs((bx - ax) * (ay - py) - (ax - px) * (by - ay)) / L; if (d > dmax) { dmax = d; idx = i; } }
+  if (dmax <= eps) return [pts[0], pts[pts.length - 1]];
+  return douglasPeucker(pts.slice(0, idx + 1), eps).slice(0, -1).concat(douglasPeucker(pts.slice(idx), eps));
+}
+function simplifyLoop(loop, eps) {   // 闭合轮廓首尾相同，先在离起点最远处切成两段，再分别简化
+  let k = 0, dmax = 0; loop.forEach(([x, y], i) => { const d = Math.hypot(x - loop[0][0], y - loop[0][1]); if (d > dmax) { dmax = d; k = i; } });
+  return douglasPeucker(loop.slice(0, k + 1), eps).slice(0, -1).concat(douglasPeucker(loop.slice(k), eps)).slice(0, -1);
+}
+const BUDGET = 1200;   // 每种表示约 1200 字节
+
+// ---------- 五种表示 ----------
+const reps = [];
+// 1 多边形：轮廓 ＋ 简化到 150 个顶点（每个顶点两个 32 位浮点数）
+(function () {
+  const loops = contours(truth, 256); let lo = 0, hi = 0.05, poly;
+  for (let k = 0; k < 30; k++) { const eps = (lo + hi) / 2; poly = loops.map(l => simplifyLoop(l, eps)); const n = poly.reduce((s, l) => s + l.length, 0); if (n > BUDGET / 8) lo = eps; else hi = eps; }
+  poly = loops.map(l => simplifyLoop(l, hi));
+  const n = poly.reduce((s, l) => s + l.length, 0);
+  const inside = (x, y) => { let c = false; for (const l of poly) for (let i = 0, j = l.length - 1; i < l.length; j = i++) { const [xi, yi] = l[i], [xj, yj] = l[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
+  reps.push({ name: '多边形', what: `${poly.length} 个闭合轮廓、${n} 个顶点`, bytes: n * 8, inside, edit: null, editNote: '要用多边形布尔运算' });
+})();
+// 2 点：只在边界上取 150 个点，没有连接关系，也不知道哪边是内部
+(function () {
+  const loops = contours(truth, 256), all = loops.flat(), n = Math.floor(BUDGET / 8), pts = [];
+  let len = 0; const cum = [0]; for (const l of loops) for (let i = 1; i < l.length; i++) { len += Math.hypot(l[i][0] - l[i - 1][0], l[i][1] - l[i - 1][1]); cum.push(len); }
+  const flat = []; for (const l of loops) for (let i = 1; i < l.length; i++) flat.push([l[i - 1], l[i]]);
+  for (let k = 0; k < n; k++) { const target = (k + 0.5) / n * len; let i = cum.findIndex(c => c >= target); i = Math.max(1, i); const [a, b] = flat[i - 1], t = (target - cum[i - 1]) / (cum[i] - cum[i - 1] || 1); pts.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]); }
+  reps.push({ name: '点', what: `边界上的 ${n} 个点`, bytes: n * 8, points: pts, edit: null, editNote: '要重新采样，并删去被覆盖的点' });
+})();
+// 3 像素网格：96 × 96，每格 1 位
+(function () {
+  const R = 96, g = new Uint8Array(R * R); for (let j = 0; j < R; j++) for (let i = 0; i < R; i++) g[j * R + i] = truth(-1 + 2 * (i + 0.5) / R, -1 + 2 * (j + 0.5) / R) < 0;
+  const cell = (x, y) => { const i = Math.floor((x + 1) / 2 * R), j = Math.floor((y + 1) / 2 * R); return i >= 0 && j >= 0 && i < R && j < R && g[j * R + i]; };
+  reps.push({ name: '像素网格', what: `${R} × ${R} 个格子，每格 1 位`, bytes: R * R / 8, inside: cell, edit: (x, y) => cell(x, y) || EDIT(x, y) < 0, editNote: '逐格取“或”' });
+})();
+// 4 距离场：34 × 34 个有向距离，量化为 8 位，用双线性插值重建
+(function () {
+  const R = 34, C = 0.3, q = new Uint8Array(R * R);
+  for (let j = 0; j < R; j++) for (let i = 0; i < R; i++) { const d = Math.max(-C, Math.min(C, truth(-1 + 2 * i / (R - 1), -1 + 2 * j / (R - 1)))); q[j * R + i] = Math.round((d / C * 0.5 + 0.5) * 255); }
+  const sdf = (x, y) => { const fx = (x + 1) / 2 * (R - 1), fy = (y + 1) / 2 * (R - 1), i = Math.max(0, Math.min(R - 2, Math.floor(fx))), j = Math.max(0, Math.min(R - 2, Math.floor(fy))), u = fx - i, v = fy - j;
+    const at = (a, b) => (q[b * R + a] / 255 - 0.5) * 2 * C; return (at(i, j) * (1 - u) + at(i + 1, j) * u) * (1 - v) + (at(i, j + 1) * (1 - u) + at(i + 1, j + 1) * u) * v; };
+  reps.push({ name: '距离场（隐式）', what: `${R} × ${R} 个距离值，每个 8 位`, bytes: R * R, inside: (x, y) => sdf(x, y) < 0, edit: (x, y) => Math.min(sdf(x, y), EDIT(x, y)) < 0, editNote: '取两个距离的较小值' });
+})();
+// 5 高斯：50 个椭圆形的“软斑点”，用梯度下降拟合（每个 6 个数：中心 2、形状 3、权重 1）
+(function () {
+  const K = Math.floor(BUDGET / 24), N = 64, T = new Float32Array(N * N), X = new Float32Array(N * N), Y = new Float32Array(N * N);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const x = -1 + 2 * (i + 0.5) / N, y = -1 + 2 * (j + 0.5) / N; X[j * N + i] = x; Y[j * N + i] = y; T[j * N + i] = truth(x, y) < 0 ? 1 : 0; }
+  let s = 7; const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
+  const inside = []; for (let k = 0; k < N * N; k++) if (T[k]) inside.push(k);
+  // 参数：中心 (cx, cy)、精度矩阵的楚列斯基因子 (a, b, c)、权重 w
+  const P = []; for (let k = 0; k < K; k++) { const p = inside[Math.floor(rnd() * inside.length)]; P.push([X[p], Y[p], 9, 0, 9, 1.2]); }
+  const m = P.map(p => p.map(() => 0)), v = P.map(p => p.map(() => 0)), SHARP = 10, lr = 0.02;
+  const density = (x, y) => { let D = 0; for (const [cx, cy, a, b, c, w] of P) { const dx = x - cx, dy = y - cy, u = a * dx + b * dy, z = c * dy; D += w * Math.exp(-0.5 * (u * u + z * z)); } return D; };
+  for (let it = 1; it <= 400; it++) {
+    const G = P.map(p => p.map(() => 0));
+    for (let k = 0; k < N * N; k++) {
+      const x = X[k], y = Y[k]; let D = 0; const e = new Float32Array(K);
+      for (let q = 0; q < K; q++) { const [cx, cy, a, b, c, w] = P[q], dx = x - cx, dy = y - cy, u = a * dx + b * dy, z = c * dy; e[q] = Math.exp(-0.5 * (u * u + z * z)); D += w * e[q]; }
+      const o = 1 / (1 + Math.exp(-SHARP * (D - 0.5))), g = 2 * (o - T[k]) * o * (1 - o) * SHARP;   // 损失：(o − 目标)²
+      if (Math.abs(g) < 1e-5) continue;
+      for (let q = 0; q < K; q++) { const [cx, cy, a, b, c, w] = P[q], dx = x - cx, dy = y - cy, u = a * dx + b * dy, z = c * dy, ge = g * w * e[q];
+        G[q][5] += g * e[q];
+        G[q][0] += ge * (u * a); G[q][1] += ge * (u * b + z * c);
+        G[q][2] += ge * (-u * dx); G[q][3] += ge * (-u * dy); G[q][4] += ge * (-z * dy); }
+    }
+    for (let q = 0; q < K; q++) for (let r = 0; r < 6; r++) {   // Adam 优化器
+      const gr = G[q][r] / (N * N) * 50; m[q][r] = 0.9 * m[q][r] + 0.1 * gr; v[q][r] = 0.999 * v[q][r] + 0.001 * gr * gr;
+      P[q][r] -= lr * (r >= 2 && r <= 4 ? 10 : 1) * (m[q][r] / (1 - 0.9 ** it)) / (Math.sqrt(v[q][r] / (1 - 0.999 ** it)) + 1e-8);
+    }
+  }
+  const D = density;
+  reps.push({ name: '高斯斑点', what: `${K} 个二维高斯，梯度下降 400 步`, bytes: K * 6 * 4, inside: (x, y) => D(x, y) > 0.5, edit: (x, y) => D(x, y) + Math.exp(-0.5 * ((x - 0.62) ** 2 + (y - 0.62) ** 2) / 0.012) > 0.5, editNote: '加一个高斯（形状只能近似）' });
+})();
+
+// ---------- 评价：在 512 × 512 上比较 ----------
+const E = 512, P = i => -1 + 2 * (i + 0.5) / E;
+function raster(fn) { const g = new Uint8Array(E * E); for (let j = 0; j < E; j++) for (let i = 0; i < E; i++) g[j * E + i] = fn(P(i), P(j)) ? 1 : 0; return g; }
+function boundary(g) { const out = []; for (let j = 1; j < E - 1; j++) for (let i = 1; i < E - 1; i++) { const k = j * E + i; if (g[k] && (!g[k - 1] || !g[k + 1] || !g[k - E] || !g[k + E])) out.push([P(i), P(j)]); } return out; }
+function distanceField(pts) {   // 两遍扫描的近似距离变换：每个像素到最近边界点的距离
+  const d = new Float32Array(E * E).fill(1e9), px = 2 / E;
+  for (const [x, y] of pts) { const i = Math.round((x + 1) / 2 * E - 0.5), j = Math.round((y + 1) / 2 * E - 0.5); if (i >= 0 && j >= 0 && i < E && j < E) d[j * E + i] = 0; }
+  const a = 1, b = Math.SQRT2;
+  for (let j = 0; j < E; j++) for (let i = 0; i < E; i++) { const k = j * E + i; if (i > 0) d[k] = Math.min(d[k], d[k - 1] + a); if (j > 0) { d[k] = Math.min(d[k], d[k - E] + a); if (i > 0) d[k] = Math.min(d[k], d[k - E - 1] + b); if (i < E - 1) d[k] = Math.min(d[k], d[k - E + 1] + b); } }
+  for (let j = E - 1; j >= 0; j--) for (let i = E - 1; i >= 0; i--) { const k = j * E + i; if (i < E - 1) d[k] = Math.min(d[k], d[k + 1] + a); if (j < E - 1) { d[k] = Math.min(d[k], d[k + E] + a); if (i < E - 1) d[k] = Math.min(d[k], d[k + E + 1] + b); if (i > 0) d[k] = Math.min(d[k], d[k + E - 1] + b); } }
+  return { at: (x, y) => d[Math.min(E - 1, Math.max(0, Math.round((y + 1) / 2 * E - 0.5))) * E + Math.min(E - 1, Math.max(0, Math.round((x + 1) / 2 * E - 0.5)))] * px };
+}
+const T = raster((x, y) => truth(x, y) < 0), TB = boundary(T), TBdf = distanceField(TB);
+const handleRegion = (x, y) => x > 0.45 && x < 0.85 && y < -0.38 && y > -0.75;   // 细柄所在区域
+function evaluate(r) {
+  let inter = 0, uni = 0, hIn = 0, hTruth = 0;
+  if (r.inside) { const g = raster(r.inside); for (let k = 0; k < E * E; k++) { inter += g[k] & T[k]; uni += g[k] | T[k]; }
+    for (let j = 0; j < E; j++) for (let i = 0; i < E; i++) if (handleRegion(P(i), P(j)) && T[j * E + i]) { hTruth++; hIn += g[j * E + i]; }
+    const RB = boundary(g), RBdf = distanceField(RB); let s = 0; for (const [x, y] of TB) s += RBdf.at(x, y); for (const [x, y] of RB) s += TBdf.at(x, y);
+    return { iou: inter / uni, bErr: s / (TB.length + RB.length), handle: hIn / hTruth, g };
+  }
+  const df = distanceField(r.points); let s = 0; for (const [x, y] of TB) s += df.at(x, y); for (const [x, y] of r.points) s += Math.abs(truth(x, y));
+  return { iou: null, bErr: s / (TB.length + r.points.length), handle: null };
+}
+
+// ---------- 绘制 ----------
+const S = 180;
+function paint(fnInside, region, points, editFn) {
+  const c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d'), im = g.createImageData(S, S);
+  const [x0, y0, x1, y1] = region;
+  for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
+    const x = x0 + (x1 - x0) * (i + 0.5) / S, y = y1 - (y1 - y0) * (j + 0.5) / S, k = (j * S + i) * 4;
+    const t = truth(x, y) < 0, inn = fnInside ? fnInside(x, y) : false;
+    const col = inn ? [47, 111, 219] : t && !points ? [244, 205, 196] : [246, 247, 249];   // 蓝色：表示出的内部；浅红：真实形状中漏掉的部分
+    im.data.set([...col, 255], k);
+  }
+  g.putImageData(im, 0, 0);
+  // 真实边界画成细线，方便对照
+  g.strokeStyle = 'rgba(29,35,48,0.55)'; g.lineWidth = 1; const tf = editFn ? truthEdited : truth;
+  for (const l of contours(tf, 200)) { g.beginPath(); l.forEach(([x, y], n) => { const px = (x - x0) / (x1 - x0) * S, py = (y1 - y) / (y1 - y0) * S; n ? g.lineTo(px, py) : g.moveTo(px, py); }); g.stroke(); }
+  if (points) { g.fillStyle = '#e4572e'; for (const [x, y] of points) { const px = (x - x0) / (x1 - x0) * S, py = (y1 - y) / (y1 - y0) * S; g.beginPath(); g.arc(px, py, region[2] - region[0] < 1 ? 3 : 1.6, 0, 7); g.fill(); } }
+  return c;
+}
+const FULL = [-1, -1, 1, 1], ZOOM = [0.4, -0.78, 0.9, -0.28];
+const grid = $('grid'), cell = el => { grid.append(el); return el; }, label = (t, cls = 'lab') => { const d = document.createElement('div'); d.className = cls; d.textContent = t; return cell(d); };
+label('');
+label('真实形状', 'head'); reps.forEach(r => label(r.name, 'head'));
+label('整体'); cell(paint((x, y) => truth(x, y) < 0, FULL)); reps.forEach(r => cell(paint(r.inside, FULL, r.points)));
+label('放大细柄'); cell(paint((x, y) => truth(x, y) < 0, ZOOM)); reps.forEach(r => cell(paint(r.inside, ZOOM, r.points && r.points.filter(([x, y]) => x > ZOOM[0] && x < ZOOM[2] && y > ZOOM[1] && y < ZOOM[3]))));
+label('并上一个圆'); cell(paint((x, y) => truthEdited(x, y) < 0, FULL, null, true));
+reps.forEach(r => { if (r.edit) cell(paint(r.edit, FULL, null, true)); else { const d = document.createElement('div'); d.className = 'lab'; d.style.textAlign = 'center'; d.textContent = r.editNote; cell(d); } });
+
+const results = reps.map(r => ({ r, e: evaluate(r) }));
+for (const { r, e } of results) {
+  const tr = $('t').insertRow();
+  [r.name, r.what, `${r.bytes.toLocaleString()} 字节`, e.iou == null ? '—（没有内部）' : e.iou.toFixed(3), `${(e.bErr * 100 / 2).toFixed(2)}%`, e.handle == null ? '只有边界点' : `${(e.handle * 100).toFixed(0)}% 被表示出来`, r.edit ? `容易：${r.editNote}` : `困难：${r.editNote}`].forEach(v => tr.insertCell().textContent = v);
+}
+$('note').textContent = '边界误差：真实边界与表示出的边界之间的平均距离，以画面宽度的百分比表示（双向计算）。“细柄”一列是细柄区域中被正确表示为内部的比例。高斯斑点的结果来自固定随机种子的优化，重新运行完全相同。';
+window.__rep = results.map(({ r, e }) => ({ name: r.name, bytes: r.bytes, what: r.what, iou: e.iou, bErr: e.bErr * 50, handle: e.handle }));
+</script>
+</body>
+</html>

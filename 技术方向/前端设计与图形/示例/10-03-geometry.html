@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>几何处理：简化、修复与平滑，以及怎样量化误差</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
+               "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.16/build/index.module.js",
+               "meshoptimizer/simplifier": "https://cdn.jsdelivr.net/npm/meshoptimizer@1.3.0/meshopt_simplifier.js" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .row4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .row3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  figure { margin: 0; display: grid; gap: 2px; } figure canvas { width: 100%; height: auto; display: block; border-radius: 6px; background: #eef0f3; }
+  figcaption { font-size: 12px; color: var(--muted); } figcaption b { color: var(--ink); display: block; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  .ramp { height: 10px; border-radius: 3px; background: linear-gradient(90deg, #2f6fdb, #5bc0a8, #f3d34a, #e4572e, #8b1e1e); }
+  .legend { display: grid; grid-template-columns: auto minmax(120px, 260px) auto; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; }
+  .bad { color: #b3261e; font-weight: 700; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section>
+  <h2>1 网格简化：同样只保留 10% 的三角形，三种方法的误差不同</h2>
+  <p class="sub">原始模型是一个带起伏的球（20,480 个三角形）。颜色表示简化后每个顶点到原始表面的距离：蓝色贴合，红色偏离。</p>
+  <div class="row4" id="views"></div>
+  <div class="legend"><span>0</span><div class="ramp"></div><span id="rampMax">包围盒对角线的 1%</span></div>
+  <table id="simp"><tr><th>方法</th><th>保留比例</th><th>三角形</th><th>用时</th><th>平均误差</th><th>最大误差（豪斯多夫）</th><th>法线平均偏差</th><th>拓扑：欧拉示性数／边界边／非流形边</th></tr></table>
+  <p class="sub">误差以包围盒对角线的百分比表示；用 three-mesh-bvh 建立层次包围体，在两个方向上求每个顶点到另一个表面的最近点。</p>
+</section>
+<section>
+  <div class="two">
+    <div style="display:grid;gap:8px">
+      <h2>2 修复：找出扫描留下的洞，再补上</h2>
+      <p class="sub">删掉一片三角形模拟扫描缺失。只属于一个三角形的边是“边界边”，首尾相连就是洞的轮廓；用轮廓中心做扇形三角化补洞。</p>
+      <div class="row3" id="repair"></div>
+      <table id="repT"><tr><th>状态</th><th>三角形</th><th>边界边</th><th>洞</th><th>欧拉示性数</th></tr></table>
+    </div>
+    <div style="display:grid;gap:8px">
+      <h2>3 平滑：去掉噪声，但别把形状缩小</h2>
+      <p class="sub">给顶点加上随机噪声，再迭代平滑 20 次。拉普拉斯平滑把每个顶点拉向邻居的平均位置，体积会持续缩小；Taubin 方法每次先收缩、再反向膨胀一点。</p>
+      <div class="row3" id="smooth"></div>
+      <table id="smT"><tr><th>状态</th><th>到干净模型的平均距离</th><th>体积变化</th></tr></table>
+    </div>
+  </div>
+</section>
+<script type="module">
+import * as THREE from 'three';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { MeshBVH } from 'three-mesh-bvh';
+import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
+const $ = id => document.getElementById(id);
+const W = 360, H = 300;
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(W, H, false);
+const camera = new THREE.PerspectiveCamera(32, W / H, 0.1, 20); camera.position.set(2.2, 1.3, 3.6); camera.lookAt(0, 0, 0);
+
+// ---------- 原始模型：带起伏的球 ----------
+let seed = 11; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const grads = Array.from({ length: 256 }, () => new THREE.Vector3(rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1).normalize());
+const perm = Array.from({ length: 256 }, (_, i) => i).sort(() => rnd() - 0.5);
+const hash = (x, y, z) => perm[(perm[(perm[x & 255] + y) & 255] + z) & 255];
+function noise(x, y, z) {   // 梯度噪声
+  const X = Math.floor(x), Y = Math.floor(y), Z = Math.floor(z), fx = x - X, fy = y - Y, fz = z - Z;
+  const s = t => t * t * t * (t * (t * 6 - 15) + 10), u = s(fx), v = s(fy), w = s(fz);
+  const g = (i, j, k) => { const gr = grads[hash(X + i, Y + j, Z + k)]; return gr.x * (fx - i) + gr.y * (fy - j) + gr.z * (fz - k); };
+  const l = (a, b, t) => a + (b - a) * t;
+  return l(l(l(g(0, 0, 0), g(1, 0, 0), u), l(g(0, 1, 0), g(1, 1, 0), u), v), l(l(g(0, 0, 1), g(1, 0, 1), u), l(g(0, 1, 1), g(1, 1, 1), u), v), w);
+}
+function makeShape() {
+  const g = mergeVertices(new THREE.IcosahedronGeometry(1, 31).deleteAttribute('normal').deleteAttribute('uv'));
+  const p = g.attributes.position, v = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i).normalize();
+    const r = 1 + 0.16 * noise(v.x * 2.2, v.y * 2.2, v.z * 2.2) + 0.05 * noise(v.x * 6, v.y * 6, v.z * 6) + 0.12 * Math.max(0, Math.sin(v.y * 9) - 0.6);   // 起伏 ＋ 细节 ＋ 几道棱
+    p.setXYZ(i, v.x * r, v.y * r, v.z * r);
+  }
+  g.computeVertexNormals(); g.computeBoundingBox();
+  return g;
+}
+const original = makeShape();
+const DIAG = original.boundingBox.getSize(new THREE.Vector3()).length();
+const triCount = g => (g.index ? g.index.count : g.attributes.position.count) / 3;
+
+// ---------- 三种简化 ----------
+function clusterSimplify(src, target) {   // 网格聚类：把落在同一个格子里的顶点合并成平均位置
+  const pos = src.attributes.position, idx = src.index.array;
+  const run = cell => {
+    const key = new Map(), sum = [], remap = new Int32Array(pos.count);
+    for (let i = 0; i < pos.count; i++) {
+      const k = `${Math.floor(pos.getX(i) / cell)},${Math.floor(pos.getY(i) / cell)},${Math.floor(pos.getZ(i) / cell)}`;
+      let c = key.get(k); if (c === undefined) { c = sum.length; key.set(k, c); sum.push([0, 0, 0, 0]); }
+      const s = sum[c]; s[0] += pos.getX(i); s[1] += pos.getY(i); s[2] += pos.getZ(i); s[3]++; remap[i] = c;
+    }
+    const out = [], seen = new Set();
+    for (let t = 0; t < idx.length; t += 3) {
+      const a = remap[idx[t]], b = remap[idx[t + 1]], c = remap[idx[t + 2]];
+      if (a === b || b === c || a === c) continue;                    // 退化的三角形丢掉
+      const k = [a, b, c].sort((x, y) => x - y).join(); if (seen.has(k)) continue; seen.add(k);   // 重复的也丢掉
+      out.push(a, b, c);
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(sum.flatMap(s => [s[0] / s[3], s[1] / s[3], s[2] / s[3]]), 3)); g.setIndex(out);
+    return g;
+  };
+  let lo = 0.005, hi = 1, best = null;
+  for (let k = 0; k < 18; k++) { const mid = (lo + hi) / 2, g = run(mid), n = triCount(g); best = g; if (n > target) lo = mid; else hi = mid; }   // 二分查找格子大小
+  return best;
+}
+function indexedResult(src, indices) { const g = new THREE.BufferGeometry(); g.setAttribute('position', src.attributes.position.clone()); g.setIndex(Array.from(indices)); return g; }
+function sloppySimplify(src, target) {   // meshoptimizer 的粗略简化：速度快，不保证拓扑
+  const [indices] = MeshoptSimplifier.simplifySloppy(new Uint32Array(src.index.array), new Float32Array(src.attributes.position.array), 3, null, target * 3, 1);
+  return indexedResult(src, indices);
+}
+function meshoptSimplify(src, target) {   // meshoptimizer 的边折叠：每次折叠二次误差最小的边，保持拓扑
+  const [indices] = MeshoptSimplifier.simplify(new Uint32Array(src.index.array), new Float32Array(src.attributes.position.array), 3, target * 3, 1);
+  return indexedResult(src, indices);
+}
+
+// ---------- 误差与拓扑 ----------
+function distances(fromGeo, toGeo) {   // fromGeo 的每个顶点到 toGeo 表面的最近距离
+  const bvh = new MeshBVH(toGeo.index ? toGeo : mergeVertices(toGeo)), p = fromGeo.attributes.position, v = new THREE.Vector3(), out = new Float32Array(p.count), hit = {};
+  for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i); bvh.closestPointToPoint(v, hit); out[i] = hit.distance; }
+  return { d: out, bvh };
+}
+function normalDeviation(src, simp) {
+  const bvh = new MeshBVH(simp), p = src.attributes.position, n = src.attributes.normal, v = new THREE.Vector3(), nv = new THREE.Vector3(), hit = {};
+  const tri = new THREE.Triangle(), fn = new THREE.Vector3(), idx = simp.index.array, sp = simp.attributes.position; let sum = 0;
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i); nv.fromBufferAttribute(n, i); bvh.closestPointToPoint(v, hit);
+    const f = hit.faceIndex * 3; tri.setFromAttributeAndIndices(sp, idx[f], idx[f + 1], idx[f + 2]); tri.getNormal(fn);
+    sum += Math.acos(Math.min(1, Math.abs(fn.dot(nv))));
+  }
+  return sum / p.count * 180 / Math.PI;
+}
+function topology(g) {   // 欧拉示性数 V − E ＋ F；只属于一个面的边是边界边；属于三个以上面的边是非流形边
+  const idx = g.index.array, edges = new Map(), used = new Set();
+  for (let t = 0; t < idx.length; t += 3) for (let k = 0; k < 3; k++) {
+    const a = idx[t + k], b = idx[t + (k + 1) % 3]; used.add(a);
+    const key = a < b ? a * 1e7 + b : b * 1e7 + a; edges.set(key, (edges.get(key) || 0) + 1);
+  }
+  let boundary = 0, nonManifold = 0; for (const c of edges.values()) { if (c === 1) boundary++; if (c > 2) nonManifold++; }
+  return { V: used.size, E: edges.size, F: idx.length / 3, chi: used.size - edges.size + idx.length / 3, boundary, nonManifold, edges };
+}
+function volume(g) { const p = g.attributes.position, idx = g.index.array, a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(); let v = 0; for (let t = 0; t < idx.length; t += 3) { a.fromBufferAttribute(p, idx[t]); b.fromBufferAttribute(p, idx[t + 1]); c.fromBufferAttribute(p, idx[t + 2]); v += a.dot(b.cross(c)) / 6; } return v; }
+
+// ---------- 绘制 ----------
+const ramp = ['#2f6fdb', '#5bc0a8', '#f3d34a', '#e4572e', '#8b1e1e'].map(c => new THREE.Color(c));
+function heat(t) { t = Math.min(1, Math.max(0, t)) * 4; const i = Math.min(3, Math.floor(t)); return ramp[i].clone().lerp(ramp[i + 1], t - i); }
+function draw(geo, { colors, wire = true, color = '#c9c3b6', groupColors } = {}) {
+  const scene = new THREE.Scene(); scene.background = new THREE.Color('#eef0f3');
+  scene.add(new THREE.HemisphereLight('#ffffff', '#8a8f99', 1.6)); const l = new THREE.DirectionalLight('#ffffff', 1.6); l.position.set(3, 4, 5); scene.add(l);
+  const g = geo.index ? geo.clone() : geo.clone(); g.computeVertexNormals();
+  if (colors) g.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  const mat = c => new THREE.MeshStandardMaterial({ color: colors ? '#ffffff' : c, vertexColors: !!colors, roughness: 0.75, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+  scene.add(new THREE.Mesh(g, groupColors ? groupColors.map(mat) : mat(color)));   // 有分组时，每组一种颜色
+  if (wire) scene.add(new THREE.LineSegments(new THREE.WireframeGeometry(g), new THREE.LineBasicMaterial({ color: '#1d2330', transparent: true, opacity: 0.25 })));
+  renderer.render(scene, camera);
+  const c = document.createElement('canvas'); c.width = W; c.height = H; c.getContext('2d').drawImage(renderer.domElement, 0, 0);
+  g.dispose(); return c;
+}
+function figure(parent, canvas, title, note) { const f = document.createElement('figure'); f.append(canvas); f.insertAdjacentHTML('beforeend', `<figcaption><b>${title}</b>${note}</figcaption>`); $(parent).append(f); }
+const pct = v => (v / DIAG * 100).toFixed(2) + '%';
+const tick = () => new Promise(r => setTimeout(r));
+
+async function run() {
+  await MeshoptSimplifier.ready;
+  const results = [], N0 = triCount(original), t0 = topology(original);
+  figure('views', draw(original, { wire: false }), '原始模型', `${N0.toLocaleString()} 个三角形`);
+  const methods = [['网格聚类', clusterSimplify], ['meshoptimizer · 粗略简化', sloppySimplify], ['meshoptimizer · 边折叠', meshoptSimplify]];
+  for (const ratio of [0.25, 0.1, 0.03]) for (const [name, fn] of methods) {
+    const target = Math.round(N0 * ratio), s = performance.now(); let g = fn(original, target); const ms = performance.now() - s;
+    if (!g.index) g = mergeVertices(g);
+    const fwd = distances(original, g), back = distances(g, original);   // 两个方向
+    let mean = 0, max = 0; for (const d of fwd.d) { mean += d; max = Math.max(max, d); } mean /= fwd.d.length; for (const d of back.d) max = Math.max(max, d);
+    const topo = topology(g), nd = normalDeviation(original, g);
+    results.push({ name, ratio, tris: triCount(g), ms, mean, max, nd, topo });
+    if (ratio === 0.1) {
+      const cols = []; for (const d of back.d) { const c = heat(d / (DIAG * 0.01)); cols.push(c.r, c.g, c.b); }
+      figure('views', draw(g, { colors: cols }), name, `${triCount(g).toLocaleString()} 个三角形，平均误差 ${pct(mean)}`);
+    }
+    await tick();
+  }
+  const t = $('simp');
+  for (const r of results) { const tr = t.insertRow(); const topoTxt = `${r.topo.chi}／${r.topo.boundary}／${r.topo.nonManifold}`;
+    [r.name, `${r.ratio * 100}%`, r.tris.toLocaleString(), `${r.ms.toFixed(0)} 毫秒`, pct(r.mean), pct(r.max), `${r.nd.toFixed(1)}°`, topoTxt].forEach(v => tr.insertCell().textContent = v);
+    if (r.topo.chi !== 2 || r.topo.nonManifold > 0) tr.cells[7].className = 'bad'; }
+  const repair = repairDemo(), smooth = smoothDemo();
+  return { results: results.map(r => ({ name: r.name, ratio: r.ratio, tris: r.tris, ms: r.ms, mean: r.mean / DIAG * 100, max: r.max / DIAG * 100, nd: r.nd, chi: r.topo.chi, boundary: r.topo.boundary, nonManifold: r.topo.nonManifold })), original: { tris: N0, chi: t0.chi }, repair, smooth };
+}
+
+// ---------- 修复 ----------
+function repairDemo() {
+  const g = original.clone(), idx = Array.from(g.index.array), p = g.attributes.position, v = new THREE.Vector3(), keep = [];
+  for (let t = 0; t < idx.length; t += 3) {   // 删掉朝向相机一侧的一片三角形，模拟扫描缺失
+    v.set(0, 0, 0); for (let k = 0; k < 3; k++) v.add(new THREE.Vector3().fromBufferAttribute(p, idx[t + k])); v.divideScalar(3);
+    const d1 = v.distanceTo(new THREE.Vector3(0.55, 0.45, 0.75)), d2 = v.distanceTo(new THREE.Vector3(0.75, -0.35, 0.6));
+    if (d1 > 0.28 && d2 > 0.18) keep.push(idx[t], idx[t + 1], idx[t + 2]);
+  }
+  const holed = g.clone(); holed.setIndex(keep);
+  const before = topology(holed);
+  // 找边界边：只被一个三角形使用的有向边，按“终点 → 下一条的起点”串成环
+  const next = new Map(), count = new Map(); const ia = holed.index.array;
+  for (let t = 0; t < ia.length; t += 3) for (let k = 0; k < 3; k++) { const a = ia[t + k], b = ia[t + (k + 1) % 3]; const key = a < b ? a * 1e7 + b : b * 1e7 + a; count.set(key, (count.get(key) || 0) + 1); }
+  for (let t = 0; t < ia.length; t += 3) for (let k = 0; k < 3; k++) { const a = ia[t + k], b = ia[t + (k + 1) % 3]; const key = a < b ? a * 1e7 + b : b * 1e7 + a; if (count.get(key) === 1) next.set(b, a); }   // 反向连接，补洞的三角形朝外
+  const loops = [], visited = new Set();
+  for (const start of next.keys()) { if (visited.has(start)) continue; const loop = []; let cur = start; while (!visited.has(cur)) { visited.add(cur); loop.push(cur); cur = next.get(cur); } loops.push(loop); }
+  // 扇形三角化：在轮廓中心加一个顶点
+  const pos = Array.from(holed.attributes.position.array), fill = [...holed.index.array];
+  for (const loop of loops) {
+    const c = new THREE.Vector3(); for (const i of loop) c.add(new THREE.Vector3().fromBufferAttribute(holed.attributes.position, i)); c.divideScalar(loop.length);
+    const ci = pos.length / 3; pos.push(c.x, c.y, c.z);
+    for (let k = 0; k < loop.length; k++) fill.push(loop[k], loop[(k + 1) % loop.length], ci);
+  }
+  const fixed = new THREE.BufferGeometry(); fixed.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); fixed.setIndex(fill);
+  fixed.addGroup(0, holed.index.count, 0); fixed.addGroup(holed.index.count, fill.length - holed.index.count, 1);   // 原有部分与补上的部分分两组上色
+  const after = topology(fixed);
+  figure('repair', draw(original, { wire: false }), '完整', '');
+  figure('repair', draw(holed, { wire: false, color: '#e8a33a' }), '有两个洞', '');
+  figure('repair', draw(fixed, { wire: false, groupColors: ['#c9c3b6', '#e4572e'] }), '补洞之后', '红色是补上的三角形：较平，是“补上”而不是“恢复”');
+  const t = $('repT');
+  for (const [name, topo, holes] of [['完整', topology(original), 0], ['删掉两片', before, loops.length], ['扇形补洞', after, 0]]) { const tr = t.insertRow(); [name, topo.F.toLocaleString(), topo.boundary, holes, topo.chi].forEach(v => tr.insertCell().textContent = v); }
+  return { before: { F: before.F, boundary: before.boundary, chi: before.chi }, holes: loops.length, loopSizes: loops.map(l => l.length), after: { F: after.F, boundary: after.boundary, chi: after.chi } };
+}
+
+// ---------- 平滑 ----------
+function smoothDemo() {
+  const clean = original, noisy = clean.clone(), p = noisy.attributes.position, n = clean.attributes.normal;
+  seed = 5; for (let i = 0; i < p.count; i++) { const a = (rnd() - 0.5) * 0.06; p.setXYZ(i, p.getX(i) + n.getX(i) * a, p.getY(i) + n.getY(i) * a, p.getZ(i) + n.getZ(i) * a); }
+  const nb = Array.from({ length: p.count }, () => new Set()), idx = clean.index.array;
+  for (let t = 0; t < idx.length; t += 3) for (let k = 0; k < 3; k++) { const a = idx[t + k], b = idx[t + (k + 1) % 3]; nb[a].add(b); nb[b].add(a); }
+  const neighbors = nb.map(s => [...s]);
+  function smooth(src, steps) {
+    const g = src.clone(), pos = g.attributes.position.array;
+    for (const lam of steps) {
+      const old = pos.slice();
+      for (let i = 0; i < neighbors.length; i++) { const ns = neighbors[i]; let x = 0, y = 0, z = 0; for (const j of ns) { x += old[3 * j]; y += old[3 * j + 1]; z += old[3 * j + 2]; } x /= ns.length; y /= ns.length; z /= ns.length;
+        pos[3 * i] = old[3 * i] + lam * (x - old[3 * i]); pos[3 * i + 1] = old[3 * i + 1] + lam * (y - old[3 * i + 1]); pos[3 * i + 2] = old[3 * i + 2] + lam * (z - old[3 * i + 2]); }
+    }
+    g.attributes.position.needsUpdate = true; return g;
+  }
+  const lap = smooth(noisy, Array(20).fill(0.5));
+  const taubin = smooth(noisy, Array.from({ length: 20 }, (_, k) => k % 2 ? -0.53 : 0.5));
+  const V0 = volume(clean), meanDist = g => { const { d } = distances(g, clean); let s = 0; for (const x of d) s += x; return s / d.length; };
+  const rows = [['加噪声之后', noisy], ['拉普拉斯平滑 20 次', lap], ['Taubin 平滑 20 次', taubin]].map(([name, g]) => ({ name, dist: meanDist(g), dv: volume(g) / V0 - 1, g }));
+  for (const r of rows) figure('smooth', draw(r.g, { wire: false, color: '#9fb3d1' }), r.name, `体积 ${(r.dv * 100).toFixed(1)}%`);
+  const t = $('smT'); for (const r of rows) { const tr = t.insertRow(); [r.name, pct(r.dist), `${(r.dv * 100).toFixed(1)}%`].forEach(v => tr.insertCell().textContent = v); }
+  return rows.map(r => ({ name: r.name, dist: r.dist / DIAG * 100, dv: r.dv * 100 }));
+}
+
+window.__geo = { done: run() };
+</script>
+</body>
+</html>

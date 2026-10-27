@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>逆向渲染：从图像反推材质与光照</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .row6 { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+  figure { margin: 0; display: grid; gap: 2px; } figure canvas { width: 100%; height: auto; display: block; border-radius: 6px; image-rendering: pixelated; }
+  figcaption { font-size: 12px; color: var(--muted); } figcaption b { color: var(--ink); display: block; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 14px; align-items: start; }
+  #chart { width: 100%; height: auto; display: block; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 12px; } .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section>
+  <h2>目标是一张照片；我们知道球的形状，想求出它的颜色、灯光方向和灯光强度</h2>
+  <p class="sub">渲染模型：像素颜色 ＝ 表面颜色 × 灯光强度 × （max(0, 法线·灯光方向) ＋ 0.06），其中 0.06 是这盏灯在房间里反射形成的环境光。对每个参数求导，用梯度下降让渲染结果逼近目标照片。目标照片带有少量噪声。</p>
+  <div class="row6" id="imgs"></div>
+</section>
+<section>
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>损失下降曲线（对数坐标）</h2><canvas id="chart" width="520" height="300" aria-label="五次优化的损失随迭代下降"></canvas>
+      <div class="legend" id="legend"></div></div>
+    <div style="display:grid;gap:6px"><h2>估计结果与真实值</h2>
+      <table id="t"><tr><th>情况</th><th>优化的参数</th><th>最终损失</th><th>表面颜色（R, G, B）</th><th>灯光强度</th><th>灯光方向误差</th></tr></table>
+      <p class="sub" id="note"></p></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const N = 72, AMB = 0.06;
+const TRUE = { albedo: [0.78, 0.42, 0.25], I: 1.5, theta: 0.75, phi: 2.3 };
+const lightDir = (th, ph) => [Math.sin(th) * Math.cos(ph), Math.sin(th) * Math.sin(ph), Math.cos(th)];
+// 每个像素的法线（正交相机看一个单位球）；右下角另有一块已知颜色的“标定卡”（平放、朝向相机）
+const px = [];
+for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+  const x = (i + 0.5) / N * 2 - 1, y = 1 - (j + 0.5) / N * 2, r2 = (x + 0.12) ** 2 + (y - 0.1) ** 2;
+  if (r2 < 0.72) { const s = Math.sqrt(0.72); const nx = (x + 0.12) / s, ny = (y - 0.1) / s; px.push({ k: j * N + i, n: [nx, ny, Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny))], card: false }); }
+  else if (x > 0.6 && y < -0.62) px.push({ k: j * N + i, n: [0.35, 0.35, Math.sqrt(1 - 0.245)], card: true });   // 标定卡：表面颜色已知为 0.8 的灰
+}
+function render(p) {   // 返回 N×N×3 的图像
+  const img = new Float32Array(N * N * 3), l = lightDir(p.theta, p.phi);
+  for (const q of px) { const d = Math.max(0, q.n[0] * l[0] + q.n[1] * l[1] + q.n[2] * l[2]), a = q.card ? [0.8, 0.8, 0.8] : p.albedo;
+    for (let c = 0; c < 3; c++) img[q.k * 3 + c] = a[c] * p.I * (d + AMB); }
+  return img;
+}
+let seed = 9; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const gauss = () => Math.sqrt(-2 * Math.log(rnd() + 1e-12)) * Math.cos(2 * Math.PI * rnd());
+const target = render(TRUE); for (let k = 0; k < target.length; k++) target[k] += gauss() * 0.01;   // 传感器噪声
+// ---------- 梯度下降（Adam），只更新允许优化的参数 ----------
+function optimize(init, free, useCard, iters = 2000) {
+  const p = JSON.parse(JSON.stringify(init)), names = ['a0', 'a1', 'a2', 'I', 'theta', 'phi'];
+  const get = n => n[0] === 'a' ? p.albedo[+n[1]] : p[n], set = (n, v) => { if (n[0] === 'a') p.albedo[+n[1]] = v; else p[n] = v; };
+  const m = {}, v = {}; names.forEach(n => { m[n] = 0; v[n] = 0; });
+  const losses = [];
+  for (let it = 1; it <= iters; it++) {
+    const g = {}; names.forEach(n => g[n] = 0);
+    const l = lightDir(p.theta, p.phi), dth = [Math.cos(p.theta) * Math.cos(p.phi), Math.cos(p.theta) * Math.sin(p.phi), -Math.sin(p.theta)], dph = [-Math.sin(p.theta) * Math.sin(p.phi), Math.sin(p.theta) * Math.cos(p.phi), 0];
+    let loss = 0, count = 0;
+    for (const q of px) {
+      if (q.card && !useCard) continue;
+      const nl = q.n[0] * l[0] + q.n[1] * l[1] + q.n[2] * l[2], d = Math.max(0, nl), a = q.card ? [0.8, 0.8, 0.8] : p.albedo;
+      for (let c = 0; c < 3; c++) {
+        const pred = a[c] * p.I * (d + AMB), r = pred - target[q.k * 3 + c]; loss += r * r; count++;
+        if (!q.card) g['a' + c] += 2 * r * p.I * (d + AMB);
+        g.I += 2 * r * a[c] * (d + AMB);
+        if (nl > 0) { g.theta += 2 * r * a[c] * p.I * (q.n[0] * dth[0] + q.n[1] * dth[1] + q.n[2] * dth[2]); g.phi += 2 * r * a[c] * p.I * (q.n[0] * dph[0] + q.n[1] * dph[1]); }
+      }
+    }
+    losses.push(loss / count);
+    for (const n of free) { const gr = g[n] / count; m[n] = 0.9 * m[n] + 0.1 * gr; v[n] = 0.999 * v[n] + 0.001 * gr * gr; set(n, get(n) - 0.01 * (m[n] / (1 - 0.9 ** it)) / (Math.sqrt(v[n] / (1 - 0.999 ** it)) + 1e-8)); }
+  }
+  return { p, losses };
+}
+const ALL = ['a0', 'a1', 'a2', 'I', 'theta', 'phi'];
+const cases = [
+  { name: 'A：强度已知', free: ['a0', 'a1', 'a2', 'theta', 'phi'], init: { albedo: [0.5, 0.5, 0.5], I: TRUE.I, theta: 0.3, phi: 1.0 }, card: false, color: '#2f6fdb' },
+  { name: 'B1：颜色与强度都未知（起点 1）', free: ALL, init: { albedo: [0.3, 0.3, 0.3], I: 3.0, theta: 0.3, phi: 1.0 }, card: false, color: '#e4572e' },
+  { name: 'B2：颜色与强度都未知（起点 2）', free: ALL, init: { albedo: [0.9, 0.9, 0.9], I: 0.8, theta: 0.3, phi: 1.0 }, card: false, color: '#f3b13b' },
+  { name: 'B3：颜色与强度都未知（起点 3）', free: ALL, init: { albedo: [0.5, 0.5, 0.5], I: 1.5, theta: 0.3, phi: 1.0 }, card: false, color: '#9b59b6' },
+  { name: 'C：加一块已知颜色的标定卡', free: ALL, init: { albedo: [0.3, 0.3, 0.3], I: 3.0, theta: 0.3, phi: 1.0 }, card: true, color: '#1f7a4d' }
+];
+// ---------- 显示 ----------
+function toCanvas(img, scale = 2) {
+  const c = document.createElement('canvas'); c.width = c.height = N; const g = c.getContext('2d'), im = g.createImageData(N, N);
+  const enc = v => Math.round(255 * Math.pow(Math.min(1, Math.max(0, v)), 1 / 2.2));
+  for (let k = 0; k < N * N; k++) im.data.set([enc(img[3 * k]), enc(img[3 * k + 1]), enc(img[3 * k + 2]), 255], 4 * k);
+  g.putImageData(im, 0, 0); return c;
+}
+function figure(canvas, title, note) { const f = document.createElement('figure'); f.append(canvas); f.insertAdjacentHTML('beforeend', `<figcaption><b>${title}</b>${note}</figcaption>`); $('imgs').append(f); }
+figure(toCanvas(target), '目标照片', `颜色 (${TRUE.albedo.join(', ')})，强度 ${TRUE.I}`);
+const angleErr = p => { const a = lightDir(p.theta, p.phi), b = lightDir(TRUE.theta, TRUE.phi); return Math.acos(Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])) * 180 / Math.PI; };
+const out = [];
+for (const cs of cases) {
+  const r = optimize(cs.init, cs.free, cs.card); out.push({ cs, r });
+  figure(toCanvas(render(r.p)), cs.name.split('：')[0] + ' 的结果', `颜色 (${r.p.albedo.map(v => v.toFixed(2)).join(', ')})，强度 ${r.p.I.toFixed(2)}`);
+  const tr = $('t').insertRow();
+  [cs.name, cs.free.length === 5 ? '颜色、方向' : '颜色、强度、方向', r.losses[r.losses.length - 1].toExponential(2), r.p.albedo.map(v => v.toFixed(3)).join(', '), r.p.I.toFixed(3), `${angleErr(r.p).toFixed(2)}°`].forEach(v => tr.insertCell().textContent = v);
+}
+{ const tr = $('t').insertRow(); ['真实值', '—', '噪声水平约 1.0e-4', TRUE.albedo.join(', '), TRUE.I, '0°'].forEach(v => tr.insertCell().textContent = v); tr.style.fontWeight = '700'; }
+// 损失曲线
+(function chart() {
+  const c = $('chart'), g = c.getContext('2d'), W = c.width, H = c.height, L = 50, B = 26, all = out.flatMap(o => o.r.losses), lo = Math.log10(Math.min(...all)) - 0.2, hi = Math.log10(Math.max(...all)) + 0.2, n = out[0].r.losses.length;
+  const X = i => L + i / (n - 1) * (W - L - 10), Y = v => 8 + (hi - Math.log10(v)) / (hi - lo) * (H - 8 - B);
+  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.strokeStyle = '#dde1e7'; g.fillStyle = '#5b6475'; g.font = '11px sans-serif';
+  for (let e = Math.ceil(lo); e <= hi; e++) { g.beginPath(); g.moveTo(L, Y(10 ** e)); g.lineTo(W - 10, Y(10 ** e)); g.stroke(); g.fillText(`1e${e}`, 6, Y(10 ** e) + 4); }
+  g.fillText('迭代次数', W / 2 - 20, H - 4); g.fillText('0', L - 3, H - B + 14); g.fillText(String(n), W - 34, H - B + 14);
+  for (const { cs, r } of out) { g.strokeStyle = cs.color; g.lineWidth = 2; g.beginPath(); r.losses.forEach((v, i) => i ? g.lineTo(X(i), Y(v)) : g.moveTo(X(i), Y(v))); g.stroke(); }
+  $('legend').innerHTML = out.map(({ cs }) => `<span><i style="background:${cs.color}"></i>${cs.name.split('：')[0]}</span>`).join('');
+})();
+$('note').textContent = 'B1—B3 的损失都降到了噪声水平，画面几乎一样，但颜色与强度各不相同：颜色乘以强度的结果相同，单看这张照片无法区分。C 加了一块颜色已知的标定卡，强度就被确定下来了。';
+window.__inv = out.map(({ cs, r }) => ({ name: cs.name, loss: r.losses[r.losses.length - 1], albedo: r.p.albedo, I: r.p.I, angle: angleErr(r.p), product: r.p.albedo.map(a => a * r.p.I) }));
+</script>
+</body>
+</html>

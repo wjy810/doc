@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>感知质量与评价：同样的误差，看起来不一样</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .row7 { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+  figure { margin: 0; display: grid; gap: 2px; } figure canvas { width: 100%; height: auto; display: block; border-radius: 4px; }
+  figcaption { font-size: 11.5px; color: var(--muted); } figcaption b { color: var(--ink); display: block; font-size: 12px; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .pair { display: flex; gap: 14px; justify-content: center; }
+  .pair button { padding: 0; border: 2px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; } .pair button:hover { border-color: #2f6fdb; }
+  .pair canvas { width: 160px; height: 160px; display: block; border-radius: 4px; }   /* 按 1:1 显示，不缩放 */
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  pre { margin: 0; padding: 8px 10px; background: #f6f7f9; border-radius: 8px; font: 11.5px/1.5 ui-monospace, "JetBrains Mono", monospace; white-space: pre-wrap; max-height: 260px; overflow: auto; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section>
+  <h2>1 六种失真，均方误差都调到 100（PSNR 约 28.1 dB）</h2>
+  <p class="sub">按像素差的平方平均，这六张图与原图“一样差”。但人看起来差别很大：整体变亮几乎察觉不到，模糊和噪声却很明显。结构相似度（SSIM）比较局部的亮度、对比度和结构，排序更接近人的感受，但它也只是一个模型。</p>
+  <div class="row7" id="imgs"></div>
+  <table id="t"><tr><th>失真</th><th>参数</th><th>均方误差</th><th>PSNR</th><th>SSIM（1 为相同）</th></tr></table>
+</section>
+<section>
+  <div class="two">
+    <div style="display:grid;gap:8px">
+      <h2>2 让人来比较：两项迫选实验</h2>
+      <p class="sub">每次并排显示两张失真图，问“哪一张更接近原图”。左右位置和出现顺序都按记录下来的种子随机安排，避免位置偏好和顺序效应；每次回答都记录耗时。</p>
+      <div class="pair" id="pair"><button type="button" id="left" aria-label="选择左边的图"></button><button type="button" id="right" aria-label="选择右边的图"></button></div>
+      <p class="sub" id="trialInfo" role="status"></p>
+    </div>
+    <div style="display:grid;gap:8px">
+      <h2>实验记录（本页不包含真实参与者的数据）</h2>
+      <pre id="log"></pre>
+      <p class="sub">真正的研究还要说明：参与者人数与招募方式、观看距离与屏幕、每对出现几次、怎样排除注意力不集中的回答，以及用什么统计方法汇总（例如把两两比较结果换算成一维的质量分数）。</p>
+    </div>
+  </div>
+</section>
+<script type="module">
+const $ = id => document.getElementById(id);
+const S = 160;
+// ---------- 原图：程序生成，含平滑渐变、边缘、文字和细纹理 ----------
+function reference() {
+  const c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d');
+  const sky = g.createLinearGradient(0, 0, 0, S); sky.addColorStop(0, '#8fb8e8'); sky.addColorStop(1, '#e9d8c0'); g.fillStyle = sky; g.fillRect(0, 0, S, S);
+  g.fillStyle = '#f6d36b'; g.beginPath(); g.arc(118, 40, 18, 0, 7); g.fill();
+  g.fillStyle = '#5b8c7a'; g.beginPath(); g.moveTo(0, 110); for (let x = 0; x <= S; x += 8) g.lineTo(x, 100 - 18 * Math.sin(x / 26)); g.lineTo(S, S); g.lineTo(0, S); g.fill();
+  g.fillStyle = '#3d6b5b'; for (let x = 0; x < S; x += 4) g.fillRect(x, 128 + (x % 8), 2, 30);   // 细纹理：草
+  g.fillStyle = '#1d2330'; g.font = '700 26px "Noto Sans SC", sans-serif'; g.fillText('感知', 14, 50);
+  return g.getImageData(0, 0, S, S).data;
+}
+const REF = reference();
+const clamp = v => Math.max(0, Math.min(255, v));
+const mse = (a, b) => { let s = 0; for (let k = 0; k < a.length; k += 4) for (let c = 0; c < 3; c++) s += (a[k + c] - b[k + c]) ** 2; return s / (a.length / 4 * 3); };
+let seed = 21; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647, gauss = () => Math.sqrt(-2 * Math.log(rnd() + 1e-12)) * Math.cos(2 * Math.PI * rnd());
+const noiseField = Array.from({ length: S * S * 3 }, gauss);
+// 各种失真：参数 p 越大越严重
+const D = {
+  brighter: p => REF.map((v, k) => k % 4 === 3 ? 255 : clamp(v + p)),
+  contrast: p => { const m = 128; return REF.map((v, k) => k % 4 === 3 ? 255 : clamp(m + (v - m) * (1 + p))); },
+  noise: p => REF.map((v, k) => k % 4 === 3 ? 255 : clamp(v + p * noiseField[(k >> 2) * 3 + (k % 4)])),
+  blur: p => { const r = Math.ceil(p * 3), w = []; for (let i = -r; i <= r; i++) w.push(Math.exp(-i * i / (2 * p * p))); const ws = w.reduce((a, b) => a + b, 0);
+    const pass = (src, dx, dy) => { const out = new Uint8ClampedArray(src.length); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) for (let c = 0; c < 4; c++) { let s = 0; for (let i = -r; i <= r; i++) { const xx = Math.min(S - 1, Math.max(0, x + i * dx)), yy = Math.min(S - 1, Math.max(0, y + i * dy)); s += w[i + r] * src[4 * (yy * S + xx) + c]; } out[4 * (y * S + x) + c] = s / ws; } return out; };
+    return pass(pass(REF, 1, 0), 0, 1); },
+  shift: p => { const out = new Uint8ClampedArray(REF.length); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const sx = Math.min(S - 1, Math.max(0, x - p)), x0 = Math.floor(sx), x1 = Math.min(S - 1, x0 + 1), t = sx - x0; for (let c = 0; c < 4; c++) out[4 * (y * S + x) + c] = REF[4 * (y * S + x0) + c] * (1 - t) + REF[4 * (y * S + x1) + c] * t; } return out; },
+};
+async function jpeg(q) {
+  const c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d'); g.putImageData(new ImageData(new Uint8ClampedArray(REF), S, S), 0, 0);
+  const img = new Image(); img.src = c.toDataURL('image/jpeg', q); await img.decode(); g.drawImage(img, 0, 0); return g.getImageData(0, 0, S, S).data;
+}
+const TARGET = 100;
+function calibrate(fn, lo, hi) { for (let k = 0; k < 40; k++) { const mid = (lo + hi) / 2; if (mse(REF, fn(mid)) < TARGET) lo = mid; else hi = mid; } return (lo + hi) / 2; }
+// ---------- SSIM：在 7 × 7 的窗口里比较均值、方差与协方差（亮度通道） ----------
+function ssim(a, b) {
+  const L = d => { const o = new Float32Array(S * S); for (let k = 0; k < S * S; k++) o[k] = 0.299 * d[4 * k] + 0.587 * d[4 * k + 1] + 0.114 * d[4 * k + 2]; return o; };
+  const x = L(a), y = L(b), C1 = (0.01 * 255) ** 2, C2 = (0.03 * 255) ** 2, R = 3; let sum = 0, n = 0;
+  for (let j = R; j < S - R; j++) for (let i = R; i < S - R; i++) {
+    let mx = 0, my = 0, xx = 0, yy = 0, xy = 0, c = 0;
+    for (let v = -R; v <= R; v++) for (let u = -R; u <= R; u++) { const k = (j + v) * S + i + u; mx += x[k]; my += y[k]; xx += x[k] * x[k]; yy += y[k] * y[k]; xy += x[k] * y[k]; c++; }
+    mx /= c; my /= c; const vx = xx / c - mx * mx, vy = yy / c - my * my, cov = xy / c - mx * my;
+    sum += ((2 * mx * my + C1) * (2 * cov + C2)) / ((mx * mx + my * my + C1) * (vx + vy + C2)); n++;
+  }
+  return sum / n;
+}
+// ---------- 生成六种失真 ----------
+const items = [];
+const add = (name, param, img) => items.push({ name, param, img, mse: mse(REF, img), ssim: ssim(REF, img) });
+add('整体变亮', '＋10', D.brighter(10));   // 像素值是整数，每个像素加 10，均方误差正好约为 100
+add('对比度增强', `×${(1 + calibrate(D.contrast, 0, 1)).toFixed(3)}`, D.contrast(calibrate(D.contrast, 0, 1)));
+add('平移', `${calibrate(D.shift, 0, 6).toFixed(2)} 像素`, D.shift(calibrate(D.shift, 0, 6)));
+add('高斯噪声', `σ ＝ ${calibrate(D.noise, 0, 30).toFixed(1)}`, D.noise(calibrate(D.noise, 0, 30)));
+add('模糊', `σ ＝ ${calibrate(D.blur, 0.3, 6).toFixed(2)} 像素`, D.blur(calibrate(D.blur, 0.3, 6)));
+{ let lo = 0.01, hi = 1, best = null; for (let k = 0; k < 14; k++) { const q = (lo + hi) / 2, im = await jpeg(q), e = mse(REF, im); best = { q, im }; if (e > TARGET) lo = q; else hi = q; } add('JPEG 压缩', `质量 ${best.q.toFixed(3)}`, best.im); }
+// ---------- 显示 ----------
+const toCanvas = d => { const c = document.createElement('canvas'); c.width = c.height = S; c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(d), S, S), 0, 0); return c; };
+function figure(canvas, title, note) { const f = document.createElement('figure'); f.append(canvas); f.insertAdjacentHTML('beforeend', `<figcaption><b>${title}</b>${note}</figcaption>`); $('imgs').append(f); }
+figure(toCanvas(REF), '原图', '程序生成');
+const psnr = m => 10 * Math.log10(255 * 255 / m);
+for (const it of items) figure(toCanvas(it.img), it.name, `PSNR ${psnr(it.mse).toFixed(1)}，SSIM ${it.ssim.toFixed(3)}`);
+for (const it of [...items].sort((a, b) => b.ssim - a.ssim)) { const tr = $('t').insertRow(); [it.name, it.param, it.mse.toFixed(1), `${psnr(it.mse).toFixed(2)} dB`, it.ssim.toFixed(3)].forEach(v => tr.insertCell().textContent = v); }
+// ---------- 两项迫选实验 ----------
+const EXP_SEED = 20261027; let es = EXP_SEED; const erand = () => (es = (es * 48271) % 2147483647) / 2147483647;
+const pairs = []; for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) pairs.push([i, j]);
+for (let k = pairs.length - 1; k > 0; k--) { const r = Math.floor(erand() * (k + 1)); [pairs[k], pairs[r]] = [pairs[r], pairs[k]]; }   // 打乱顺序
+const trials = pairs.map(([i, j]) => erand() < 0.5 ? [i, j] : [j, i]);                                             // 随机左右
+const log = { 实验: '哪一张更接近原图（两项迫选）', 随机种子: EXP_SEED, 刺激: items.map(i => `${i.name}（${i.param}）`), 每张尺寸: `${S}×${S} 像素，按 1:1 显示`, 试次: trials.length, 回答: [] };
+let cur = 0, shownAt = 0;
+function show() {
+  const info = $('trialInfo');
+  if (cur >= trials.length) { info.textContent = `完成 ${trials.length} 次比较。`; $('left').innerHTML = $('right').innerHTML = ''; return; }
+  const [a, b] = trials[cur]; $('left').innerHTML = ''; $('right').innerHTML = ''; $('left').append(toCanvas(items[a].img)); $('right').append(toCanvas(items[b].img));
+  info.textContent = `第 ${cur + 1} / ${trials.length} 次：哪一张更接近原图？`; shownAt = performance.now();
+}
+function answer(side) {
+  if (cur >= trials.length) return;
+  const [a, b] = trials[cur], chosen = side === 'left' ? a : b;
+  log.回答.push({ 试次: cur + 1, 左: items[a].name, 右: items[b].name, 选择: items[chosen].name, 耗时毫秒: Math.round(performance.now() - shownAt) });
+  $('log').textContent = JSON.stringify(log, null, 2); cur++; show();
+}
+$('left').addEventListener('click', () => answer('left')); $('right').addEventListener('click', () => answer('right'));
+$('log').textContent = JSON.stringify(log, null, 2); show();
+window.__per = { items: items.map(i => ({ name: i.name, param: i.param, mse: i.mse, psnr: psnr(i.mse), ssim: i.ssim })), trials: trials.length, answer };
+</script>
+</body>
+</html>
