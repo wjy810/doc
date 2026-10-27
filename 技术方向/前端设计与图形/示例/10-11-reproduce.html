@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>综合项目：复现“任意维度的快速泊松圆盘采样”</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 4px 0 0; } .sub { color: var(--muted); margin: 0; }
+  .row4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  figure { margin: 0; display: grid; gap: 2px; } figure canvas { width: 100%; height: auto; display: block; border-radius: 6px; background: #f6f7f9; }
+  figcaption { font-size: 12px; color: var(--muted); } figcaption b { color: var(--ink); display: block; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  .ok { color: #1f7a4d; font-weight: 700; } .part { color: #a15c00; font-weight: 700; }
+  ol { margin: 0; padding-left: 20px; } li { margin: 2px 0; }
+  pre { margin: 0; padding: 8px 10px; background: #f6f7f9; border-radius: 8px; font: 11.5px/1.5 ui-monospace, "JetBrains Mono", monospace; white-space: pre-wrap; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section>
+  <h2>复现报告：Bridson，《Fast Poisson Disk Sampling in Arbitrary Dimensions》，SIGGRAPH 2007 草图</h2>
+  <p class="sub">论文给出一个算法：在已有样本周围的圆环里随机尝试最多 k 个候选点，用背景网格加速距离检查。本页按论文的步骤实现（二维），固定数据与参数，逐条检查论文的说法，并记录困难情况与差异。</p>
+  <div class="two">
+    <div><h3>要检查的说法（摘自论文）</h3><ol>
+      <li>所有样本之间的距离至少为 r。</li>
+      <li>生成 N 个样本时，第 2 步恰好执行 2N − 1 次。</li>
+      <li>运行时间与 N 成正比（O(N)）。</li>
+      <li>样本分布是“蓝噪声”：多次运行平均的周期图在低频处能量很少（论文图 1）。</li>
+    </ol></div>
+    <div><h3>固定的设置</h3><pre id="setup"></pre></div>
+  </div>
+</section>
+<section>
+  <div class="row4" id="figs"></div>
+  <h2>逐条检查</h2>
+  <table id="claims"><tr><th>说法</th><th>测量方法</th><th>结果</th><th>结论</th></tr></table>
+  <h2>运行时间与样本数</h2>
+  <table id="scal"><tr><th>r</th><th>样本数 N</th><th>第 2 步执行次数</th><th>用时</th><th>每千个样本</th></tr></table>
+</section>
+<section>
+  <div class="two">
+    <div style="display:grid;gap:8px">
+      <h2>困难情况</h2>
+      <table id="hard"><tr><th>设置</th><th>样本数</th><th>还能再放下样本的面积</th><th>用时</th></tr></table>
+      <p class="sub" id="hardNote"></p>
+    </div>
+    <div style="display:grid;gap:8px">
+      <h2>差异与可能的原因</h2>
+      <ol id="diffs"></ol>
+      <h2>重跑步骤</h2>
+      <ol><li>用浏览器打开本页（不需要联网以外的任何依赖）。</li><li>页面用固定的种子 1—10 运行，结果会与本报告一致；用时取决于设备。</li><li>修改页面顶部的 R、K 或种子列表，可以重做每一项检查。</li></ol>
+    </div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const R = 0.02, K = 30, SEEDS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+function rng(seed) { let s = seed >>> 0 || 1; return () => (s = (s * 48271) % 2147483647) / 2147483647; }
+// ---------- 论文的算法（二维、单位正方形） ----------
+function bridson(r, k, seed) {
+  const rand = rng(seed), cell = r / Math.SQRT2, G = Math.ceil(1 / cell), grid = new Int32Array(G * G).fill(-1), pts = [], active = [];
+  let step2 = 0;
+  const gi = (x, y) => Math.min(G - 1, Math.floor(y / cell)) * G + Math.min(G - 1, Math.floor(x / cell));
+  const far = (x, y) => { const cx = Math.floor(x / cell), cy = Math.floor(y / cell);
+    for (let j = Math.max(0, cy - 2); j <= Math.min(G - 1, cy + 2); j++) for (let i = Math.max(0, cx - 2); i <= Math.min(G - 1, cx + 2); i++) { const q = grid[j * G + i]; if (q >= 0 && (pts[q][0] - x) ** 2 + (pts[q][1] - y) ** 2 < r * r) return false; }
+    return true; };
+  const add = (x, y) => { pts.push([x, y]); grid[gi(x, y)] = pts.length - 1; active.push(pts.length - 1); };
+  add(rand(), rand());                                                  // 第 1 步
+  while (active.length) {                                               // 第 2 步
+    step2++;
+    const ai = Math.floor(rand() * active.length), [px, py] = pts[active[ai]]; let found = false;
+    for (let t = 0; t < k; t++) {
+      const a = rand() * 2 * Math.PI, d = Math.sqrt(rand() * 3 * r * r + r * r);   // 在 r 到 2r 的圆环内按面积均匀取点
+      const x = px + Math.cos(a) * d, y = py + Math.sin(a) * d;
+      if (x >= 0 && x < 1 && y >= 0 && y < 1 && far(x, y)) { add(x, y); found = true; break; }
+    }
+    if (!found) { active[ai] = active[active.length - 1]; active.pop(); }
+  }
+  return { pts, step2, grid, G, cell };
+}
+// ---------- 对照：朴素的投飞镖（随机点逐个检查，连续失败 3000 次就停） ----------
+function dartThrowing(r, seed, maxFail = 3000) {
+  const rand = rng(seed), pts = []; let fail = 0;
+  while (fail < maxFail) { const x = rand(), y = rand(); let ok = true; for (const p of pts) if ((p[0] - x) ** 2 + (p[1] - y) ** 2 < r * r) { ok = false; break; } if (ok) { pts.push([x, y]); fail = 0; } else fail++; }
+  return { pts };
+}
+// ---------- 检查 ----------
+function minDistance(pts) {   // 用网格找最近的一对点
+  const c = R, G = Math.ceil(1 / c), cells = Array.from({ length: G * G }, () => []); pts.forEach((p, i) => cells[Math.min(G - 1, Math.floor(p[1] / c)) * G + Math.min(G - 1, Math.floor(p[0] / c))].push(i));
+  let m = Infinity;
+  pts.forEach((p, i) => { const cx = Math.floor(p[0] / c), cy = Math.floor(p[1] / c); for (let j = Math.max(0, cy - 1); j <= Math.min(G - 1, cy + 1); j++) for (let ii = Math.max(0, cx - 1); ii <= Math.min(G - 1, cx + 1); ii++) for (const q of cells[j * G + ii]) if (q !== i) m = Math.min(m, Math.hypot(pts[q][0] - p[0], pts[q][1] - p[1])); });
+  return m;
+}
+function uncovered(pts, r) {   // 在 300 × 300 个位置上检查：离所有样本都至少 r 的位置还能再放一个样本
+  const M = 300, c = r, G = Math.ceil(1 / c), cells = Array.from({ length: G * G }, () => []); pts.forEach((p, i) => cells[Math.min(G - 1, Math.floor(p[1] / c)) * G + Math.min(G - 1, Math.floor(p[0] / c))].push(i));
+  let free = 0; const mask = new Uint8Array(M * M);
+  for (let j = 0; j < M; j++) for (let i = 0; i < M; i++) { const x = (i + 0.5) / M, y = (j + 0.5) / M, cx = Math.floor(x / c), cy = Math.floor(y / c); let ok = true;
+    for (let jj = Math.max(0, cy - 1); jj <= Math.min(G - 1, cy + 1) && ok; jj++) for (let ii = Math.max(0, cx - 1); ii <= Math.min(G - 1, cx + 1) && ok; ii++) for (const q of cells[jj * G + ii]) if ((pts[q][0] - x) ** 2 + (pts[q][1] - y) ** 2 < r * r) { ok = false; break; }
+    if (ok) { free++; mask[j * M + i] = 1; } }
+  return { frac: free / (M * M), mask, M };
+}
+function periodogram(runs, F = 72) {   // 周期图：|Σ exp(−2πi f·x)|² ÷ N，在整数频率网格上，多次运行取平均
+  const P = new Float64Array((2 * F + 1) ** 2);
+  for (const pts of runs) for (let v = -F; v <= F; v++) for (let u = -F; u <= F; u++) { let re = 0, im = 0; for (const [x, y] of pts) { const a = -2 * Math.PI * (u * x + v * y); re += Math.cos(a); im += Math.sin(a); } P[(v + F) * (2 * F + 1) + u + F] += (re * re + im * im) / pts.length / runs.length; }
+  P[F * (2 * F + 1) + F] = 0;   // 零频率（点的总数）不画
+  return { P, F };
+}
+// ---------- 运行 ----------
+const t0 = performance.now(); const main = SEEDS.map(s => bridson(R, K, s)); const tMain = performance.now() - t0;
+const mins = main.map(m => minDistance(m.pts)), steps = main.map(m => [m.step2, 2 * m.pts.length - 1]);
+const pg = periodogram(main.slice(0, 5).map(m => m.pts));   // 前 5 次运行平均
+// 低频能量：|f| < 0.5 ／ r 的平均功率 ÷ 全部频率的平均功率（白噪声约为 1）
+let low = 0, nl = 0, all = 0, na = 0; for (let v = -pg.F; v <= pg.F; v++) for (let u = -pg.F; u <= pg.F; u++) { if (!u && !v) continue; const p = pg.P[(v + pg.F) * (2 * pg.F + 1) + u + pg.F], f = Math.hypot(u, v); all += p; na++; if (f < 0.5 / R) { low += p; nl++; } }
+const lowRatio = (low / nl) / (all / na);
+const randomRuns = SEEDS.map(s => { const r = rng(s + 100); return Array.from({ length: main[0].pts.length }, () => [r(), r()]); });
+const pgRand = periodogram(randomRuns.slice(0, 3));
+// 规模：r 越小，样本越多
+const scaling = [];
+bridson(0.03, K, 99);   // 预热，避免 JIT 编译算进第一组
+for (const r of [0.04, 0.02, 0.01, 0.007, 0.005, 0.0035]) { const s = performance.now(), res = bridson(r, K, 1), ms = performance.now() - s; scaling.push({ r, N: res.pts.length, step2: res.step2, ms }); }
+// 困难情况
+const hard = [];
+for (const [name, fn, r = R] of [['论文设置：k ＝ 30', () => bridson(R, 30, 1)], ['k ＝ 3', () => bridson(R, 3, 1)], ['k ＝ 1', () => bridson(R, 1, 1)], ['朴素投飞镖（连续失败 3000 次停止）', () => dartThrowing(R, 1)],
+  ['论文设置，r ＝ 0.01', () => bridson(0.01, 30, 1), 0.01], ['朴素投飞镖，r ＝ 0.01', () => dartThrowing(0.01, 1), 0.01]]) {
+  const s = performance.now(), res = fn(), ms = performance.now() - s, u = uncovered(res.pts, r); hard.push({ name, N: res.pts.length, frac: u.frac, ms, res, u });
+}
+// ---------- 显示 ----------
+function drawPoints(pts, mask) {
+  const S = 270, c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d');
+  if (mask) { const im = g.createImageData(S, S); for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) { const m = mask.mask[Math.floor((S - 1 - j) / S * mask.M) * mask.M + Math.floor(i / S * mask.M)]; im.data.set(m ? [244, 160, 150, 255] : [246, 247, 249, 255], 4 * (j * S + i)); } g.putImageData(im, 0, 0); }
+  g.fillStyle = '#1d2330'; for (const [x, y] of pts) { g.beginPath(); g.arc(x * S, (1 - y) * S, 1.2, 0, 7); g.fill(); }
+  return c;
+}
+function drawPg({ P, F }) {
+  const S = 2 * F + 1, c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d'), im = g.createImageData(S, S);
+  for (let k = 0; k < S * S; k++) { const v = Math.min(1, P[k] / 2.2), t = Math.pow(v, 0.7); im.data.set([20 + 230 * t, 24 + 200 * t, 40 + 150 * t, 255], 4 * k); }
+  g.putImageData(im, 0, 0); return c;
+}
+function figure(canvas, title, note) { const f = document.createElement('figure'); f.append(canvas); f.insertAdjacentHTML('beforeend', `<figcaption><b>${title}</b>${note}</figcaption>`); $('figs').append(f); }
+figure(drawPoints(main[0].pts), `k ＝ 30，种子 1：${main[0].pts.length} 个样本`, `r ＝ ${R}，单位正方形`);
+figure(drawPg(pg), '周期图：5 次运行平均', '中心暗、外围一圈亮环：蓝噪声；十字来自正方形区域的边界');
+figure(drawPg(pgRand), '对照：同样数量的均匀随机点', '各频率能量大致相同：白噪声');
+figure(drawPoints(hard[1].res.pts, hard[1].u), `k ＝ 3：${hard[1].N} 个样本`, `红色是还能再放下样本的空隙（占 ${(hard[1].frac * 100).toFixed(1)}%）`);
+$('setup').textContent = JSON.stringify({ 维度: 2, 区域: '单位正方形 [0,1)²', r: R, k: K, 种子: SEEDS.join('、'), 随机数: '线性同余（乘数 48271），每个种子独立', 背景网格: `格子边长 r／√2，${Math.ceil(Math.SQRT2 / R)} × ${Math.ceil(Math.SQRT2 / R)}`, 圆环取点: '在 r—2r 的圆环内按面积均匀', 实现: 'JavaScript，单线程', 浏览器: navigator.userAgent.match(/(Chrome|Firefox|Safari)\/[\d.]+/)?.[0] || '未知' }, null, 2);
+const msPerK = scaling.map(s => s.ms / s.N * 1000), spread = Math.max(...msPerK.slice(1)) / Math.min(...msPerK.slice(1));
+const rows = [
+  ['1 最小距离 ≥ r', '10 个种子，用网格找最近的一对样本', `最小距离 ÷ r：${Math.min(...mins.map(m => m / R)).toFixed(4)}—${Math.max(...mins.map(m => m / R)).toFixed(4)}`, mins.every(m => m >= R) ? ['复现', 'ok'] : ['未复现', 'part']],
+  ['2 第 2 步恰好 2N − 1 次', '计数器记录第 2 步的执行次数', `10 个种子全部相等（例：N ＝ ${main[0].pts.length}，执行 ${main[0].step2} 次）`, steps.every(([a, b]) => a === b) ? ['复现', 'ok'] : ['未复现', 'part']],
+  ['3 时间与 N 成正比', `r 从 0.04 到 0.0035，N 从 ${scaling[0].N} 到 ${scaling[scaling.length - 1].N.toLocaleString()}`, `每千个样本用时在 ${Math.min(...msPerK.slice(1)).toFixed(2)}—${Math.max(...msPerK.slice(1)).toFixed(2)} 毫秒之间（最小的一组除外）`, spread < 2 ? ['基本复现：只能看趋势', 'part'] : ['偏差较大', 'part']],
+  ['4 蓝噪声', '5 次运行的周期图；低频（|f| < 0.5／r）平均功率 ÷ 全部频率平均功率', `${lowRatio.toFixed(3)}（均匀随机点约为 1）`, lowRatio < 0.3 ? ['定性复现：论文没有给出数值', 'part'] : ['未复现', 'part']]
+];
+for (const [a, b, c, [d, cls]] of rows) { const tr = $('claims').insertRow(); [a, b, c].forEach(v => tr.insertCell().textContent = v); const td = tr.insertCell(); td.textContent = d; td.className = cls; }
+for (const s of scaling) { const tr = $('scal').insertRow(); [s.r, s.N.toLocaleString(), s.step2.toLocaleString(), `${s.ms.toFixed(1)} 毫秒`, `${(s.ms / s.N * 1000).toFixed(2)} 毫秒`].forEach(v => tr.insertCell().textContent = v); }
+for (const h of hard) { const tr = $('hard').insertRow(); [h.name, h.N.toLocaleString(), `${(h.frac * 100).toFixed(2)}%`, `${h.ms.toFixed(0)} 毫秒`].forEach(v => tr.insertCell().textContent = v); }
+$('hardNote').textContent = `k 越小，样本越早被移出活动列表，留下能再放样本的空隙；k ＝ 1 时几乎一开始就停止了。论文建议 k ＝ 30，但没有讨论 k 与空隙的关系。朴素投飞镖在这个规模下反而得到更多样本、空隙更少，代价是时间：每个候选点都要和所有已有样本比较，样本数增加约 4 倍时，用时增长远超 4 倍。`;
+const diffs = [
+  '论文没有给出运行时间、样本数或空隙比例的具体数值，只能检查趋势与定性结论；用时还受 JavaScript 即时编译与设备影响，最小的一组（样本少）每个样本的用时偏高。',
+  '论文图 1 是二维结果与周期图的示意，没有给出图像的数值与运行次数。本页用 5 次平均，亮环的半径约为 1／r，形状一致，但无法逐像素比较；周期图中的十字是正方形区域边界造成的，不是算法的特征。',
+  'k ＝ 30 时仍有极少量空隙（见上表），说明算法生成的样本集合接近但不一定是严格“极大”的；这一点论文没有声称，不算矛盾。',
+  `圆环内取点的方式论文没有规定，本页按面积均匀取点；按半径均匀取点会使样本略微偏密，可能改变样本数（本页没有测试这一变体，留作练习）。`
+];
+for (const d of diffs) { const li = document.createElement('li'); li.textContent = d; $('diffs').append(li); }
+window.__bp = { mins: mins.map(m => m / R), steps, lowRatio, scaling, hard: hard.map(h => ({ name: h.name, N: h.N, frac: h.frac, ms: h.ms })), tMain };
+</script>
+</body>
+</html>

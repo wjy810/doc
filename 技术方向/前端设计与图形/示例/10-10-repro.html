@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>复现与研究工具：让每次运行都可以追溯</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 14px; align-items: start; }
+  .plots { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  figure { margin: 0; display: grid; gap: 2px; } figure canvas { width: 100%; height: auto; display: block; border-radius: 6px; background: #f6f7f9; }
+  figcaption { font-size: 12px; color: var(--muted); } figcaption b { color: var(--ink); display: block; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  code, pre { font: 11.5px/1.5 ui-monospace, "JetBrains Mono", monospace; }
+  pre { margin: 0; padding: 8px 10px; background: #f6f7f9; border-radius: 8px; white-space: pre-wrap; }
+  .ok { color: #1f7a4d; font-weight: 700; } .bad { color: #b3261e; font-weight: 700; } .warn { color: #a15c00; font-weight: 700; }
+  a.btn { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; color: inherit; text-decoration: none; justify-self: start; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section>
+  <div class="two">
+    <div style="display:grid;gap:8px">
+      <h2>一个小实验：把 2000 个点分成 5 类（k 均值聚类）</h2>
+      <p class="sub">数据由带种子的生成器产生；算法的初始中心也由种子决定。每次运行都记录配置、数据、结果三个哈希值，以及运行环境。</p>
+      <pre id="config"></pre>
+      <div class="plots" id="plots"></div>
+    </div>
+    <div style="display:grid;gap:8px">
+      <h2>运行记录</h2>
+      <table id="runs"><tr><th>运行</th><th>配置</th><th>数据</th><th>结果</th><th>误差平方和</th><th>与 A 比较</th></tr></table>
+      <p class="sub">哈希值取 SHA-256 的前 8 位。“结果”哈希对聚类标签计算；误差平方和（SSE）越小，聚得越紧。没有固定种子的两次运行即使 SSE 相同，结果哈希也可能不同：类别的编号是任意的，比较前应先按中心位置给类别重新编号。</p>
+      <h2>同一配置，换 20 个种子</h2>
+      <table id="seeds"><tr><th>初始化方法</th><th>最好</th><th>中位数</th><th>最差</th><th>落入较差解的种子</th></tr></table>
+      <p class="sub">只报告最好的一次会夸大方法的效果。应当报告多个种子的分布，并说明种子是事先固定的。</p>
+      <a class="btn" id="export" download="运行记录.json" href="#">导出运行记录（JSON）</a>
+    </div>
+  </div>
+</section>
+<script type="module">
+const $ = id => document.getElementById(id);
+async function sha(obj) { const bytes = obj instanceof Uint8Array || obj instanceof Float64Array || obj instanceof Int32Array ? new Uint8Array(obj.buffer) : new TextEncoder().encode(JSON.stringify(obj)); const h = await crypto.subtle.digest('SHA-256', bytes); return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 8); }
+function rng(seed) { let s = seed >>> 0 || 1; return () => (s = (s * 48271) % 2147483647) / 2147483647; }
+// ---------- 数据：5 团带噪声的点 ----------
+function makeData({ seed, n }) {
+  const r = rng(seed), g = () => Math.sqrt(-2 * Math.log(r() + 1e-12)) * Math.cos(2 * Math.PI * r());
+  const centers = [[-0.6, -0.5], [0.55, -0.45], [0, 0.55], [-0.15, -0.05], [0.65, 0.35]], pts = new Float64Array(n * 2);
+  for (let i = 0; i < n; i++) { const c = centers[i % 5], s = i % 5 === 3 ? 0.07 : 0.13; pts[2 * i] = c[0] + g() * s; pts[2 * i + 1] = c[1] + g() * s; }
+  return pts;
+}
+// ---------- k 均值：初始化可以是随机选点，也可以是 k-means++ ----------
+function kmeans(pts, { k, init, seed, iters }, random) {
+  const n = pts.length / 2, r = random || rng(seed), C = [];
+  if (init === 'random') for (let j = 0; j < k; j++) { const i = Math.floor(r() * n); C.push([pts[2 * i], pts[2 * i + 1]]); }
+  else {   // k-means++：后选的中心更倾向离已选中心远的点
+    const i0 = Math.floor(r() * n); C.push([pts[2 * i0], pts[2 * i0 + 1]]);
+    while (C.length < k) { const d = new Float64Array(n); let sum = 0; for (let i = 0; i < n; i++) { let m = Infinity; for (const c of C) m = Math.min(m, (pts[2 * i] - c[0]) ** 2 + (pts[2 * i + 1] - c[1]) ** 2); d[i] = m; sum += m; }
+      let t = r() * sum, i = 0; while (i < n - 1 && (t -= d[i]) > 0) i++; C.push([pts[2 * i], pts[2 * i + 1]]); }
+  }
+  const label = new Int32Array(n);
+  for (let it = 0; it < iters; it++) {
+    let moved = 0;
+    for (let i = 0; i < n; i++) { let best = 0, bd = Infinity; C.forEach((c, j) => { const d = (pts[2 * i] - c[0]) ** 2 + (pts[2 * i + 1] - c[1]) ** 2; if (d < bd) { bd = d; best = j; } }); if (label[i] !== best) moved++; label[i] = best; }
+    const s = C.map(() => [0, 0, 0]); for (let i = 0; i < n; i++) { const t = s[label[i]]; t[0] += pts[2 * i]; t[1] += pts[2 * i + 1]; t[2]++; }
+    s.forEach((t, j) => { if (t[2]) C[j] = [t[0] / t[2], t[1] / t[2]]; });
+    if (!moved && it > 0) break;
+  }
+  return { label, C };
+}
+function sse(pts, { label, C }, chunked = false) {   // 误差平方和；chunked 模拟 GPU 上的并行求和：单精度、先分块求和再相加
+  const n = pts.length / 2, term = i => (pts[2 * i] - C[label[i]][0]) ** 2 + (pts[2 * i + 1] - C[label[i]][1]) ** 2;
+  if (!chunked) { let s = 0; for (let i = 0; i < n; i++) s += term(i); return s; }
+  const f = Math.fround, parts = []; for (let b = 0; b < n; b += 64) { let s = 0; for (let i = b; i < Math.min(n, b + 64); i++) s = f(s + f(term(i))); parts.push(s); } return parts.reduce((a, v) => f(a + v), 0);
+}
+// ---------- 配置与运行 ----------
+const VERSION = '10-10-repro 1.0';
+const env = { 页面版本: VERSION, 浏览器: navigator.userAgent.match(/(Chrome|Firefox|Safari)\/[\d.]+/)?.[0] || '未知', 平台: navigator.platform || '未知', 日期: new Date().toISOString().slice(0, 10) };
+const config = { 数据: { 生成器: '五团高斯点', seed: 1, n: 2000 }, 方法: { 名称: 'k 均值', k: 5, init: 'random', seed: 7, iters: 100 } };
+$('config').textContent = JSON.stringify({ ...config, 环境: env }, null, 2);
+const log = [];
+async function run(name, cfg, opts = {}) {
+  let pts = makeData(cfg.数据); if (opts.tamper) { pts = pts.slice(); pts[0] += 0.001; }
+  const res = kmeans(pts, cfg.方法, opts.unseeded ? Math.random : null);
+  const rec = { 运行: name, 配置哈希: await sha(cfg), 数据哈希: await sha(pts), 结果哈希: await sha(res.label), SSE: sse(pts, res, opts.chunked), 环境: env, 时间: new Date().toISOString() };
+  log.push(rec); return { rec, res, pts };
+}
+const A = await run('A：按配置运行', config);
+const B = await run('B：同一配置再运行', config);
+const C1 = await run('C1：忘了用种子（Math.random）', config, { unseeded: true });
+const C2 = await run('C2：忘了用种子，再运行', config, { unseeded: true });
+const Dd = await run('D：数据被改了 0.001', config, { tamper: true });
+const E = await run('E：同一结果，换成单精度分块求和', config, { chunked: true });
+function compare(r) {
+  if (r === A) return ['—', ''];
+  const a = A.rec, x = r.rec, same = (k) => a[k] === x[k];
+  if (!same('数据哈希')) return ['数据与记录不一致：先查数据，再谈结果', 'bad'];
+  if (same('结果哈希') && a.SSE === x.SSE) return ['完全相同', 'ok'];
+  if (same('结果哈希')) return [`标签相同；SSE 相差 ${Math.abs(a.SSE - x.SSE).toExponential(1)}（浮点精度与求和顺序不同）`, 'warn'];
+  return [`结果不同（SSE 差 ${(x.SSE - a.SSE).toFixed(2)}）`, 'bad'];
+}
+for (const r of [A, B, C1, C2, Dd, E]) { const tr = $('runs').insertRow(), [txt, cls] = compare(r); [r.rec.运行, r.rec.配置哈希, r.rec.数据哈希, r.rec.结果哈希, r.rec.SSE.toFixed(6)].forEach(v => tr.insertCell().textContent = v); const td = tr.insertCell(); td.textContent = txt; td.className = cls; }
+// ---------- 多个种子 ----------
+const pts = makeData(config.数据), seedStats = {};
+for (const init of ['random', 'kmeans++']) {
+  const vals = []; for (let s = 1; s <= 20; s++) vals.push(sse(pts, kmeans(pts, { ...config.方法, init, seed: s })));
+  vals.sort((a, b) => a - b); const best = vals[0], bad = vals.filter(v => v > best * 1.05).length;
+  seedStats[init] = { best, median: vals[10], worst: vals[19], bad };
+  const tr = $('seeds').insertRow(); [init === 'random' ? '随机选点' : 'k-means++', best.toFixed(2), vals[10].toFixed(2), vals[19].toFixed(2), `${bad} / 20`].forEach(v => tr.insertCell().textContent = v);
+}
+// ---------- 散点图 ----------
+const palette = ['#2f6fdb', '#e4572e', '#5b8c7a', '#f3b13b', '#9b59b6'];
+function plot(r, title) {
+  const c = document.createElement('canvas'); c.width = c.height = 260; const g = c.getContext('2d'), P = v => (v + 1.1) / 2.2 * 260;
+  for (let i = 0; i < r.pts.length / 2; i++) { g.fillStyle = palette[r.res.label[i]]; g.fillRect(P(r.pts[2 * i]) - 1, 260 - P(r.pts[2 * i + 1]) - 1, 2.4, 2.4); }
+  for (const cc of r.res.C) { g.strokeStyle = '#1d2330'; g.lineWidth = 2; g.beginPath(); g.arc(P(cc[0]), 260 - P(cc[1]), 6, 0, 7); g.stroke(); }
+  const f = document.createElement('figure'); f.append(c); f.insertAdjacentHTML('beforeend', `<figcaption><b>${title}</b>SSE ${r.rec.SSE.toFixed(2)}</figcaption>`); $('plots').append(f);
+}
+plot(A, '运行 A（种子 7）');
+const worse = [C1, C2].find(r => r.rec.SSE > A.rec.SSE * 1.05) || C1; plot(worse, worse.rec.运行.split('：')[0] + '（未固定种子）');
+$('export').href = URL.createObjectURL(new Blob([JSON.stringify({ 配置: config, 运行: log, 多种子: seedStats }, null, 2)], { type: 'application/json' }));
+window.__rp = { runs: log.map(r => ({ name: r.运行, cfg: r.配置哈希, data: r.数据哈希, res: r.结果哈希, sse: r.SSE })), seedStats };
+</script>
+</body>
+</html>
