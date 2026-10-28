@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>人机共创：带理由的建议、影响预览、接管、拒绝、撤销与恢复</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .gantt { display: grid; grid-template-columns: 112px repeat(14, minmax(0, 1fr)) 220px; font-size: 11.5px; border-top: 1px solid var(--line); }
+  .gantt > div { border-bottom: 1px solid var(--line); padding: 3px 4px; min-height: 26px; }
+  .gantt .h { color: var(--muted); text-align: center; }
+  .gantt .cap { color: var(--muted); text-align: center; font-size: 11px; }
+  .gantt .cap.low { color: var(--bad); font-weight: 700; }
+  .cell { text-align: center; }
+  .cell b { display: block; border-radius: 4px; background: #dfe9fb; color: #1d4fa8; font-weight: 400; }
+  .cell b.lock { background: #2f6fdb; color: #fff; }
+  .cell b.new { outline: 2px solid #e4572e; }
+  .cell b.gone { background: repeating-linear-gradient(45deg, #fbe4dd, #fbe4dd 4px, #fff 4px, #fff 8px); color: #b3261e; text-decoration: line-through; }
+  .why { color: var(--muted); font-size: 11px; line-height: 1.4; }
+  .card { border: 1px solid #f0b429; background: #fffaf0; border-radius: 8px; padding: 8px 10px; display: grid; gap: 4px; }
+  .card.off { border-color: var(--line); background: #f6f7f9; color: var(--muted); }
+  .bar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  button { font: inherit; padding: 2px 10px; border-radius: 6px; border: 1px solid #b9c0cc; background: #fff; cursor: pointer; }
+  button.primary { background: #2f6fdb; color: #fff; border-color: #2f6fdb; }
+  .tag { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 11px; white-space: nowrap; } .tag.ai { background: #eef3ff; color: #2456b0; } .tag.me { background: #eef7f1; color: #1f7a4d; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 学习计划：系统排期，人设定目标与约束</h2>
+  <p class="sub">目标：每周 8 小时，14 周内完成。系统按前置关系与每周可用时间排期，并为每个任务写出排在这里的理由。蓝底白字是用户锁定的任务；橙色框是建议中会改变的格子，斜线格是会被移走的时间。</p>
+  <div class="gantt" id="gantt"></div>
+</section>
+
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px">
+      <h2>2 建议：依据、影响范围，以及怎样控制</h2>
+      <div class="bar"><span class="sub">建议方式</span>
+        <label><input type="radio" name="mode" value="auto"> 自动应用</label>
+        <label><input type="radio" name="mode" value="preview" checked> 先预览，我来决定</label>
+        <label><input type="radio" name="mode" value="manual"> 只在我要求时</label></div>
+      <div id="card" class="card off">暂无建议</div>
+    </div>
+    <div style="display:grid;gap:6px"><h2>3 交互记录</h2><table id="log"><tr><th>#</th><th>来源</th><th>事件</th><th>结果</th></tr></table></div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>4 重新排期时该保留什么：三种方式（200 次随机变化）</h2>
+  <p class="sub">起点是用户调整过的计划：系统排好后，用户把“数据清洗”整块挪到了第 8 周。每次随机改变一项条件（某一周的可用时间减少，或把某个任务推迟 1—2 周开始），再用三种方式重新排期。三种方式改动的任务数差不多，差别在于改动了什么：从头重排每次都追求最早完成，几乎总会抹掉用户的手动调整；只往后推的修补保留了调整，却常常晚完成；先确定用户在意的部分（锁定与亲手放的任务）并保留，再把其余部分重新排，两头兼顾。上面的建议用的就是第三种。</p>
+  <table id="cmp"><tr><th>方式</th><th>平均变动的任务数</th><th>变动 ≥ 4 个任务的次数</th><th>保留了用户的手动调整</th><th>平均完成周</th><th>比三种中最早的晚完成</th><th>违反锁定／前置关系</th></tr></table>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const WEEKS = 14;
+const TASKS = [
+  { id: 'T1', name: 'HTML／CSS 复习', h: 6, pre: [] },
+  { id: 'T2', name: 'JavaScript 基础', h: 10, pre: ['T1'] },
+  { id: 'T3', name: '数据清洗', h: 6, pre: ['T2'] },
+  { id: 'T4', name: 'ECharts 入门', h: 8, pre: ['T2'] },
+  { id: 'T5', name: 'D3 入门', h: 12, pre: ['T2'] },
+  { id: 'T6', name: '交互与动画', h: 8, pre: ['T4'] },
+  { id: 'T7', name: '作品集项目', h: 16, pre: ['T3', 'T5', 'T6'] },
+  { id: 'T8', name: '面试准备', h: 6, pre: ['T7'] }
+];
+const byId = Object.fromEntries(TASKS.map(t => [t.id, t]));
+// 优先级：到终点的最长路径（关键路径上的任务先排）
+const tail = {}; function tl(id) { if (tail[id] != null) return tail[id]; const succ = TASKS.filter(t => t.pre.includes(id)); return tail[id] = byId[id].h + Math.max(0, ...succ.map(s => tl(s.id))); }
+TASKS.forEach(t => tl(t.id));
+const head = {}; function hd(id) { if (head[id] != null) return head[id]; return head[id] = Math.max(0, ...byId[id].pre.map(p => hd(p) + byId[p].h)); }
+TASKS.forEach(t => hd(t.id));
+const LONGEST = Math.max(...TASKS.map(t => head[t.id] + tail[t.id]));
+const critical = id => head[id] + tail[id] === LONGEST;   // 关键路径：这条链上任何一个任务推迟，整体完成就推迟
+const order = (() => { const done = new Set(), out = []; while (out.length < TASKS.length) { const ready = TASKS.filter(t => !done.has(t.id) && t.pre.every(p => done.has(p))).sort((a, b) => tail[b.id] - tail[a.id]); out.push(ready[0].id); done.add(ready[0].id); } return out; })();
+
+// 计划：hours[任务][周]。任务只能在所有前置任务完成的“下一周”开始
+const lastWeek = row => { for (let w = WEEKS - 1; w >= 0; w--) if (row[w] > 0) return w; return -1; };
+const firstWeek = row => row.findIndex(v => v > 0);
+function fill(row, from, hours, left) { for (let w = from; w < WEEKS && hours > 0; w++) { const x = Math.min(hours, left[w]); if (x > 0) { row[w] += x; left[w] -= x; hours -= x; } } return hours; }
+function plan(caps, locks) {   // 从头排：锁定的任务先放，其余按优先级“尽早”
+  const left = caps.slice(), P = {}; for (const t of TASKS) P[t.id] = Array(WEEKS).fill(0);
+  for (const id of order) if (locks[id] != null) fill(P[id], locks[id], byId[id].h, left);
+  for (const id of order) { if (locks[id] != null) continue; const earliest = Math.max(0, ...byId[id].pre.map(p => lastWeek(P[p]) + 1)); fill(P[id], earliest, byId[id].h, left); }
+  return P;
+}
+function replanStable(old, caps, locks, soft = st.soft) {   // 最小改动：从原计划出发，只修补放不下或不合规则的地方；用户亲手放的任务最后才动
+  stats.calls++;
+  const P = {}; for (const t of TASKS) P[t.id] = old[t.id].slice();
+  const shift = (id, k) => { if (!k) return true; const row = Array(WEEKS).fill(0); for (let w = 0; w < WEEKS; w++) if (P[id][w]) { if (w + k >= WEEKS || w + k < 0) return false; row[w + k] = P[id][w]; } P[id] = row; return true; };
+  for (const id in locks) if (!shift(id, locks[id] - firstWeek(P[id]))) return (stats.fallback++, plan(caps, locks));   // 锁定：整块平移到锁定的开始周
+  for (let iter = 0; iter < 300; iter++) {
+    let moved = false;
+    for (const id of order) {   // 前置关系：开始得太早的任务整块往后移
+      const need = Math.max(0, ...byId[id].pre.map(p => lastWeek(P[p]) + 1));
+      if (firstWeek(P[id]) < need) { if (locks[id] != null || !shift(id, need - firstWeek(P[id]))) return (stats.fallback++, plan(caps, locks)); moved = true; }
+    }
+    for (let w = 0; w < WEEKS; w++) {   // 容量：超出的小时移到下一周，先移优先级最低的任务
+      let over = TASKS.reduce((a, t) => a + P[t.id][w], 0) - caps[w];
+      if (over <= 0) continue;
+      if (w + 1 >= WEEKS) return (stats.fallback++, plan(caps, locks));
+      const cand = TASKS.filter(t => P[t.id][w] > 0 && !(locks[t.id] === w)).sort((a, b) => (soft.has(a.id) - soft.has(b.id)) || tail[a.id] - tail[b.id]);
+      for (const t of cand) { if (over <= 0) break; const x = Math.min(over, P[t.id][w]); P[t.id][w] -= x; P[t.id][w + 1] += x; over -= x; }
+      if (over > 0) return (stats.fallback++, plan(caps, locks));
+      moved = true;
+    }
+    if (!moved) return P;
+  }
+  return (stats.fallback++, plan(caps, locks));
+}
+function replanKeep(old, caps, locks, soft = st.soft) {   // 保留用户的调整（锁定与亲手放的任务），其余重新求最早完成
+  const left = caps.slice(), P = {}; for (const t of TASKS) P[t.id] = Array(WEEKS).fill(0);
+  const kept = new Set();
+  for (const id of soft) {   // 亲手放的任务原样保留（若也被锁定，只要开始周仍符合锁定）
+    if (locks[id] != null && firstWeek(old[id]) !== locks[id]) continue;
+    if (old[id].some((v, w) => v > left[w])) return replanStable(old, caps, locks, soft);
+    old[id].forEach((v, w) => { P[id][w] = v; left[w] -= v; }); kept.add(id);
+  }
+  for (const id of order) if (locks[id] != null && !kept.has(id)) fill(P[id], locks[id], byId[id].h, left);
+  for (const id of order) { if (locks[id] != null || kept.has(id)) continue; const earliest = Math.max(0, ...byId[id].pre.map(p => lastWeek(P[p]) + 1)); fill(P[id], earliest, byId[id].h, left); }
+  return valid(P, locks) ? P : replanStable(old, caps, locks, soft);   // 保留的安排与新条件冲突时，退回修补
+}
+const finish = P => Math.max(...TASKS.map(t => lastWeek(P[t.id]))) + 1;
+const changed = (A, B) => TASKS.filter(t => A[t.id].some((v, w) => v !== B[t.id][w])).map(t => t.id);
+const valid = (P, locks) => TASKS.every(t => P[t.id].reduce((a, b) => a + b, 0) === t.h && t.pre.every(p => lastWeek(P[p]) < firstWeek(P[t.id])) && (locks[t.id] == null || firstWeek(P[t.id]) === locks[t.id]));
+
+// ---------- 状态 ----------
+const stats = { calls: 0, fallback: 0 };
+const st = { caps: Array(WEEKS).fill(8), locks: {}, P: null, preview: null, suppressed: new Set(), paused: false, undo: [], rejected: [], soft: new Set() };
+st.P = plan(st.caps, st.locks);
+const logRows = [];
+function log(src, ev, res) { logRows.push([src, ev, res]); const t = $('log'); [...t.rows].slice(1).forEach(r => r.remove()); logRows.forEach(([s, e, r], i) => t.insertAdjacentHTML('beforeend', `<tr><td>${i + 1}</td><td><span class="tag ${s === '系统' ? 'ai' : 'me'}">${s}</span></td><td>${e}</td><td>${r}</td></tr>`)); }
+function reason(id, P) {
+  const t = byId[id], s = firstWeek(P[id]) + 1, e = lastWeek(P[id]) + 1;
+  if (st.locks[id] != null) return `你锁定在第 ${s} 周开始`;
+  const pre = t.pre.map(p => [p, lastWeek(P[p]) + 1]).sort((a, b) => b[1] - a[1])[0];
+  const why = pre ? `要等 ${byId[pre[0]].name} 在第 ${pre[1]} 周学完` : '没有前置任务，最先开始';
+  const crit = critical(id) ? '；在关键路径上' : '';
+  return `${why}${crit}；共 ${t.h} 小时，第 ${s}${e > s ? '—' + e : ''} 周`;
+}
+function render() {
+  const g = $('gantt'), P = st.preview ? st.preview.P : st.P, old = st.P;
+  let html = '<div class="h">任务</div>' + Array.from({ length: WEEKS }, (_, w) => `<div class="h">第${w + 1}周</div>`).join('') + '<div class="h" style="text-align:left">为什么排在这里</div>';
+  html += '<div class="cap">每周可用</div>' + st.caps.map((c, w) => `<div class="cap${(st.preview ? st.preview.caps : st.caps)[w] < 8 ? ' low' : ''}">${(st.preview ? st.preview.caps : st.caps)[w]} 小时</div>`).join('') + '<div></div>';
+  for (const t of TASKS) {
+    html += `<div>${t.name}</div>`;
+    for (let w = 0; w < WEEKS; w++) {
+      const v = P[t.id][w], o = old[t.id][w], locked = (st.preview ? st.preview.locks : st.locks)[t.id] != null;
+      let cls = locked ? 'lock' : ''; if (st.preview && v !== o) cls += v ? ' new' : '';
+      html += `<div class="cell">${v ? `<b class="${cls}">${v}</b>` : st.preview && o ? `<b class="gone">${o}</b>` : ''}</div>`;
+    }
+    html += `<div class="why">${reason(t.id, P)}</div>`;
+  }
+  html += `<div class="h" style="text-align:left">完成</div><div style="grid-column: span 14">第 ${finish(P)} 周${st.preview ? `（原计划第 ${finish(old)} 周）` : ''}</div><div></div>`;
+  g.innerHTML = html;
+}
+function mode() { return document.querySelector('input[name=mode]:checked').value; }
+// 用户改变条件 → 系统生成建议
+function changeCondition(desc, caps, locks, source = '用户') {
+  log(source, desc, source === '用户' ? '条件已更新' : '发现计划需要调整');
+  const P = replanKeep(st.P, caps, locks), moved = changed(st.P, P);
+  const key = JSON.stringify([caps, locks, moved]);   // 同样的情况、同样的建议
+  if (st.paused) { st.pending = { desc, caps, locks }; log('系统', '生成建议', '你正在手动调整，建议已暂停'); return; }
+  if (st.suppressed.has(key)) { log('系统', '生成建议', `与你拒绝过的建议相同（移动 ${moved.map(m => byId[m].name).join('、')}），不再提出`); return; }
+  st.preview = { desc, caps, locks, P, moved, key, source };
+  if (mode() === 'auto') { apply('自动应用'); return; }
+  if (mode() === 'manual') { log('系统', '生成建议', '已准备好，等你点“给我建议”'); }
+  showCard();
+}
+function showCard() {
+  const p = st.preview, c = $('card');
+  if (!p) { c.className = 'card off'; c.innerHTML = '暂无建议'; render(); return; }
+  c.className = 'card';
+  const f0 = finish(st.P), f1 = finish(p.P);
+  c.innerHTML = `<b>建议：重新安排 ${p.moved.length} 个任务</b>
+    <div>依据：${p.desc}。保留你锁定和亲手调整过的任务${st.soft.size ? `（${[...st.soft].map(x => byId[x].name).join('、')}）` : ''}，其余按前置关系重新排。</div>
+    <div>影响范围：${p.moved.map(m => byId[m].name).join('、') || '无'}；完成时间 第 ${f0} 周 → 第 ${f1} 周${f1 > f0 ? `（晚 ${f1 - f0} 周）` : ''}。</div>
+    <div class="bar"><button class="primary" id="apply">应用</button><button id="reject">拒绝…</button><button id="takeover">我自己调整</button></div>`;
+  $('apply').onclick = () => apply('用户点“应用”');
+  $('reject').onclick = () => reject('不想推迟作品集');
+  $('takeover').onclick = takeover;
+  render();
+}
+function apply(how) {
+  const p = st.preview; st.undo.push({ caps: st.caps, locks: st.locks, P: st.P });
+  st.caps = p.caps; st.locks = p.locks; st.P = p.P; st.preview = null;
+  log(how === '自动应用' ? '系统' : '用户', how, `已应用：移动 ${p.moved.map(m => byId[m].name).join('、')}，完成于第 ${finish(st.P)} 周`); showCard();
+}
+function reject(why) {   // 拒绝：计划与条件都保持不变；记住原因，同样的建议不再主动提出
+  const p = st.preview; st.suppressed.add(p.key); st.rejected.push({ ...p, why }); st.preview = null;
+  log('用户', `拒绝建议，原因：“${why}”`, '计划保持不变；同样的建议不再提出，可以在记录中恢复'); showCard();
+}
+function takeover() { st.paused = true; st.pending = st.preview; st.preview = null; log('用户', '我自己调整', '系统暂停建议，直到你点“继续给建议”'); showCard(); }
+function manualMove(id, fromW, toW, hours) {   // 用户自己把某任务的部分时间挪到另一周
+  st.undo.push({ caps: st.caps, locks: st.locks, P: st.P });
+  const P = JSON.parse(JSON.stringify(st.P)); P[id][fromW] -= hours; P[id][toW] += hours; st.P = P; st.soft.add(id);   // 记住：这是用户亲手放的
+  const ok = valid(P, st.locks), over = P && st.caps.some((c, w) => TASKS.reduce((s, t) => s + P[t.id][w], 0) > c);
+  log('用户', `手动把 ${byId[id].name} 的 ${hours} 小时从第 ${fromW + 1} 周移到第 ${toW + 1} 周`, ok && !over ? '已修改' : '已修改；有一周超出可用时间（系统只提示，不改回）'); render();
+}
+function resume() { st.paused = false; log('用户', '继续给建议', '系统恢复建议'); if (st.pending) { const q = st.pending; st.pending = null; changeCondition('（恢复后重新检查）' + q.desc, q.caps, q.locks); } }
+function undo() { const u = st.undo.pop(); if (!u) return; Object.assign(st, u); log('用户', '撤销', `回到上一个计划，完成于第 ${finish(st.P)} 周`); render(); }
+function restoreRejected() {   // 恢复被拒绝的建议：在当前计划上重新计算影响，而不是照搬当时的结果
+  const p = st.rejected.pop(); if (!p) return; st.suppressed.delete(p.key);
+  const caps = st.caps.slice(); p.caps.forEach((c, w) => { if (c < 8) caps[w] = c; });
+  const P = replanKeep(st.P, caps, st.locks);
+  st.preview = { ...p, caps, locks: st.locks, P, moved: changed(st.P, P) };
+  log('用户', `从记录中恢复被拒绝的建议（当时的原因：“${p.why}”）`, `按当前计划重新计算：影响 ${st.preview.moved.length} 个任务`); showCard();
+}
+
+// ---------- 200 次随机变化 ----------
+function compare() {
+  // 基准计划：系统排出的计划，加上用户的一处手动调整——把“数据清洗”全部挪到第 8 周（用户想先专心学图表）
+  const base = plan(Array(WEEKS).fill(8), {}); base.T3 = Array(WEEKS).fill(0); base.T3[7] = 6;
+  const tweak = P => P.T3[7] === 6;
+  const r = rng(17), mk = () => ({ ch: [], fin: [], big: 0, later: 0, bad: 0, kept: 0 }), A = mk(), B = mk(), C = mk();
+  for (let i = 0; i < 200; i++) {
+    const caps = Array(WEEKS).fill(8), locks = {};
+    if (r() < 0.6) caps[1 + Math.floor(r() * 9)] = Math.floor(r() * 5);
+    else { const id = ['T2', 'T4', 'T5', 'T6'][Math.floor(r() * 4)], s = firstWeek(base[id]); locks[id] = Math.min(WEEKS - 3, s + 1 + Math.floor(r() * 2)); }   // 锁定为推迟 1—2 周开始
+    const soft = new Set(['T3']), res = [[A, plan(caps, locks)], [B, replanStable(base, caps, locks, soft)], [C, replanKeep(base, caps, locks, soft)]];
+    const best = Math.min(...res.map(([, P]) => finish(P)));
+    for (const [X, P] of res) { const c = changed(base, P).length; X.ch.push(c); X.fin.push(finish(P)); if (c >= 4) X.big++; if (finish(P) > best) X.later++; if (!valid(P, locks)) X.bad++; if (tweak(P)) X.kept++; }
+  }
+  const m = a => a.reduce((s, x) => s + x, 0) / a.length;
+  for (const [name, X] of [['从头重排（每次都求最早完成）', A], ['修补（从原计划出发，只往后推）', B], ['保留用户的调整，其余重新排', C]]) $('cmp').insertAdjacentHTML('beforeend', `<tr><td>${name}</td><td class="num">${m(X.ch).toFixed(2)}</td><td class="num">${X.big}</td><td class="num ${X.kept > 150 ? 'good' : 'poor'}">${X.kept} / 200</td><td class="num">${m(X.fin).toFixed(2)}</td><td class="num">${X.later}</td><td class="num ${X.bad ? 'poor' : 'good'}">${X.bad}</td></tr>`);
+  const o = X => ({ ch: +m(X.ch).toFixed(3), big: X.big, kept: X.kept, fin: +m(X.fin).toFixed(3), later: X.later, bad: X.bad });
+  return { A: o(A), B: o(B), C: o(C) };
+}
+const cmp = compare();
+render();
+window.__cc = { st, changeCondition, apply, reject, takeover, manualMove, resume, undo, restoreRejected, showCard, render, cmp, finish, logRows, setMode: v => { document.querySelector(`input[name=mode][value=${v}]`).checked = true; }, firstWeek, lastWeek };
+</script>
+</body>
+</html>

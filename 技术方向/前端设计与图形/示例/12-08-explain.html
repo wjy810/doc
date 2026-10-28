@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>学习与解释工具：弹簧为什么会回弹（可探索的解释）</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .three { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; align-items: start; }
+  svg { display: block; width: 100%; height: auto; background: #fafbfc; border-radius: 8px; }
+  .ctl { display: grid; grid-template-columns: 70px 1fr 120px; gap: 6px; align-items: center; }
+  input[type=range] { width: 100%; }
+  .big { font-size: 15px; } .big b { color: #2f6fdb; }
+  .lvl { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 4px; background: #eef3ff; color: #2456b0; margin-right: 4px; }
+  .quiz { border: 1px solid #f0b429; background: #fffaf0; border-radius: 8px; padding: 8px 10px; display: grid; gap: 6px; }
+  .quiz button { font: inherit; padding: 2px 10px; border-radius: 6px; border: 1px solid #b9c0cc; background: #fff; cursor: pointer; }
+  .quiz button.picked { border-color: #2f6fdb; background: #eef3ff; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>弹簧为什么会回弹？——界面动画里的“弹簧”只有两个旋钮</h2>
+  <p class="sub">学习目标：读完后能说出 ① 刚度决定快慢，② 阻尼比 ζ 决定会不会回弹（ζ ＜ 1 回弹，ζ ＝ 1 不回弹里最快，ζ ＞ 1 慢慢靠近），③ 能为一个具体的界面动画选出合适的参数。先修：知道什么是动画缓动；不需要会解微分方程。</p>
+  <div class="two">
+    <div style="display:grid;gap:6px">
+      <div><span class="lvl">第 1 层 · 一次运动</span><span class="sub">拖动滑块，看方块怎样移到右边的目标位置。</span></div>
+      <svg id="stage" viewBox="0 0 520 90"></svg>
+      <div class="ctl"><label for="k">刚度 k</label><input type="range" id="k" min="20" max="400" step="1" value="170"><span id="kv"></span></div>
+      <div class="ctl"><label for="c">阻尼 c</label><input type="range" id="c" min="1" max="50" step="0.5" value="8"><span id="cv"></span></div>
+      <p class="big" id="zeta"></p>
+    </div>
+    <div style="display:grid;gap:6px">
+      <div><span class="lvl">第 2 层 · 整个过程</span><span class="sub">把运动画成“位置—时间”曲线，标出回弹的高度和稳定下来的时间。</span></div>
+      <svg id="trace" viewBox="0 0 520 220"></svg>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px">
+      <div><span class="lvl">第 3 层 · 改变一个参数</span><span class="sub">刚度不变，阻尼取五个值：曲线从“来回晃”到“慢慢爬”。</span></div>
+      <svg id="multi" viewBox="0 0 520 220"></svg>
+    </div>
+    <div style="display:grid;gap:6px">
+      <div><span class="lvl">第 4 层 · 两个参数的地图</span><span class="sub">每个点是一组 (k, c)，颜色是回弹高度。虚线是 ζ ＝ 1。点击地图上的任意位置，回到第 1 层看那一组参数的运动。</span></div>
+      <svg id="map" viewBox="0 0 520 260"></svg>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="three">
+    <div style="display:grid;gap:6px">
+      <h3>先预测，再验证</h3>
+      <div class="quiz" id="quiz"></div>
+      <table id="qlog"><tr><th>问题</th><th>预测</th><th>结果</th></tr></table>
+    </div>
+    <div style="display:grid;gap:6px">
+      <h3>操作与概念的对应</h3>
+      <table>
+        <tr><th>操作</th><th>对应的概念</th></tr>
+        <tr><td>拖动刚度 k</td><td>固有频率 ω ＝ √k：k 变成 4 倍，运动快 2 倍</td></tr>
+        <tr><td>拖动阻尼 c</td><td>阻尼比 ζ ＝ c ／（2√k）：同样的 c，k 越大越容易回弹</td></tr>
+        <tr><td>看第 3 层的五条曲线</td><td>ζ 从小到大：回弹逐渐消失，过了 1 以后变慢</td></tr>
+        <tr><td>在地图上沿着虚线走</td><td>都是“刚好不回弹”，但越往上越快</td></tr>
+        <tr><td>点击地图上的点</td><td>从抽象回到具体：看这一组参数实际怎样动</td></tr>
+      </table>
+    </div>
+    <div style="display:grid;gap:6px">
+      <h3>模拟可信吗：与公式对比</h3>
+      <table id="verify"><tr><th>ζ</th><th>模拟的回弹</th><th>公式 e^(−ζπ／√(1−ζ²))</th><th>差</th></tr></table>
+      <p class="sub" id="vnote"></p>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>怎样知道它真的帮助了理解：评价方案</h2>
+  <div class="two">
+    <table>
+      <tr><th>阶段</th><th>内容</th><th>看什么</th></tr>
+      <tr><td>前测（3 分钟）</td><td>三道选择题：哪组参数会回弹？怎样让动画更快又不回弹？</td><td>已有知识；避免“本来就会”</td></tr>
+      <tr><td>使用（10 分钟）</td><td>自由探索，配合本页的预测问题</td><td>访问了哪几层、预测是否正确、在哪里停留与反复</td></tr>
+      <tr><td>后测（3 分钟）</td><td>与前测同类、数字不同的题目</td><td>前后测的变化</td></tr>
+      <tr><td>迁移题</td><td>“一个提示框弹出时想要轻微回弹（约 5%），应怎样调？”</td><td>能否把概念用到新情境</td></tr>
+      <tr><td>对照</td><td>另一组只读一段带公式的文字说明</td><td>可探索版本是否比文字更好、对谁更好</td></tr>
+    </table>
+    <div style="display:grid;gap:6px"><h3>本次（测试脚本）的交互记录</h3><table id="ilog"><tr><th>时间</th><th>层</th><th>操作</th></tr></table><p class="sub">记录由测试脚本的操作产生，只用于展示要收集什么，不是学习效果的证据。</p></div>
+  </div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs, parent, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; parent && parent.appendChild(e); return e; };
+const T_END = 2.5;
+
+// RK4 积分：x'' = −k(x − 1) − c·x'，从 x = 0 静止出发
+function simulate(k, c, dt = 1 / 600, tEnd = T_END) {
+  const f = (x, v) => [v, -k * (x - 1) - c * v];
+  let x = 0, v = 0; const xs = [0];
+  for (let t = 0; t < tEnd - 1e-9; t += dt) {
+    const [a1, b1] = f(x, v), [a2, b2] = f(x + a1 * dt / 2, v + b1 * dt / 2), [a3, b3] = f(x + a2 * dt / 2, v + b2 * dt / 2), [a4, b4] = f(x + a3 * dt, v + b3 * dt);
+    x += dt / 6 * (a1 + 2 * a2 + 2 * a3 + a4); v += dt / 6 * (b1 + 2 * b2 + 2 * b3 + b4); xs.push(x);
+  }
+  return xs;
+}
+function metrics(xs, dt = 1 / 600) {
+  const over = Math.max(0, Math.max(...xs) - 1); let settle = 0;
+  for (let i = xs.length - 1; i >= 0; i--) if (Math.abs(xs[i] - 1) > 0.02) { settle = (i + 1) * dt; break; }
+  const reached = xs.some(x => Math.abs(x - 1) <= 0.02);
+  return { over, settle: reached && settle < T_END - 0.01 ? settle : null };
+}
+const zetaOf = (k, c) => c / (2 * Math.sqrt(k));
+const ilog = []; const t0 = performance.now();
+function logI(level, what) { ilog.push([((performance.now() - t0) / 1000).toFixed(1) + ' 秒', level, what]); const t = $('ilog'); [...t.rows].slice(1).forEach(r => r.remove()); for (const [a, b, c] of ilog.slice(-9)) t.insertAdjacentHTML('beforeend', `<tr><td class="num">${a}</td><td>${b}</td><td>${c}</td></tr>`); }
+
+// 第 1、2 层
+let anim = { start: performance.now(), frozen: null };
+function params() { return [+$('k').value, +$('c').value]; }
+function drawTrace() {
+  const [k, c] = params(), xs = simulate(k, c), m = metrics(xs), z = zetaOf(k, c), svg = $('trace');
+  svg.innerHTML = ''; const X = t => 40 + t / T_END * 460, Y = x => 190 - x * 110;
+  el('line', { x1: 40, y1: Y(1), x2: 500, y2: Y(1), stroke: '#8a93a3', 'stroke-dasharray': '4 3' }, svg); el('text', { x: 36, y: Y(1) + 4, 'text-anchor': 'end', 'font-size': 10, fill: '#5b6475' }, svg, '目标');
+  el('rect', { x: 40, y: Y(1.02), width: 460, height: Y(0.98) - Y(1.02), fill: '#1f7a4d', 'fill-opacity': 0.12 }, svg);
+  el('line', { x1: 40, y1: Y(0), x2: 500, y2: Y(0), stroke: '#c2c8d0' }, svg); el('text', { x: 36, y: Y(0) + 4, 'text-anchor': 'end', 'font-size': 10, fill: '#5b6475' }, svg, '起点');
+  const step = 4; el('path', { d: 'M' + xs.filter((_, i) => i % step === 0).map((x, i) => `${X(i * step / 600).toFixed(1)} ${Y(x).toFixed(1)}`).join('L'), fill: 'none', stroke: '#2f6fdb', 'stroke-width': 2.2 }, svg);
+  if (m.over > 0.005) { const i = xs.indexOf(Math.max(...xs)); el('line', { x1: X(i / 600), y1: Y(1), x2: X(i / 600), y2: Y(xs[i]), stroke: '#e4572e', 'stroke-width': 2 }, svg); el('text', { x: X(i / 600) + 6, y: Y(xs[i]) + 4, 'font-size': 11, fill: '#e4572e' }, svg, `回弹 ${(m.over * 100).toFixed(1)}%`); }
+  if (m.settle) { el('line', { x1: X(m.settle), y1: Y(0), x2: X(m.settle), y2: Y(1.1), stroke: '#1f7a4d', 'stroke-dasharray': '3 2' }, svg); el('text', { x: X(m.settle) + 4, y: Y(0) - 6, 'font-size': 11, fill: '#1f7a4d' }, svg, `${m.settle.toFixed(2)} 秒后稳定（±2%）`); }
+  for (let t = 0; t <= T_END; t += 0.5) el('text', { x: X(t), y: 210, 'text-anchor': 'middle', 'font-size': 10, fill: '#5b6475' }, svg, t + ' 秒');
+  $('kv').textContent = `${k}（ω ＝ ${Math.sqrt(k).toFixed(1)}）`; $('cv').textContent = c;
+  const kind = z < 0.98 ? '欠阻尼：会回弹' : z <= 1.02 ? '接近临界阻尼：刚好不回弹' : '过阻尼：慢慢靠近，不回弹';
+  $('zeta').innerHTML = `阻尼比 ζ ＝ ${c} ／（2 × √${k}）＝ <b>${z.toFixed(2)}</b>，${kind}`;
+  anim.xs = xs; return { k, c, z, ...m };
+}
+function drawStage() {
+  const svg = $('stage'), xs = anim.xs; if (!xs) return;
+  const t = anim.frozen != null ? anim.frozen : ((performance.now() - anim.start) / 1000) % (T_END + 0.6);
+  const x = xs[Math.min(xs.length - 1, Math.round(Math.min(t, T_END) * 600))];
+  svg.innerHTML = ''; el('line', { x1: 30, y1: 70, x2: 500, y2: 70, stroke: '#c2c8d0' }, svg);
+  el('rect', { x: 400, y: 20, width: 50, height: 50, rx: 6, fill: 'none', stroke: '#8a93a3', 'stroke-dasharray': '4 3' }, svg); el('text', { x: 425, y: 86, 'text-anchor': 'middle', 'font-size': 10, fill: '#5b6475' }, svg, '目标');
+  const px = 40 + x * 360; el('rect', { x: px, y: 20, width: 50, height: 50, rx: 6, fill: '#2f6fdb' }, svg);
+  el('text', { x: 10, y: 14, 'font-size': 10, fill: '#5b6475' }, svg, `t ＝ ${Math.min(t, T_END).toFixed(2)} 秒`);
+}
+function loop() { drawStage(); requestAnimationFrame(loop); }
+
+// 第 3 层：五条曲线
+function drawMulti() {
+  const svg = $('multi'), k = +$('k').value, cs = [0.2, 0.5, 1, 1.5, 3].map(z => +(z * 2 * Math.sqrt(k)).toFixed(1)), colors = ['#e4572e', '#f0b429', '#1f7a4d', '#2f6fdb', '#7b4bd1'];
+  svg.innerHTML = ''; const X = t => 40 + t / T_END * 350, Y = x => 190 - x * 100;
+  el('line', { x1: 40, y1: Y(1), x2: 390, y2: Y(1), stroke: '#8a93a3', 'stroke-dasharray': '4 3' }, svg);
+  cs.forEach((c, j) => { const xs = simulate(k, c); el('path', { d: 'M' + xs.filter((_, i) => i % 6 === 0).map((x, i) => `${X(i * 6 / 600).toFixed(1)} ${Y(x).toFixed(1)}`).join('L'), fill: 'none', stroke: colors[j], 'stroke-width': 2 }, svg); el('text', { x: 398, y: 40 + j * 24, 'font-size': 11, fill: colors[j] }, svg, `ζ ＝ ${[0.2, 0.5, 1, 1.5, 3][j]}（c ＝ ${c}）`); });
+  for (let t = 0; t <= T_END; t += 0.5) el('text', { x: X(t), y: 210, 'text-anchor': 'middle', 'font-size': 10, fill: '#5b6475' }, svg, t + ' 秒');
+  el('text', { x: 40, y: 14, 'font-size': 11, fill: '#1d2330' }, svg, `k ＝ ${k}`);
+}
+// 第 4 层：地图
+const MAP = { x0: 50, y0: 10, w: 400, h: 210, kMin: 20, kMax: 400, cMin: 1, cMax: 50 };
+const mk = px => MAP.kMin + (px - MAP.x0) / MAP.w * (MAP.kMax - MAP.kMin), mc = py => MAP.cMax - (py - MAP.y0) / MAP.h * (MAP.cMax - MAP.cMin);
+const kx = k => MAP.x0 + (k - MAP.kMin) / (MAP.kMax - MAP.kMin) * MAP.w, cy = c => MAP.y0 + (MAP.cMax - c) / (MAP.cMax - MAP.cMin) * MAP.h;
+function overshootAnalytic(z) { return z >= 1 ? 0 : Math.exp(-z * Math.PI / Math.sqrt(1 - z * z)); }
+function drawMap() {
+  const svg = $('map'); svg.innerHTML = ''; const N = 40, M = 30;
+  for (let i = 0; i < N; i++) for (let j = 0; j < M; j++) {
+    const k = MAP.kMin + (i + 0.5) / N * (MAP.kMax - MAP.kMin), c = MAP.cMax - (j + 0.5) / M * (MAP.cMax - MAP.cMin), o = overshootAnalytic(zetaOf(k, c));
+    const col = o <= 0 ? '#e9f1fc' : `hsl(${18 + 30 * (1 - Math.min(1, o / 0.6))}, 85%, ${92 - 42 * Math.min(1, o / 0.6)}%)`;
+    el('rect', { x: MAP.x0 + i * MAP.w / N, y: MAP.y0 + j * MAP.h / M, width: MAP.w / N + 0.5, height: MAP.h / M + 0.5, fill: col }, svg);
+  }
+  el('path', { d: 'M' + Array.from({ length: 60 }, (_, i) => { const k = MAP.kMin + i / 59 * (MAP.kMax - MAP.kMin); return `${kx(k).toFixed(1)} ${cy(2 * Math.sqrt(k)).toFixed(1)}`; }).join('L'), fill: 'none', stroke: '#1d2330', 'stroke-width': 2, 'stroke-dasharray': '6 4' }, svg);
+  el('text', { x: kx(330), y: cy(2 * Math.sqrt(330)) - 8, 'font-size': 11, fill: '#1d2330' }, svg, 'ζ ＝ 1');
+  el('text', { x: kx(300), y: cy(46), 'font-size': 11, fill: '#2456b0' }, svg, '不回弹（过阻尼）');
+  el('text', { x: kx(240), y: cy(8), 'font-size': 11, fill: '#7a2a10' }, svg, '回弹');
+  const [k, c] = params(); el('circle', { cx: kx(k), cy: cy(c), r: 6, fill: '#fff', stroke: '#1d2330', 'stroke-width': 2 }, svg);
+  for (const kk of [20, 100, 200, 300, 400]) el('text', { x: kx(kk), y: 236, 'text-anchor': 'middle', 'font-size': 10, fill: '#5b6475' }, svg, kk);
+  for (const cc of [1, 10, 20, 30, 40, 50]) el('text', { x: 44, y: cy(cc) + 3, 'text-anchor': 'end', 'font-size': 10, fill: '#5b6475' }, svg, cc);
+  el('text', { x: 250, y: 254, 'text-anchor': 'middle', 'font-size': 11, fill: '#5b6475' }, svg, '刚度 k →'); el('text', { x: 12, y: 16, 'font-size': 11, fill: '#5b6475' }, svg, 'c');
+  for (let i = 0; i <= 5; i++) { const o = i * 0.12; el('rect', { x: 466, y: 20 + i * 18, width: 14, height: 14, fill: o === 0 ? '#e9f1fc' : `hsl(${18 + 30 * (1 - Math.min(1, o / 0.6))}, 85%, ${92 - 42 * Math.min(1, o / 0.6)}%)` }, svg); el('text', { x: 484, y: 31 + i * 18, 'font-size': 10, fill: '#5b6475' }, svg, `${Math.round(o * 100)}%`); }
+}
+$('map').addEventListener('click', e => {
+  const r = $('map').getBoundingClientRect(), x = (e.clientX - r.left) * 520 / r.width, y = (e.clientY - r.top) * 260 / r.height;
+  if (x < MAP.x0 || x > MAP.x0 + MAP.w || y < MAP.y0 || y > MAP.y0 + MAP.h) return;
+  $('k').value = Math.round(mk(x)); $('c').value = Math.round(mc(y) * 2) / 2; update('第 4 层 → 第 1 层', `点击地图：k ＝ ${$('k').value}，c ＝ ${$('c').value}`);
+});
+function update(level, what) { const m = drawTrace(); drawMulti(); drawMap(); anim.start = performance.now(); if (level) logI(level, what + `；ζ ＝ ${m.z.toFixed(2)}，回弹 ${(m.over * 100).toFixed(1)}%`); return m; }
+$('k').addEventListener('input', () => update('第 1 层', `拖动刚度到 ${$('k').value}`));
+$('c').addEventListener('input', () => update('第 1 层', `拖动阻尼到 ${$('c').value}`));
+
+// 预测
+const questions = [
+  { q: '现在 k ＝ 170、c ＝ 8。如果把阻尼 c 加到 26，回弹会怎样？', opts: ['回弹更大', '回弹变小但还在', '几乎没有回弹'], set: [170, 26], check: m => m.over < 0.01 ? 2 : m.over < 0.3 ? 1 : 0 },
+  { q: '保持 c ＝ 26，把刚度 k 加到 400，会怎样？', opts: ['仍然不回弹', '又开始回弹', '变得更慢'], set: [400, 26], check: m => m.over > 0.01 ? 1 : 0 }
+];
+const qlog = []; let qi = 0;
+function showQuiz() {
+  const box = $('quiz'), q = questions[qi];
+  if (!q) { box.innerHTML = '<div>两道预测题都完成了。试着回答：为什么同样的 c，k 变大后又会回弹？（提示：看 ζ 的公式）</div>'; return; }
+  box.innerHTML = `<div>${q.q}</div><div style="display:flex;gap:6px;flex-wrap:wrap">${q.opts.map((o, i) => `<button data-i="${i}">${o}</button>`).join('')}</div>`;
+  box.querySelectorAll('button').forEach(b => b.onclick = () => answer(+b.dataset.i));
+}
+function answer(i) {
+  const q = questions[qi]; $('k').value = q.set[0]; $('c').value = q.set[1];
+  const m = update('预测', `回答“${q.opts[i]}”，然后自动设为 k ＝ ${q.set[0]}、c ＝ ${q.set[1]} 验证`), right = q.check(m);
+  qlog.push([`第 ${qi + 1} 题`, q.opts[i], right === i ? `正确：${q.opts[right]}` : `实际是：${q.opts[right]}`]);
+  const t = $('qlog'); [...t.rows].slice(1).forEach(r => r.remove()); for (const [a, b, c] of qlog) t.insertAdjacentHTML('beforeend', `<tr><td>${a}</td><td>${b}</td><td class="${c.startsWith('正确') ? 'good' : 'mid'}">${c}</td></tr>`);
+  qi++; showQuiz();
+}
+
+// 与公式对比
+const ver = [];
+for (const z of [0.1, 0.2, 0.3, 0.5, 0.7, 0.9]) {
+  const k = 200, c = z * 2 * Math.sqrt(k), sim = metrics(simulate(k, c, 1 / 600, 4)).over, ana = overshootAnalytic(z);
+  ver.push(Math.abs(sim - ana));
+  $('verify').insertAdjacentHTML('beforeend', `<tr><td class="num">${z}</td><td class="num">${(sim * 100).toFixed(3)}%</td><td class="num">${(ana * 100).toFixed(3)}%</td><td class="num">${(Math.abs(sim - ana) * 100).toExponential(1)}%</td></tr>`);
+}
+$('vnote').textContent = `四阶龙格—库塔法，步长 1/600 秒；最大差 ${(Math.max(...ver) * 100).toExponential(1)} 个百分点。模拟与解析解一致，地图直接用公式着色。`;
+
+update(); showQuiz(); loop();
+window.__ex = { update, answer, questions, qlog, ilog, simulate, metrics, freeze: t => { anim.frozen = t; drawStage(); }, ver };
+</script>
+</body>
+</html>
