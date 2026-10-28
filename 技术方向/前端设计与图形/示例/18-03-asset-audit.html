@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>设计资产审计：组件、令牌、图标与资产目录</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 4px 0 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } table.t tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .col { display: grid; gap: 6px; align-content: start; }
+  .pages { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .frame { border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: #fff; font-size: 12px; }
+  .frame > b { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .sw { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -3px; margin-right: 3px; border: 1px solid #0002; }
+  .ic { width: 18px; height: 18px; vertical-align: -4px; }
+</style>
+<!-- 被审计的“产品”样式：故意包含历史遗留的重复与不一致 -->
+<style id="product">
+  :root { --color-primary: #2f6fdb; --color-danger: #b3261e; --color-success: #1f7a4d; --color-text: #1d2330; --color-muted: #5b6475; --radius-md: 6px; --radius-lg: 10px; }
+  .p button { font-family: inherit; border: 0; color: #fff; cursor: pointer; margin: 2px; }
+  .btn-primary { background: var(--color-primary); border-radius: 6px; padding: 6px 14px; font-size: 14px; }
+  .btn-primary:hover { background: #2a63c6; }
+  .btn-primary:focus-visible { outline: 3px solid #2f6fdb66; }
+  .btn-primary:disabled { opacity: .5; }
+  .btn-blue { background: #3070dc; border-radius: 4px; padding: 8px 16px; font-size: 14px; }
+  .btn-blue:hover { background: #2a63c6; }
+  .submit { background: #2e6edb; border-radius: 6px; padding: 6px 14px; font-size: 13px; }
+  .action-btn { background: #1f7a4d; border-radius: 20px; padding: 6px 16px; font-size: 13px; }
+  .btn-danger { background: var(--color-danger); border-radius: 6px; padding: 6px 14px; font-size: 14px; }
+  .btn-danger:focus-visible { outline: 3px solid #b3261e66; }
+  .delete { background: #b42a20; border-radius: 6px; padding: 6px 12px; font-size: 14px; }
+  .p .link-button { background: none; color: #2f6fdb; padding: 0 4px; font-size: 13px; }
+  .tag { display: inline-block; background: #e8eefb; color: #1f4fae; border-radius: 9px; padding: 0 8px; font-size: 11px; }
+  .badge { display: inline-block; background: #e9effb; color: #1f4fae; border-radius: 10px; padding: 0 7px; font-size: 11px; }
+  .label-pill { display: inline-block; background: #fff3d6; color: #7a4a00; border-radius: 9px; padding: 0 8px; font-size: 11px; }
+  .card { border: 1px solid #dde1e7; border-radius: 8px; padding: 8px; margin: 4px 0; }
+  .course-card { border: 1px solid #dfe2e8; border-radius: 10px; padding: 10px; margin: 4px 0; }
+  .muted, .hint { color: #5b6475; font-size: 12px; } .hint { color: #5d6677; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>被审计的三个页面（同一个学习产品，三年里由不同的人做）</h2>
+  <p class="sub">页面、组件和图标为演示而构造。下面的审计读的是浏览器里实际计算出的样式和样式表本身。</p>
+  <div class="pages">
+    <div class="frame p" id="pg1"><b>课程列表</b>
+      <div class="card"><span class="tag">数据</span> <span class="badge">新</span><div><b>数据可视化入门</b></div><div class="muted">12 周 · 每周 8 小时</div><button class="btn-primary">开始学习</button><button class="link-button">收藏</button></div>
+      <div class="card"><span class="tag">前端</span><div><b>CSS 布局</b></div><div class="muted">6 周</div><button class="btn-blue">开始学习</button></div>
+      <div class="hint">共 24 门课程</div></div>
+    <div class="frame p" id="pg2"><b>课程详情</b>
+      <div class="course-card"><span class="label-pill">即将开课</span><div><b>数据可视化入门</b></div><div class="hint">报名截止 11 月 3 日</div><button class="submit">报名</button><button class="action-btn">加入学习计划</button><button style="background:#2f6fdb;border-radius:8px;padding:6px 14px;font-size:14px">咨询助教</button></div></div>
+    <div class="frame p" id="pg3"><b>个人中心</b>
+      <div class="card"><div><b>我的学习计划</b></div><div class="muted">本周 3 项</div><button class="btn-primary" disabled>已保存</button><button class="btn-danger">退出课程</button><button class="delete">删除记录</button></div>
+      <div id="icons"></div></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div class="col"><h2>1 组件：同一种按钮有几种样子</h2><table class="t" id="buttons"></table><p class="m" id="mbuttons"></p>
+      <h3>交互状态有没有定义</h3><table class="t" id="states"></table></div>
+    <div class="col"><h2>2 令牌：颜色是否都来自令牌</h2><table class="t" id="colors"></table><p class="m" id="mcolors"></p>
+      <h2>3 图标：重复与风格不一致</h2><table class="t" id="icons-t"></table></div>
+  </div>
+</section>
+<section class="panel">
+  <h2>4 资产目录：命名、状态、负责人、变更记录与淘汰</h2>
+  <table class="t" id="registry"></table><p class="m" id="mreg"></p>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ok = (b, y = '✓', n = '✗') => b ? `<span class="good">${y}</span>` : `<span class="poor">${n}</span>`;
+const fnv = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(16).padStart(8, '0'); };
+const R = {};
+// ---------- 颜色工具：sRGB → Lab，CIE76 色差 ----------
+const parseRGB = s => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+const hexToRGB = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const toHex = c => '#' + c.map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+function lab([r, g, b]) {
+  const f = c => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+  const [R, G, B] = [f(r), f(g), f(b)], X = (R * 0.4124 + G * 0.3576 + B * 0.1805) / 0.95047, Yv = R * 0.2126 + G * 0.7152 + B * 0.0722, Z = (R * 0.0193 + G * 0.1192 + B * 0.9505) / 1.08883;
+  const t = v => v > 0.008856 ? Math.cbrt(v) : 7.787 * v + 16 / 116;
+  return [116 * t(Yv) - 16, 500 * (t(X) - t(Yv)), 200 * (t(Yv) - t(Z))];
+}
+const dE = (a, b) => { const A = lab(a), B = lab(b); return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]); };
+
+// ---------- 图标（故意包含重复与线宽不一致） ----------
+const ICONS = [
+  ['search', 'M11 11l4 4M7 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10z', 2], ['magnifier', 'M11 11l4 4M7 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10z', 1.5],
+  ['close', 'M4 4l10 10M14 4L4 14', 2], ['x', 'M4 4l10 10M14 4L4 14', 2], ['Close_Icon', 'M4 4l10 10M14 4L4 14', 1.5],
+  ['home', 'M3 9l6-5 6 5v6H3z', 2], ['user', 'M9 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 16c1-3 3-4 6-4s5 1 6 4', 2], ['calendar', 'M3 5h12v10H3zM3 8h12M6 3v3M12 3v3', 2],
+  ['bell', 'M5 13V9a4 4 0 0 1 8 0v4l1 2H4zM8 16h2', 1.5], ['star', 'M9 2l2 5h5l-4 3 2 5-5-3-5 3 2-5-4-3h5z', 2], ['Star-Filled', 'M9 2l2 5h5l-4 3 2 5-5-3-5 3 2-5-4-3h5z', 2], ['download', 'M9 3v9M5 8l4 4 4-4M3 15h12', 2]
+];
+$('icons').innerHTML = ICONS.map(([n, d, w]) => `<svg class="ic" viewBox="0 0 18 18" aria-label="${n}"><path d="${d}" fill="none" stroke="#1d2330" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round"/></svg>`).join(' ');
+
+// ---------- 1 按钮 ----------
+const buttons = [...document.querySelectorAll('.p button')];
+const sig = el => { const cs = getComputedStyle(el); return { bg: cs.backgroundColor, color: cs.color, radius: cs.borderTopLeftRadius, pad: `${cs.paddingTop} ${cs.paddingLeft}`, size: cs.fontSize }; };
+const variants = new Map();
+for (const b of buttons) { const s = sig(b), key = JSON.stringify(s), name = b.className || '（行内样式）'; if (!variants.has(key)) variants.set(key, { s, names: new Set(), texts: [] }); variants.get(key).names.add(name); variants.get(key).texts.push(b.textContent); }
+const V = [...variants.values()];
+// 把“看起来几乎一样”的分到一组：背景色差 < 3，且都不是文字按钮
+const groups = [];
+for (const v of V) {
+  const c = parseRGB(v.s.bg), transparent = v.s.bg.includes('rgba(0, 0, 0, 0)');
+  const g = groups.find(g => !transparent && !g.transparent && dE(c, g.c) < 3);
+  if (g) g.items.push(v); else groups.push({ c, transparent, items: [v] });
+}
+const roleOf = g => g.transparent ? '文字按钮' : dE(g.c, hexToRGB('#2f6fdb')) < 3 ? '主要按钮' : dE(g.c, hexToRGB('#b3261e')) < 3 ? '危险按钮' : dE(g.c, hexToRGB('#1f7a4d')) < 3 ? '成功按钮' : '其他';
+$('buttons').innerHTML = '<tr><th>实际是</th><th>样式变体</th><th>类名</th><th>背景、圆角、内边距、字号</th></tr>' + groups.map(g => g.items.map((v, i) => `<tr>${i === 0 ? `<th rowspan="${g.items.length}">${roleOf(g)}</th><td rowspan="${g.items.length}" class="num ${g.items.length > 1 ? 'poor' : ''}">${g.items.length}</td>` : ''}<td>${[...v.names].map(esc).join('、')}</td><td class="num"><span class="sw" style="background:${v.s.bg}"></span>${g.transparent ? '透明' : toHex(parseRGB(v.s.bg))}，${v.s.radius}，${v.s.pad}，${v.s.size}</td></tr>`).join('')).join('');
+const dupGroups = groups.filter(g => g.items.length > 1);
+$('mbuttons').innerHTML = `页面上有 ${buttons.length} 个按钮，${V.length} 种样子；按“背景色差小于 3（肉眼几乎看不出）”归组后，实际只有 ${groups.length} 种角色：主要按钮就有 ${groups.find(g => roleOf(g) === '主要按钮').items.length} 种写法（${toHex(hexToRGB('#2f6fdb'))}、#3070dc、#2e6edb 和一处行内样式），危险按钮 2 种。重复不只是难看：改一次主色要找 4 个地方。`;
+R.buttons = { count: buttons.length, variants: V.length, roles: groups.length, dup: dupGroups.map(g => [roleOf(g), g.items.length]) };
+
+// 交互状态：从样式表里找每个类的 :hover、:focus-visible、:disabled 规则
+const rules = [...$('product').sheet.cssRules].map(r => r.selectorText || '').filter(Boolean);
+const classes = [...new Set(buttons.map(b => b.className).filter(Boolean))];
+const has = (c, pseudo) => rules.some(sel => sel.split(',').some(s => s.includes('.' + c + pseudo)));
+const ST = classes.map(c => ({ c, hover: has(c, ':hover'), focus: has(c, ':focus-visible'), disabled: has(c, ':disabled') }));
+$('states').innerHTML = '<tr><th>类名</th><th>悬停</th><th>键盘焦点</th><th>禁用</th></tr>' + ST.map(s => `<tr><td>${s.c}</td><td>${ok(s.hover)}</td><td>${ok(s.focus)}</td><td>${ok(s.disabled)}</td></tr>`).join('');
+R.states = { classes: ST.length, noFocus: ST.filter(s => !s.focus).map(s => s.c), noDisabled: ST.filter(s => !s.disabled).length, noHover: ST.filter(s => !s.hover).length };
+
+// ---------- 2 颜色与令牌 ----------
+const TOKENS = Object.fromEntries([...$('product').sheet.cssRules].find(r => r.selectorText === ':root').cssText.match(/--color-[\w-]+:\s*#[0-9a-f]{6}/gi).map(x => { const [k, v] = x.split(/:\s*/); return [k, v]; }));
+const used = new Map();
+for (const r of $('product').sheet.cssRules) {
+  if (r.selectorText === ':root') continue;
+  const txt = r.cssText;
+  // 浏览器把规则里的颜色序列化成 rgb()／rgba()，两种写法都要找
+  for (const m of txt.matchAll(/#[0-9a-f]{6}\b|rgba?\(([^)]+)\)/gi)) {
+    let h;
+    if (m[0][0] === '#') h = m[0].toLowerCase();
+    else { const v = m[1].split(',').map(Number); if (v.length > 3 && v[3] === 0) continue; h = toHex(v.slice(0, 3)); }
+    used.set(h, (used.get(h) || []).concat(r.selectorText));
+  }
+}
+for (const b of buttons) { const st = b.getAttribute('style'); if (st) for (const m of st.matchAll(/#[0-9a-f]{6}/gi)) used.set(m[0].toLowerCase(), (used.get(m[0].toLowerCase()) || []).concat('行内样式')); }
+const tokenFor = h => { let best = null; for (const [k, v] of Object.entries(TOKENS)) { const d = dE(hexToRGB(h), hexToRGB(v)); if (!best || d < best.d) best = { k, v, d }; } return best; };
+const crows = [...used.entries()].map(([h, where]) => ({ h, where, t: tokenFor(h) })).sort((a, b) => a.t.d - b.t.d);
+const near = crows.filter(r => r.t.d < 3), exact = crows.filter(r => r.t.d < 0.01), missingTok = crows.filter(r => r.t.d >= 10);
+$('colors').innerHTML = '<tr><th>写死的颜色</th><th>用在</th><th>最接近的令牌</th><th>色差</th></tr>' + crows.map(r => `<tr><td class="num"><span class="sw" style="background:${r.h}"></span>${r.h}</td><td>${esc([...new Set(r.where)].join('、'))}</td>${r.t.d < 10 ? `<td>${r.t.k}（${r.t.v}）</td><td class="num ${r.t.d < 3 ? 'poor' : ''}">${r.t.d.toFixed(1)}</td>` : '<td class="mid">缺少令牌</td><td class="num">—</td>'}</tr>`).join('');
+$('mcolors').innerHTML = `样式表定义了 ${Object.keys(TOKENS).length} 个颜色令牌，规则里却写死了 ${crows.length} 个十六进制颜色；其中 ${near.length} 个与某个令牌的色差小于 3（${exact.length} 个完全相同），应当直接改用令牌。另有 ${missingTok.length} 个（浅蓝底、浅黄底、边框灰、白色等）附近没有任何令牌，说明令牌本身缺了一批中性色和浅底色，需要补进来并命名。`;
+R.colors = { tokens: Object.keys(TOKENS).length, hard: crows.length, near: near.length, exact: exact.length, missingTok: missingTok.length, mid: crows.length - near.length - missingTok.length };
+
+// ---------- 3 图标 ----------
+const byPath = new Map(); for (const [n, d, w] of ICONS) byPath.set(fnv(d), (byPath.get(fnv(d)) || []).concat([[n, w]]));
+const dupIcons = [...byPath.values()].filter(v => v.length > 1);
+const widths = [...new Set(ICONS.map(i => i[2]))], badNames = ICONS.filter(([n]) => !/^[a-z]+(-[a-z]+)*$/.test(n)).map(i => i[0]);
+$('icons-t').innerHTML = '<tr><th>检查</th><th>结果</th></tr>' +
+  `<tr><td>同一形状、不同名字</td><td class="poor">${dupIcons.length} 组：${dupIcons.map(g => g.map(x => x[0]).join(' = ')).join('；')}</td></tr>` +
+  `<tr><td>线宽</td><td class="${widths.length > 1 ? 'poor' : 'good'}">${widths.length} 种（${widths.join('、')}）：${ICONS.filter(i => i[2] !== 2).map(i => i[0]).join('、')} 用 1.5</td></tr>` +
+  `<tr><td>命名不符合“小写加连字符”</td><td class="poor">${badNames.join('、')}</td></tr>` +
+  `<tr><td>共计</td><td>${ICONS.length} 个图标，去重后 ${byPath.size} 个</td></tr>`;
+R.icons = { total: ICONS.length, unique: byPath.size, dupGroups: dupIcons.map(g => g.map(x => x[0])), widths, badNames };
+
+// ---------- 4 资产目录 ----------
+const REG = [
+  { name: 'Button／主要', status: '稳定', owner: '设计系统组', log: '2026-09 统一圆角为 6', used: buttons.filter(b => /btn-primary|btn-blue|submit/.test(b.className)).length },
+  { name: 'Button／危险', status: '稳定', owner: '设计系统组', log: '2026-05 新增', used: buttons.filter(b => /btn-danger|delete/.test(b.className)).length },
+  { name: 'btn-blue', status: '弃用', owner: '—', log: '', used: buttons.filter(b => b.className === 'btn-blue').length, replace: 'Button／主要', until: '' },
+  { name: 'Tag', status: '稳定', owner: '设计系统组', log: '2026-03 文字改为 11 像素', used: document.querySelectorAll('.tag').length },
+  { name: 'badge', status: '草稿', owner: '', log: '', used: document.querySelectorAll('.badge').length },
+  { name: 'CourseCard', status: '稳定', owner: '课程组', log: '2025-11 加封面图', used: document.querySelectorAll('.course-card').length },
+  { name: '图标：magnifier', status: '弃用', owner: '设计系统组', log: '2026-01 由 search 替代', used: 1, replace: 'search', until: '2026-12-31' },
+  { name: '空状态插画', status: '稳定', owner: '品牌组', log: '2026-02 增加深色版本', used: 0 }
+];
+const issues = r => [!r.owner || r.owner === '—' ? '没有负责人' : '', !r.log ? '没有变更记录' : '', r.status === '弃用' && r.used ? `已弃用但仍在用 ${r.used} 处` : '', r.status === '弃用' && (!r.replace || !r.until) ? '淘汰缺少替代品或截止日期' : '', r.status === '草稿' && r.used ? '草稿已上线' : '', r.used === 0 && r.status !== '弃用' ? '没有被使用' : '', !/^[A-Z][A-Za-z]+(／|$)|^图标：|^[一-龥]/.test(r.name) ? '命名不符合约定' : ''].filter(Boolean);
+$('registry').innerHTML = '<tr><th>资产</th><th>状态</th><th>负责人</th><th>最近变更</th><th>使用处</th><th>淘汰</th><th>问题</th></tr>' + REG.map(r => { const is = issues(r); return `<tr><td>${esc(r.name)}</td><td>${r.status}</td><td>${r.owner || '—'}</td><td class="sub">${r.log || '—'}</td><td class="num">${r.used}</td><td class="sub">${r.status === '弃用' ? `→ ${r.replace || '？'}${r.until ? `，${r.until} 前` : ''}` : '—'}</td><td class="${is.length ? 'poor' : 'good'}">${is.join('；') || '无'}</td></tr>`; }).join('');
+const regIssues = REG.reduce((n, r) => n + issues(r).length, 0);
+$('mreg').innerHTML = `目录里 ${REG.length} 项资产有 ${regIssues} 个问题。目录的作用是让每件资产都能回答：叫什么、能不能用（草稿／稳定／弃用）、出了问题找谁、最近改了什么、谁在用。淘汰要有替代品和截止日期，并按使用处逐个迁移；没有人使用的资产也要定期清理。`;
+R.registry = { items: REG.length, issues: regIssues, perItem: REG.map(r => [r.name, issues(r)]) };
+document.fonts.ready.then(() => { window.__aud = R; });
+</script>
+</body>
+</html>
