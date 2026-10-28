@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>地图：投影、比例尺、标注与聚合</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
+  figure { margin: 0; display: grid; gap: 2px; } figcaption { font-size: 12px; color: var(--muted); } figcaption b { color: var(--ink); }
+  svg { display: block; width: 100%; height: auto; background: #f3f6fa; border-radius: 6px; font: 10px "Noto Sans SC", sans-serif; }
+  .land { fill: #dfe3e8; stroke: #fff; stroke-width: 0.4; } .grat { fill: none; stroke: #cfd6df; stroke-width: 0.4; }
+  .gl { fill: #e08a7e; } .cd { fill: #7fa7e6; } .tissot { fill: #c0392b; fill-opacity: 0.35; stroke: #c0392b; stroke-width: 0.6; }
+  .key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 3px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>同一个地球，两种投影</h2>
+  <p class="sub">红色小圆是底索指线圈（Tissot's indicatrix）：地面上半径都是 556 千米（5°）的圆，画到平面上后的样子。它们变大、变扁的程度，就是投影在这里的面积与形状变形。<span class="key" style="background:#e08a7e"></span>格陵兰　<span class="key" style="background:#7fa7e6"></span>刚果（金）——两者的实际面积相近。</p>
+  <div class="two"><figure><svg id="merc" viewBox="0 0 540 330"></svg><figcaption><b>墨卡托投影</b>：保持局部形状与方向（适合导航和网页地图的缩放），面积随纬度变大。红线是 1000 千米。</figcaption></figure>
+    <figure><svg id="eqe" viewBox="0 0 540 330"></svg><figcaption><b>等面积投影（Equal Earth）</b>：面积比例正确，适合比较各地区的大小或画分级统计图；形状在边缘被拉斜。</figcaption></figure></div>
+  <div class="two"><table id="t1"></table><table id="t2"></table></div>
+</section>
+<section class="panel">
+  <h2>不同缩放等级，不同细节：聚合与标注避让</h2>
+  <p class="sub">一座城市的 80 个公共服务点（坐标为演示而构造）。同样的数据在三个缩放等级上显示：点在 48 像素的网格里聚合成带数字的圆；单独的点按重要性（医院 → 图书馆 → 社区中心 → 便民点）依次尝试在右、左、上、下放标注，和已放的标注或点重叠就放弃。</p>
+  <div class="three" id="zooms"></div>
+  <table id="t3"></table>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const R_EARTH = 6371;
+const URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json';
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const OUT = {};
+d3.json(URL).then(world => {
+  const land = topojson.feature(world, world.objects.countries), byId = id => land.features.find(f => f.id === id);
+  const GL = byId('304'), CD = byId('180'), noAnt = { type: 'FeatureCollection', features: land.features.filter(f => f.id !== '010') };
+  const circles = []; for (const lat of [-60, -30, 0, 30, 60]) for (let lon = -150; lon <= 150; lon += 60) circles.push({ lat, lon, g: d3.geoCircle().center([lon, lat]).radius(5)() });
+  const projs = {
+    merc: d3.geoMercator().fitExtent([[6, 6], [534, 324]], { type: 'MultiPoint', coordinates: [[-180, -62], [180, 80]] }).clipExtent([[0, 0], [540, 330]]),
+    eqe: d3.geoEqualEarth().fitExtent([[6, 6], [534, 324]], { type: 'Sphere' })
+  };
+  const res = {};
+  for (const [k, p] of Object.entries(projs)) {
+    const path = d3.geoPath(p), svg = d3.select('#' + k);
+    if (k === 'eqe') svg.append('path').attr('d', path({ type: 'Sphere' })).attr('fill', '#eaf0f7');
+    svg.append('path').attr('class', 'grat').attr('d', path(d3.geoGraticule10()));
+    svg.selectAll('path.land').data((k === 'merc' ? noAnt : land).features).join('path').attr('class', d => d.id === '304' ? 'gl' : d.id === '180' ? 'cd' : 'land').attr('d', path);
+    svg.selectAll('path.tissot').data(circles).join('path').attr('class', 'tissot').attr('d', d => path(d.g));
+    const area = lat => d3.mean(circles.filter(c => c.lat === lat), c => path.area(c.g));
+    const full = d3.geoPath(k === 'merc' ? d3.geoMercator() : d3.geoEqualEarth());   // 面积比用不裁切的投影计算，避免格陵兰北端被画面裁掉
+    res[k] = { a0: area(0), a30: area(30), a60: area(60), gl: full.area(GL), cd: full.area(CD) };
+    if (k === 'merc') {   // 1000 千米的东西向线段，分别放在赤道和北纬 60°
+      res.bar = [0, 60].map(lat => { const dLon = 1000 / (R_EARTH * Math.cos(lat * Math.PI / 180)) * 180 / Math.PI, a = p([-30, lat]), b = p([-30 + dLon, lat]);
+        svg.append('line').attr('x1', a[0]).attr('y1', a[1]).attr('x2', b[0]).attr('y2', b[1]).attr('stroke', '#b3261e').attr('stroke-width', 2.5);
+        svg.append('text').attr('x', b[0] + 4).attr('y', a[1] + 3).attr('fill', '#b3261e').text(`${lat}°`); return b[0] - a[0]; });
+    }
+  }
+  const realGL = d3.geoArea(GL) * R_EARTH ** 2, realCD = d3.geoArea(CD) * R_EARTH ** 2;
+  $('t1').innerHTML = '<tr><th>测量（像素面积来自 d3.geoPath().area）</th><th>墨卡托</th><th>等面积</th></tr>' +
+    `<tr><td>北纬 30° 的圆 ÷ 赤道的圆</td><td class="num">${(res.merc.a30 / res.merc.a0).toFixed(2)} 倍</td><td class="num">${(res.eqe.a30 / res.eqe.a0).toFixed(2)} 倍</td></tr>` +
+    `<tr><td>北纬 60° 的圆 ÷ 赤道的圆</td><td class="num poor">${(res.merc.a60 / res.merc.a0).toFixed(2)} 倍</td><td class="num good">${(res.eqe.a60 / res.eqe.a0).toFixed(2)} 倍</td></tr>` +
+    `<tr><td>格陵兰 ÷ 刚果（金），图上面积</td><td class="num poor">${(res.merc.gl / res.merc.cd).toFixed(2)} 倍</td><td class="num good">${(res.eqe.gl / res.eqe.cd).toFixed(2)} 倍</td></tr>` +
+    `<tr><td>格陵兰 ÷ 刚果（金），球面上的实际面积</td><td class="num" colspan="2">${(realGL / 1e6).toFixed(2)} ÷ ${(realCD / 1e6).toFixed(2)} 百万平方千米 = ${(realGL / realCD).toFixed(2)} 倍（1:1.1 亿的简化边界）</td></tr>`;
+  // 网页地图（Web 墨卡托）每像素代表多少米：156543.03 × cos(纬度) ÷ 2^缩放级别
+  const mpp = (lat, z) => 156543.03392 * Math.cos(lat * Math.PI / 180) / 2 ** z;
+  $('t2').innerHTML = '<tr><th>比例尺只在某一纬度正确</th><th>赤道</th><th>北纬 31°（上海）</th><th>北纬 60°</th></tr>' +
+    `<tr><td>上图 1000 千米的线段长度</td><td class="num">${res.bar[0].toFixed(1)} 像素</td><td class="num">—</td><td class="num poor">${res.bar[1].toFixed(1)} 像素</td></tr>` +
+    [12, 15, 18].map(z => `<tr><td>网页地图缩放级别 ${z}：每像素</td>${[0, 31, 60].map(lat => `<td class="num">${mpp(lat, z) >= 10 ? mpp(lat, z).toFixed(1) : mpp(lat, z).toFixed(2)} 米</td>`).join('')}</tr>`).join('') +
+    '<tr><td colspan="4" class="sub">同一缩放级别下，北纬 60° 每像素代表的距离只有赤道的一半：比例尺要按地图中心的纬度计算，并随平移更新。</td></tr>';
+  Object.assign(OUT, { ratio30: [res.merc.a30 / res.merc.a0, res.eqe.a30 / res.eqe.a0], ratio60: [res.merc.a60 / res.merc.a0, res.eqe.a60 / res.eqe.a0], glcd: [res.merc.gl / res.merc.cd, res.eqe.gl / res.eqe.cd], real: [realGL, realCD], bar: res.bar, mpp: [12, 15, 18].map(z => [0, 31, 60].map(lat => +mpp(lat, z).toFixed(2))) });
+  zooms();
+}).catch(e => { $('t1').innerHTML = `<tr><td class="poor">地图数据加载失败：${e.message}。需要联网读取 world-atlas。</td></tr>`; });
+
+// ---------- 聚合与标注 ----------
+function zooms() {
+  const r = rng(31), TYPES = [['医院', 5, '#c0392b', 4], ['图书馆', 10, '#2f6fdb', 3], ['社区中心', 25, '#1f7a4d', 2], ['便民点', 40, '#8a93a3', 1]];
+  const CENTERS = [[6, 5], [13, 4], [9, 9], [15, 10], [4, 11]];
+  const PTS = []; let n = 0;
+  for (const [type, count, color, pri] of TYPES) for (let i = 0; i < count; i++) { const c = CENTERS[Math.floor(r() * CENTERS.length)]; PTS.push({ id: n++, type, color, pri, name: `${type} ${i + 1}`, x: c[0] + (r() - 0.5) * 4.5, y: c[1] + (r() - 0.5) * 4.5 }); }
+  const W = 360, H = 240, ctx = document.createElement('canvas').getContext('2d'); ctx.font = '10px "Noto Sans SC"';
+  const LEVELS = [['缩放 12：整个城市', 18, [10, 7.5]], ['缩放 13：两倍', 36, [7, 6]], ['缩放 14：四倍', 72, [6, 5]]];
+  const rows = [];
+  for (const [title, s, [cx, cy]] of LEVELS) {
+    const px = p => [W / 2 + (p.x - cx) * s, H / 2 + (p.y - cy) * s], vis = PTS.map(p => ({ ...p, P: px(p) })).filter(p => p.P[0] >= 0 && p.P[0] <= W && p.P[1] >= 0 && p.P[1] <= H);
+    const cells = d3.groups(vis, p => `${Math.floor(p.P[0] / 48)},${Math.floor(p.P[1] / 48)}`);
+    const clusters = cells.filter(([, g]) => g.length > 1).map(([, g]) => ({ n: g.length, P: [d3.mean(g, p => p.P[0]), d3.mean(g, p => p.P[1])] })), singles = cells.filter(([, g]) => g.length === 1).map(([, g]) => g[0]);
+    const fig = d3.select('#zooms').append('figure'), svg = fig.append('svg').attr('viewBox', `0 0 ${W} ${H}`);
+    svg.append('rect').attr('width', W).attr('height', H).attr('fill', '#f3f6fa');
+    svg.append('path').attr('d', `M0 ${H / 2 + (8 - cy) * s} C ${W / 3} ${H / 2 + (6 - cy) * s}, ${2 * W / 3} ${H / 2 + (11 - cy) * s}, ${W} ${H / 2 + (9 - cy) * s}`).attr('stroke', '#bcd3ef').attr('stroke-width', Math.max(3, s / 6)).attr('fill', 'none');   // 一条河
+    const boxes = [], placed = [], dropped = [];
+    for (const c of clusters) { const rad = 9 + Math.sqrt(c.n) * 2; svg.append('circle').attr('cx', c.P[0]).attr('cy', c.P[1]).attr('r', rad).attr('fill', '#2f6fdb').attr('fill-opacity', 0.85); svg.append('text').attr('x', c.P[0]).attr('y', c.P[1] + 3.5).attr('text-anchor', 'middle').attr('fill', '#fff').attr('font-weight', 700).text(c.n); boxes.push([c.P[0] - rad, c.P[1] - rad, c.P[0] + rad, c.P[1] + rad]); }
+    for (const p of singles) { svg.append('circle').attr('cx', p.P[0]).attr('cy', p.P[1]).attr('r', 4).attr('fill', p.color).attr('stroke', '#fff'); boxes.push([p.P[0] - 4, p.P[1] - 4, p.P[0] + 4, p.P[1] + 4]); }
+    const hit = b => b[0] < 0 || b[1] < 0 || b[2] > W || b[3] > H || boxes.some(o => !(b[2] <= o[0] || b[0] >= o[2] || b[3] <= o[1] || b[1] >= o[3]));
+    for (const p of singles.slice().sort((a, b) => b.pri - a.pri)) {
+      const w = ctx.measureText(p.name).width, h = 11, [x, y] = p.P;
+      const cand = [[x + 6, y - h / 2], [x - 6 - w, y - h / 2], [x - w / 2, y - 7 - h], [x - w / 2, y + 7]].map(([a, b]) => [a, b, a + w, b + h]);
+      const ok = cand.find(b => !hit(b));
+      if (ok) { boxes.push(ok); placed.push(p); svg.append('text').attr('x', ok[0]).attr('y', ok[1] + 9).attr('fill', '#1d2330').text(p.name); } else dropped.push(p);
+    }
+    fig.append('figcaption').html(`<b>${title}</b>：可见 ${vis.length} 个点，${clusters.length} 个聚合圆 ＋ ${singles.length} 个单点；标注 ${placed.length} 个，放弃 ${dropped.length} 个`);
+    rows.push({ title, vis: vis.length, clusters: clusters.length, inClusters: d3.sum(clusters, c => c.n), singles: singles.length, placed: placed.length, dropped: dropped.length, droppedTypes: d3.rollups(dropped, g => g.length, d => d.type), placedTypes: d3.rollups(placed, g => g.length, d => d.type) });
+  }
+  $('t3').innerHTML = '<tr><th>缩放等级</th><th>可见的点</th><th>聚合圆（包含的点）</th><th>单点</th><th>放上标注</th><th>放弃的标注（按类型）</th></tr>' + rows.map(r => `<tr><td>${r.title}</td><td class="num">${r.vis}</td><td class="num">${r.clusters}（${r.inClusters}）</td><td class="num">${r.singles}</td><td class="num">${r.placed}</td><td>${r.dropped ? r.droppedTypes.map(([t, c]) => `${t} ${c}`).join('、') : '无'}</td></tr>`).join('') +
+    '<tr><td colspan="6" class="sub">放大以后，聚合圆拆开、单点变多，能放下的标注也变多；被放弃的总是重要性最低的类型。点进聚合圆应当放大到能拆开它的级别，而不是只显示一个数字。</td></tr>';
+  OUT.zoom = rows;
+  window.__map = OUT;
+}
+</script>
+</body>
+</html>
