@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>服务蓝图：校园场地预约的前台、后台与等待</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 4px 0 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  svg { width: 100%; height: auto; display: block; }
+  .tag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 9px; background: #fff3d6; color: #7a4a00; }
+  .key { display: inline-block; width: 12px; height: 10px; border-radius: 2px; margin: 0 3px 0 8px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>服务蓝图：同一个场地预约服务，改进前与改进后</h2>
+  <p class="sub">每一列是服务的一个阶段，每一行是一类参与者或渠道。虚线从上到下依次是互动线、可见线和内部互动线：可见线以下的事用户看不到。<span class="key" style="background:#fbe1de"></span>用户什么都不知道的等待<span class="key" style="background:#fff3d6;border:1px solid #c77700"></span>内部交接　流程与时间规则为演示而设定。</p>
+  <svg id="before" viewBox="0 0 1110 330"></svg>
+  <svg id="after" viewBox="0 0 1110 330"></svg>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>结构上的比较（由蓝图数据计算）</h2><table id="struct"></table>
+      <h3>用户在每个阶段能不能知道这五件事</h3><table id="know"></table><p class="m" id="mknow"></p></div>
+    <div><h2>40 个预约走一遍：等多久、白跑几次、要问几次</h2><p class="sub"><span class="tag">模拟</span> 提交时间与用户出门时间用种子 2026 生成；审核、排期、打印名单的时间按下面的规则计算；“等待超过 24 小时又没有任何消息，就去服务台问一次”是假设。结果只用来比较两种流程，不是真实数据。</p>
+      <table id="rules"></table><table id="sim"></table><svg id="hist" viewBox="0 0 540 170"></svg><p class="m" id="msim"></p></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const fmt = (v, d = 1) => v == null || Number.isNaN(v) ? '—' : v.toFixed(d);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const median = a => { const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const R = {};
+
+// ---------- 蓝图数据 ----------
+const LANES = ['用户行为', '前台：线上', '前台：线下', '通知', '后台：人工处理', '支撑系统'];
+const VISIBLE = new Set(['前台：线上', '前台：线下', '通知']);
+// know：用户在这一阶段能否知道 现在在哪一步、要等多久、下一步谁负责、我能做什么、出问题找谁
+const BEFORE = [
+  { stage: '发起', cards: [['用户行为', '网页填写预约'], ['前台：线上', '“提交成功”页面'], ['支撑系统', '预约系统']], know: [1, 0, 0, 0, 0] },
+  { stage: '受理', wait: true, cards: [['后台：人工处理', '管理员每天 14:00 集中审核', '管理员']], know: [0, 0, 0, 0, 0] },
+  { stage: '处理', wait: true, cards: [['后台：人工处理', '教务次日 10:00 核对排期', '教务']], know: [0, 0, 0, 0, 0] },
+  { stage: '反馈', cards: [['通知', '短信：预约已通过'], ['用户行为', '看到短信']], know: [1, 0, 0, 1, 0] },
+  { stage: '结果交付', cards: [['后台：人工处理', '每天两次打印名单', '服务台'], ['用户行为', '去服务台领钥匙'], ['前台：线下', '服务台查纸质名单']], know: [1, 0, 1, 1, 0] },
+  { stage: '使用', cards: [['用户行为', '使用场地']], know: [1, 0, 0, 1, 0] },
+  { stage: '关闭', cards: [['用户行为', '归还钥匙'], ['前台：线下', '服务台登记'], ['后台：人工处理', '退押金，不通知', '财务']], know: [1, 0, 0, 0, 0] }
+];
+const AFTER = [
+  { stage: '发起', cards: [['用户行为', '网页填写预约'], ['前台：线上', '进度页：已受理，预计今天 17:00 前审核'], ['通知', '站内消息：已受理'], ['支撑系统', '预约系统']], know: [1, 1, 1, 1, 1] },
+  { stage: '受理与处理', wait: true, cards: [['后台：人工处理', '管理员审核，系统自动查冲突', '管理员'], ['支撑系统', '排期数据（同一系统）']], know: [1, 1, 1, 1, 1] },
+  { stage: '反馈', cards: [['通知', '已通过：领取时间、地点、联系人'], ['用户行为', '看到通知']], know: [1, 1, 1, 1, 1] },
+  { stage: '结果交付', cards: [['用户行为', '去服务台领钥匙'], ['前台：线下', '服务台查同一系统'], ['支撑系统', '预约系统']], know: [1, 1, 1, 1, 1] },
+  { stage: '使用', cards: [['用户行为', '使用场地']], know: [1, 1, 1, 1, 1] },
+  { stage: '关闭', cards: [['用户行为', '归还钥匙'], ['前台：线下', '服务台扫码登记'], ['通知', '已归还，押金已退回'], ['后台：人工处理', '押金自动退回', '系统']], know: [1, 1, 1, 1, 1] }
+];
+
+function holes(cols) {
+  // 用户在等服务、却既不知道现在在哪一步、也不知道要等多久的连续阶段 = 什么都不知道的等待
+  const out = []; let start = null;
+  cols.forEach((c, i) => { const dark = c.wait && !(c.know[0] && c.know[1]); if (dark && start === null) start = i; if (!dark && start !== null) { out.push([start, i - 1]); start = null; } });
+  if (start !== null) out.push([start, cols.length - 1]);
+  return out;
+}
+function handoffs(cols) {
+  const roles = cols.flatMap((c, i) => c.cards.filter(k => k[2]).map(k => ({ i, role: k[2] })));
+  const out = []; for (let j = 1; j < roles.length; j++) if (roles[j].role !== roles[j - 1].role) out.push({ from: roles[j - 1], to: roles[j] });
+  return out;
+}
+function drawBlueprint(svg, cols, title) {
+  const W = 1110, L = 120, laneH = 46, top = 26, cw = (W - L - 10) / cols.length;
+  let s = `<text x="0" y="16" font-size="14" font-weight="700" font-family="Noto Sans SC">${title}</text>`;
+  holes(cols).forEach(([a, b]) => { s += `<rect x="${L + a * cw + 2}" y="${top}" width="${(b - a + 1) * cw - 4}" height="${laneH * LANES.length}" fill="#fbe1de" opacity="0.6"/><text x="${L + (a + b + 1) * cw / 2}" y="${top + 16}" text-anchor="middle" font-size="11" fill="#b3261e" font-family="Noto Sans SC">用户什么都不知道</text>`; });
+  LANES.forEach((ln, i) => { const y = top + i * laneH; s += `<rect x="0" y="${y}" width="${W}" height="${laneH}" fill="${i % 2 ? '#fafbfc' : 'none'}"/><text x="4" y="${y + laneH / 2 + 1}" font-size="11.5" fill="#5b6475" font-family="Noto Sans SC">${ln}</text>`; });
+  [[1, '互动线'], [4, '可见线'], [5, '内部互动线']].forEach(([i, t]) => { const y = top + i * laneH; s += `<line x1="0" x2="${W}" y1="${y}" y2="${y}" stroke="#8a93a3" stroke-dasharray="5 4"/><text x="4" y="${y + 11}" font-size="9.5" fill="#8a93a3" font-family="Noto Sans SC">${t}</text>`; });
+  const hs = handoffs(cols), pos = [];
+  cols.forEach((c, i) => {
+    s += `<text x="${L + i * cw + cw / 2}" y="${top - 6}" text-anchor="middle" font-size="12" font-weight="700" font-family="Noto Sans SC">${c.stage}</text>`;
+    c.cards.forEach(k => {
+      const li = LANES.indexOf(k[0]), x = L + i * cw + 6, y = top + li * laneH + 5, w = cw - 12, h = laneH - 10;
+      const isHand = k[2] && hs.some(h => h.to.i === i && h.to.role === k[2]);
+      s += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="${isHand ? '#fff3d6' : '#fff'}" stroke="${isHand ? '#c77700' : '#b9c3d3'}"/>`;
+      const lines = wrap(k[1] + (k[2] ? `（${k[2]}）` : ''), Math.floor(w / 11.5));
+      lines.slice(0, 2).forEach((t, j) => { s += `<text x="${x + w / 2}" y="${y + (lines.length > 1 ? 14 + j * 14 : 21)}" text-anchor="middle" font-size="11" font-family="Noto Sans SC">${esc(t)}</text>`; });
+      if (k[0] === '用户行为') pos.push({ l: x, r: x + w, y: y + h / 2 });
+    });
+  });
+  for (let j = 1; j < pos.length; j++) s += `<line x1="${pos[j - 1].r + 2}" y1="${pos[j - 1].y}" x2="${pos[j].l - 3}" y2="${pos[j].y}" stroke="#5b6475" marker-end="url(#ar)"/>`;
+  svg.innerHTML = `<defs><marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" fill="#5b6475"/></marker></defs>` + s;
+}
+const wrap = (t, n) => { const out = []; for (let i = 0; i < t.length; i += n) out.push(t.slice(i, i + n)); return out; };
+drawBlueprint($('before'), BEFORE, '改进前');
+drawBlueprint($('after'), AFTER, '改进后');
+
+// ---------- 结构比较 ----------
+const struct = cols => ({ stages: cols.length, touch: cols.reduce((n, c) => n + c.cards.filter(k => VISIBLE.has(k[0])).length, 0), hand: handoffs(cols).length, holes: holes(cols).length, holeStages: holes(cols).reduce((n, [a, b]) => n + b - a + 1, 0), know: cols.reduce((n, c) => n + c.know.reduce((a, b) => a + b, 0), 0), max: cols.length * 5, resultNotified: cols[cols.length - 1].cards.some(k => k[0] === '通知') });
+const SB = struct(BEFORE), SA = struct(AFTER);
+$('struct').innerHTML = '<tr><th>指标</th><th>改进前</th><th>改进后</th></tr>' + [
+  ['阶段数', SB.stages, SA.stages], ['用户能看到的触点（线上、线下、通知）', SB.touch, SA.touch], ['后台的内部交接', `${SB.hand}（${handoffs(BEFORE).map(h => `${h.from.role}→${h.to.role}`).join('、')}）`, `${SA.hand}（${handoffs(AFTER).map(h => `${h.from.role}→${h.to.role}`).join('、')}）`],
+  ['用户什么都不知道的等待', `${SB.holes} 段，跨 ${SB.holeStages} 个阶段`, `${SA.holes} 段`], ['最后的结果有没有通知', SB.resultNotified ? '有' : '<span class="poor">没有：押金退了也不说</span>', SA.resultNotified ? '<span class="good">有</span>' : '没有']
+].map(r => `<tr><th>${r[0]}</th><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('');
+const KN = ['现在在哪一步', '要等多久', '下一步谁负责', '我能做什么', '出问题找谁'];
+$('know').innerHTML = '<tr><th>要知道的事</th><th>改进前（7 个阶段中）</th><th>改进后（6 个阶段中）</th></tr>' + KN.map((k, j) => { const b = BEFORE.filter(c => c.know[j]).length, a = AFTER.filter(c => c.know[j]).length; return `<tr><th>${k}</th><td class="num ${b < BEFORE.length ? 'poor' : ''}">${b}</td><td class="num ${a < AFTER.length ? 'poor' : 'good'}">${a}</td></tr>`; }).join('');
+$('mknow').innerHTML = `改进前，用户在 ${SB.max} 个“阶段 × 要知道的事”里只知道 ${SB.know} 个；改进后 ${SA.know}／${SA.max}。最常缺的是“要等多久”和“出问题找谁”——这两件事不在任何一个界面里，而在后台的排班和职责里，只有画出整个服务才看得见。`;
+R.struct = { SB, SA };
+
+// ---------- 模拟 ----------
+const mulberry32 = a => () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+// 时间以小时计，0 = 周一 0:00；工作日周一到周五
+const isWork = t => Math.floor(t / 24) % 7 < 5;
+const nextAt = (t, hour) => { let d = Math.floor(t / 24); for (let k = 0; k < 14; k++) { const c = (d + k) * 24 + hour; if (c >= t && isWork(c)) return c; } };
+const deskOpen = t => { const h = t % 24; if (isWork(t) && h >= 9 && h < 17) return t; return nextAt(t, 9); };
+function addWorkHours(t, n) { let x = deskOpen(t); while (n > 0) { const end = Math.floor(x / 24) * 24 + 17, use = Math.min(n, end - x); x += use; n -= use; if (n > 0) x = nextAt(x, 9); } return x; }
+$('rules').innerHTML = '<tr><th>规则</th><th>改进前</th><th>改进后</th></tr>' + [
+  ['审核', '每个工作日 14:00 集中审核（提交后至少 1 小时）', '工作时间内 2 小时内审核（假设）'],
+  ['排期', '审核后的下一个工作日 10:00，教务核对', '审核时系统自动检查'],
+  ['通知', '排期后发短信', '提交、通过、归还各通知一次'],
+  ['服务台名单', '每个工作日 9:00 与 14:00 打印；名单上没有就领不到', '与预约系统同一数据'],
+  ['用户去领钥匙', '收到通过消息后 0—6 小时内，在服务台开放时间（工作日 9:00—17:00）', '同左']
+].map(r => `<tr><th>${r[0]}</th><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('');
+function simulate(after) {
+  const rnd = mulberry32(2026), out = [];
+  for (let k = 0; k < 40; k++) {
+    const submit = Math.floor(rnd() * 5) * 24 + 8 + rnd() * 12, goDelay = rnd() * 6;
+    let approved, notified, listReady, silent;
+    if (!after) { approved = nextAt(submit + 1, 14); notified = nextAt(approved + 1, 10); listReady = Math.min(nextAt(notified + 0.01, 9), nextAt(notified + 0.01, 14)); silent = notified - submit; }
+    else { approved = addWorkHours(submit, 2); notified = approved; listReady = approved; silent = 0; }
+    // 第一次去：收到消息后 goDelay 小时，遇到服务台关门就等到开门；名单上还没有就白跑，名单打印后再去
+    let go = deskOpen(notified + goDelay), trips = 1;
+    if (go < listReady) { trips = 2; go = deskOpen(listReady + goDelay); }
+    const inquiries = silent > 24 ? 1 : 0;
+    out.push({ submit, notified, key: go, wait: go - submit, silent, trips, inquiries });
+  }
+  return out;
+}
+const SIM_B = simulate(false), SIM_A = simulate(true);
+const sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
+const row = (name, f, d = 1, unit = '') => `<tr><th>${name}</th><td class="num">${f(SIM_B)}${unit}</td><td class="num">${f(SIM_A)}${unit}</td></tr>`;
+$('sim').innerHTML = '<tr><th>40 个预约</th><th>改进前</th><th>改进后</th></tr>' +
+  row('从提交到拿到钥匙（中位数）', s => fmt(median(s.map(x => x.wait))), 1, ' 小时') +
+  row('其中没有任何消息的时间（中位数）', s => fmt(median(s.map(x => x.silent))), 1, ' 小时') +
+  row('白跑一趟服务台的次数', s => sum(s, x => x.trips - 1)) +
+  row('等不到消息去服务台问的次数', s => sum(s, x => x.inquiries));
+// 直方图：从提交到拿到钥匙
+(() => {
+  const g = $('hist'), bins = [0, 12, 24, 36, 48, 60, 72, 96, 200], lab = ['<12', '12—24', '24—36', '36—48', '48—60', '60—72', '72—96', '≥96'];
+  const cnt = s => lab.map((_, i) => s.filter(x => x.wait >= bins[i] && x.wait < bins[i + 1]).length);
+  const cb = cnt(SIM_B), ca = cnt(SIM_A), mx = Math.max(...cb, ...ca), bw = 60;
+  let s = `<text x="0" y="12" font-size="11" fill="#5b6475" font-family="Noto Sans SC">从提交到拿到钥匙（小时）的预约数：灰色 改进前，蓝色 改进后</text>`;
+  lab.forEach((l, i) => { const x = 20 + i * bw, hb = cb[i] / mx * 110, ha = ca[i] / mx * 110;
+    s += `<rect x="${x}" y="${140 - hb}" width="22" height="${hb}" fill="#b9c0cc"/><rect x="${x + 24}" y="${140 - ha}" width="22" height="${ha}" fill="#2f6fdb"/>`;
+    s += `<text x="${x + 23}" y="156" text-anchor="middle" font-size="10" fill="#5b6475" font-family="Noto Sans SC">${l}</text>`;
+    if (cb[i]) s += `<text x="${x + 11}" y="${136 - hb}" text-anchor="middle" font-size="9.5" fill="#5b6475">${cb[i]}</text>`;
+    if (ca[i]) s += `<text x="${x + 35}" y="${136 - ha}" text-anchor="middle" font-size="9.5" fill="#2f6fdb">${ca[i]}</text>`; });
+  g.innerHTML = s + '<line x1="16" x2="510" y1="140" y2="140" stroke="#8a93a3"/>';
+})();
+$('msim').innerHTML = `改进前，等待的大部分时间不是在“处理”，而是在“排队等下一次集中处理”和“等纸质名单”：两次交接各等一个固定时刻。最难受的是白跑：短信已经说通过了，名单还没打印出来。改进后的数字取决于“2 小时内审核”这个假设能否做到——要用真实的服务记录来验证，并在进度页上写的是实际能兑现的时间。`;
+R.sim = { before: { med: median(SIM_B.map(x => x.wait)), silent: median(SIM_B.map(x => x.silent)), wasted: sum(SIM_B, x => x.trips - 1), inq: sum(SIM_B, x => x.inquiries) }, after: { med: median(SIM_A.map(x => x.wait)), silent: median(SIM_A.map(x => x.silent)), wasted: sum(SIM_A, x => x.trips - 1), inq: sum(SIM_A, x => x.inquiries) } };
+document.fonts.ready.then(() => { window.__sb = R; });
+</script>
+</body>
+</html>
