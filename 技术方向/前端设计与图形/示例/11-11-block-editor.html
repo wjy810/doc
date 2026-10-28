@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>综合项目：页面区块编辑器</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .top { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 14px; align-items: start; }
+  .ctl { display: grid; grid-template-columns: 64px 1fr; gap: 6px 8px; align-items: center; font-size: 12px; }
+  .ctl input, .ctl select, .ctl textarea { font: inherit; width: 100%; border: 1px solid #c3c9d3; border-radius: 5px; padding: 2px 6px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px; } button { font: inherit; padding: 2px 10px; border: 1px solid #c3c9d3; border-radius: 6px; background: #fff; cursor: pointer; }
+  pre { margin: 0; padding: 6px 8px; background: #f6f7f9; border-radius: 6px; font: 11px/1.45 ui-monospace, "JetBrains Mono", monospace; white-space: pre-wrap; word-break: break-all; }
+  /* ---- 区块：所有尺寸都来自配置，经过范围限制 ---- */
+  .block { --pad: 28px; --scale: 1; border-radius: 14px; overflow: hidden; display: grid; min-height: 260px; background: var(--bg); color: var(--fg); }
+  .block.split { grid-template-columns: 1fr 1.1fr; } .block.stack { grid-template-rows: 150px auto; } .block.cover { position: relative; }
+  .block .media { background: var(--img); background-size: cover; background-position: center; display: grid; place-items: center; color: var(--muted-c); font-size: 12px; min-height: 120px; }
+  .block.cover .media { position: absolute; inset: 0; } .block.cover .body { position: relative; background: linear-gradient(transparent, rgba(0,0,0,.55)); color: #fff; align-self: end; }
+  .block .body { padding: var(--pad); display: grid; gap: calc(10px * var(--scale)); align-content: center; }
+  .block h1 { margin: 0; font-size: calc(26px * var(--scale)); line-height: 1.25; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .block p { margin: 0; font-size: calc(14px * var(--scale)); opacity: .85; }
+  .block .cta { justify-self: start; background: var(--accent); color: var(--accent-fg); border: 0; border-radius: 8px; padding: 8px 16px; font: inherit; font-weight: 700; min-height: 40px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  .ok { color: #1f7a4d; font-weight: 700; } .bad { color: #b3261e; font-weight: 700; }
+  .minis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .minis figure { margin: 0; } .minis .block { min-height: 0; transform-origin: top left; } .minis figcaption { font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>区块编辑器：调整标题、图片、配色和布局；三个预设；导出与导入配置</h2>
+  <div class="top">
+    <div style="display:grid;gap:8px">
+      <div class="ctl" id="ctl"></div>
+      <div class="bar" id="presets"></div>
+      <div class="bar"><button type="button" id="undo">撤销</button><button type="button" id="export">导出配置</button><button type="button" id="import">导入配置</button></div>
+      <pre id="json"></pre>
+    </div>
+    <div id="stage"></div>
+  </div>
+</section>
+<section class="panel">
+  <h2>压力测试：长文本、图片缺失、极端参数</h2>
+  <div class="minis" id="minis"></div>
+</section>
+<section class="panel">
+  <h2>验收结果</h2>
+  <table id="tests"><tr><th>测试</th><th>做法</th><th>结果</th></tr></table>
+</section>
+<script type="module">
+const $ = id => document.getElementById(id);
+// ---------- 配置的定义：每一项都有类型、范围与默认值 ----------
+const IMAGES = { 职场: 'linear-gradient(135deg,#8fb2f0,#5b8c7a)', 数据: 'linear-gradient(160deg,#f3b13b,#e4572e)', 学习: 'linear-gradient(120deg,#5b8c7a,#1d2330)', 失效链接: 'url(https://images.invalid/hero.jpg)', 无图片: 'none' };
+const PALETTES = { 晴空: { bg: '#ffffff', fg: '#1d2330', accent: '#2f6fdb', accentFg: '#ffffff' }, 暖纸: { bg: '#fbf7f0', fg: '#2b2118', accent: '#b4500d', accentFg: '#ffffff' }, 夜间: { bg: '#0f172a', fg: '#f6f7f9', accent: '#8fb2f0', accentFg: '#0f172a' } };
+const SCHEMA = {
+  title: { type: 'text', max: 60, def: '把简历变成一份可以执行的学习计划' },
+  subtitle: { type: 'text', max: 90, def: '上传简历，三十秒得到技能差距与推荐岗位。' },
+  cta: { type: 'text', max: 12, def: '开始分析' },
+  image: { type: 'enum', options: Object.keys(IMAGES), def: '职场' },
+  palette: { type: 'enum', options: Object.keys(PALETTES), def: '晴空' },
+  layout: { type: 'enum', options: ['左图右文', '上图下文', '全图叠字'], def: '左图右文' },
+  scale: { type: 'number', min: 0.8, max: 1.4, step: 0.05, def: 1 },
+  padding: { type: 'number', min: 12, max: 48, step: 2, def: 28 }
+};
+const defaults = () => Object.fromEntries(Object.entries(SCHEMA).map(([k, s]) => [k, s.def]));
+// 配置进入编辑器前先“清洗”：未知字段丢弃、越界的数值夹到范围内、超长文本截断，并记录做了什么
+function sanitize(cfg) {
+  const out = defaults(), notes = [];
+  for (const [k, v] of Object.entries(cfg || {})) {
+    const s = SCHEMA[k]; if (!s) { notes.push(`忽略未知字段 ${k}`); continue; }
+    if (s.type === 'number') { const n = Number(v); if (!Number.isFinite(n)) { notes.push(`${k} 不是数字，用默认值`); continue; } const c = Math.min(s.max, Math.max(s.min, n)); if (c !== n) notes.push(`${k}＝${n} 超出范围，改为 ${c}`); out[k] = c; }
+    else if (s.type === 'enum') { if (s.options.includes(v)) out[k] = v; else notes.push(`${k}＝${v} 不是可选值，用默认值`); }
+    else { const t = String(v); if (t.length > s.max) notes.push(`${k} 超过 ${s.max} 字，已截断`); out[k] = t.slice(0, s.max); }
+  }
+  return { cfg: out, notes };
+}
+let config = defaults(); const undo = [];
+function set(patch) { undo.push({ ...config }); config = sanitize({ ...config, ...patch }).cfg; renderAll(); }
+// ---------- 渲染 ----------
+function blockHTML(c) {
+  const p = PALETTES[c.palette], cls = { 左图右文: 'split', 上图下文: 'stack', 全图叠字: 'cover' }[c.layout];
+  const img = IMAGES[c.image], hasImg = img !== 'none';
+  const media = hasImg ? `<div class="media" role="img" aria-label="区块配图：${c.image}" style="--img:${img}"><span class="fallback"></span></div>` : '';
+  return `<div class="block ${hasImg ? cls : ''}" style="--bg:${p.bg};--fg:${p.fg};--accent:${p.accent};--accent-fg:${p.accentFg};--muted-c:${p.fg};--pad:${c.padding}px;--scale:${c.scale}">${media}<div class="body"><h1 title="${c.title}">${c.title}</h1><p>${c.subtitle}</p><button class="cta" type="button">${c.cta}</button></div></div>`;
+}
+function mount(el, c) {
+  el.innerHTML = blockHTML(c);
+  // 图片加载失败：保留区域与替代文字，显示占位
+  const m = el.querySelector('.media'); if (m && IMAGES[c.image].startsWith('url(')) { const probe = new Image(); probe.onerror = () => { m.style.background = '#eceef2'; m.querySelector('.fallback').textContent = '图片暂时无法显示'; m.dataset.failed = '1'; }; probe.src = IMAGES[c.image].slice(4, -1); }
+}
+function renderAll() {
+  mount($('stage'), config); $('json').textContent = JSON.stringify(config);
+  for (const [k, s] of Object.entries(SCHEMA)) { const el = $('c-' + k); if (el && el.value != config[k]) el.value = config[k]; }
+}
+for (const [k, s] of Object.entries(SCHEMA)) {
+  const label = { title: '标题', subtitle: '副标题', cta: '按钮', image: '图片', palette: '配色', layout: '布局', scale: '字号倍数', padding: '内边距' }[k];
+  const input = s.type === 'enum' ? `<select id="c-${k}">${s.options.map(o => `<option>${o}</option>`).join('')}</select>` : s.type === 'number' ? `<input id="c-${k}" type="number" min="${s.min}" max="${s.max}" step="${s.step}">` : `<input id="c-${k}" maxlength="${s.max}">`;
+  $('ctl').insertAdjacentHTML('beforeend', `<label for="c-${k}">${label}</label>${input}`);
+  $('c-' + k).addEventListener('change', e => set({ [k]: s.type === 'number' ? Number(e.target.value) : e.target.value }));
+}
+const PRESETS = { 产品发布: { layout: '左图右文', palette: '晴空', image: '职场', scale: 1 }, 活动海报: { layout: '全图叠字', palette: '夜间', image: '数据', scale: 1.2, cta: '立即报名' }, 文章头图: { layout: '上图下文', palette: '暖纸', image: '学习', scale: 0.9, padding: 20 } };
+for (const [n, p] of Object.entries(PRESETS)) { const b = document.createElement('button'); b.type = 'button'; b.textContent = n; b.onclick = () => set(p); $('presets').append(b); }
+$('undo').onclick = () => { const prev = undo.pop(); if (prev) { config = prev; renderAll(); } };
+let exported = null; $('export').onclick = () => { exported = JSON.stringify(config); }; $('import').onclick = () => { if (exported) set(JSON.parse(exported)); };
+// ---------- 结果指纹：渲染后读取每个元素的位置、尺寸与颜色，算 SHA-256 ----------
+async function fingerprint(el) {
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const parts = [...el.querySelectorAll('*')].map(n => { const r = n.getBoundingClientRect(), cs = getComputedStyle(n); return [n.tagName, Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height), cs.color, cs.backgroundColor, n.childNodes.length === 1 && n.firstChild.nodeType === 3 ? n.textContent : ''].join('|'); }).join('\n');
+  const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(parts)); return [...new Uint8Array(h)].slice(0, 6).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+// ---------- 验收 ----------
+const tests = [];
+const T = (name, how, pass, detail) => { tests.push({ name, pass, detail }); const tr = $('tests').insertRow(); [name, how].forEach(v => tr.insertCell().textContent = v); const td = tr.insertCell(); td.textContent = (pass ? '通过：' : '未通过：') + detail; td.className = pass ? 'ok' : 'bad'; };
+const lum = hex => { const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+async function run() {
+  await document.fonts.ready; renderAll();
+  // 1 三个预设的对比度
+  const cr = Object.entries(PALETTES).map(([n, p]) => [n, ratio(p.fg, p.bg), ratio(p.accentFg, p.accent)]);
+  T('配色对比度', '三套配色的正文与按钮文字', cr.every(([, a, b]) => a >= 4.5 && b >= 4.5), cr.map(([n, a, b]) => `${n} ${a.toFixed(1)}／${b.toFixed(1)}`).join('，'));
+  // 2 导出 → 修改 → 导入，结果相同
+  set(PRESETS['活动海报']); const h1 = await fingerprint($('stage')); $('export').click();
+  set({ title: '临时改一下', palette: '暖纸', layout: '上图下文' }); const h2 = await fingerprint($('stage'));
+  $('import').click(); const h3 = await fingerprint($('stage'));
+  T('导出后恢复', '套用预设 → 导出 → 修改三项 → 导入', h1 === h3 && h1 !== h2, `指纹 ${h1} → 修改后 ${h2} → 导入后 ${h3}`);
+  // 3 撤销到起点
+  const steps = undo.length; config = defaults(); undo.length = 0; renderAll(); const h0 = await fingerprint($('stage'));
+  for (const p of [{ layout: '上图下文' }, { palette: '夜间' }, { scale: 1.3 }, { title: '再改一次标题' }]) set(p);
+  for (let k = 0; k < 4; k++) $('undo').click(); const hu = await fingerprint($('stage'));
+  T('撤销', '连续修改四项后撤销四次', hu === h0, `起点 ${h0}，撤销后 ${hu}`);
+  // 4 长文本：标题最多三行，完整标题保留在 title 属性中
+  const mini = (name, c, check) => { const f = document.createElement('figure'); const d = document.createElement('div'); d.style.width = '250px'; f.append(d); f.insertAdjacentHTML('beforeend', `<figcaption>${name}</figcaption>`); $('minis').append(f); mount(d, c); return d; };
+  const LONG = '把简历、岗位要求与学习任务放在同一张画布上，看清下一步该学什么、先做哪个项目，然后按周拆成任务、每周记录完成情况，并在月底复盘调整方向';
+  const long = sanitize({ title: LONG }).cfg;
+  const dl = mini('长标题（输入限 60 字，最多显示三行）', { ...long, layout: '上图下文' }); await new Promise(r => setTimeout(r, 50));
+  const h1el = dl.querySelector('h1'), lines = Math.round(h1el.getBoundingClientRect().height / parseFloat(getComputedStyle(h1el).lineHeight));
+  const sw = dl.querySelector('.block').scrollWidth, tl = h1el.title.length;
+  T('长文本', `标题 ${LONG.length} 字，区块宽 250 像素`, lines <= 3 && sw <= 252 && tl === 60, `输入截断到 ${tl} 字，显示 ${lines} 行，区块内容宽 ${sw} 像素（不超过 250），截断后的标题保存在 title 属性里`);
+  // 5 图片缺失：链接失效时保留区域、显示说明，替代文字仍在
+  const di = mini('图片链接失效', { ...defaults(), image: '失效链接', layout: '上图下文' }); await new Promise(r => setTimeout(r, 400));
+  const media = di.querySelector('.media'); T('图片缺失', '图片地址无法访问', media.dataset.failed === '1' && media.getAttribute('aria-label').length > 0, `显示“${media.textContent}”，替代文字“${media.getAttribute('aria-label')}”保留`);
+  mini('不使用图片', { ...defaults(), image: '无图片' });
+  // 6 极端参数：导入越界的配置，被夹到允许范围
+  const bad = sanitize({ scale: 5, padding: -10, layout: '螺旋', color: 'red', cta: '现在就来试试看这个按钮的文字到底能有多长' });
+  mini('导入越界的配置（自动修正）', { ...bad.cfg, layout: '上图下文' });
+  T('极端参数', '字号 ×5、内边距 −10、未知布局、未知字段、超长按钮文字', bad.cfg.scale === 1.4 && bad.cfg.padding === 12, bad.notes.join('；'));
+  set(PRESETS['产品发布']);
+  return tests;
+}
+window.__be = { done: run() };
+</script>
+</body>
+</html>

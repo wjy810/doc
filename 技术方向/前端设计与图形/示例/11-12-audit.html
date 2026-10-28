@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>从个人规范到可用系统：在旧样式中找出重复，提炼令牌与组件</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 14px; align-items: start; }
+  pre { margin: 0; padding: 8px 10px; background: #f6f7f9; border-radius: 8px; font: 11px/1.45 ui-monospace, "JetBrains Mono", monospace; white-space: pre-wrap; max-height: 360px; overflow: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 2px; border: 1px solid rgba(0,0,0,.1); }
+  .stat { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; } .stat div { background: #f6f7f9; border-radius: 8px; padding: 6px 10px; } .stat b { display: block; font-size: 18px; } .stat span { font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>一个已经上线两年的项目：样式里有多少“几乎一样”的值</h2>
+  <div class="stat" id="stat"></div>
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>旧样式（节选）</h2><pre id="src"></pre></div>
+    <div style="display:grid;gap:6px">
+      <h2>颜色：把看不出差别的颜色归为一组（OKLab 距离 &lt; 0.02）</h2>
+      <table id="colors"><tr><th>基础值与语义角色（次数）</th><th>合并的写法</th><th>使用次数</th><th>出现在</th></tr></table>
+      <h2>间距、字号与圆角：对齐到尺度（间距以 4 像素为单位，另保留 2 像素）</h2>
+      <table id="sizes"><tr><th>属性</th><th>原来的值</th><th>建议</th></tr></table>
+      <h2>组件候选：颜色归组、尺寸对齐尺度后，声明相同的规则块</h2>
+      <table id="comps"><tr><th>选择器</th><th>共同的声明</th><th>建议</th></tr></table>
+    </div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const CSS = `.header { background: #ffffff; color: #1d2330; padding: 16px 24px; border-bottom: 1px solid #dde1e7; }
+.nav a { color: #2f6fdb; font-size: 14px; margin-right: 15px; }
+.nav a:hover { color: #2456b0; }
+.hero h1 { font-size: 32px; color: #1d2330; margin-bottom: 12px; }
+.hero p { font-size: 15px; color: #5b6475; line-height: 1.7; }
+.btn-primary { background: #2f6fdb; color: #fff; border-radius: 6px; padding: 8px 16px; font-size: 14px; border: none; }
+.submit-button { background: #2f6fdb; color: #fff; border-radius: 6px; padding: 8px 16px; font-size: 14px; border: none; }
+.cta { background: #3070dc; color: #ffffff; border-radius: 6px; padding: 8px 16px; font-size: 14px; border: none; }
+.link-more { color: rgb(47, 111, 219); font-size: 13px; }
+.card { background: #fff; border: 1px solid #dde1e7; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+.job-card { background: #ffffff; border: 1px solid #dee2e8; border-radius: 8px; padding: 15px; margin-bottom: 16px; }
+.profile-card { background: #fff; border: 1px solid #dde1e7; border-radius: 10px; padding: 18px; margin-bottom: 20px; }
+.card h3, .job-card h3 { font-size: 18px; color: #1d2330; margin-bottom: 8px; }
+.meta { font-size: 13px; color: #5b6475; }
+.meta-light { font-size: 12px; color: #5c6576; }
+.tag { background: #eef3ff; color: #2456b0; border-radius: 4px; padding: 2px 8px; font-size: 12px; }
+.tag-skill { background: #eef3ff; color: #2456b0; border-radius: 4px; padding: 2px 8px; font-size: 12px; }
+.error { color: #c62828; font-size: 13px; }
+.form-error { color: #c52727; font-size: 13px; margin-top: 4px; }
+.warning { color: #a15c00; background: #fff8e6; padding: 8px 12px; border-radius: 6px; }
+.notice { color: #a15c00; background: #fff8e6; padding: 9px 12px; border-radius: 6px; }
+.footer { background: #1d2330; color: #c3c9d3; padding: 24px; font-size: 13px; }
+.modal { background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 8px 24px rgba(16,24,40,.18); }
+.dropdown { background: #fff; border-radius: 8px; padding: 6px; box-shadow: 0 8px 24px rgba(16,24,40,.16); }
+.input { border: 1px solid #c3c9d3; border-radius: 6px; padding: 7px 10px; font-size: 14px; }
+.search-input { border: 1px solid #c4cad4; border-radius: 5px; padding: 8px 10px; font-size: 14px; }
+.badge-new { background: #e4572e; color: #fff; font-size: 11px; padding: 1px 6px; border-radius: 9px; }
+.chart-title { font-size: 15px; color: #1d2330; margin-bottom: 10px; }`;
+$('src').textContent = CSS;
+// ---------- 解析 ----------
+const rules = [...CSS.matchAll(/([^{}]+)\{([^}]*)\}/g)].map(m => ({ sel: m[1].trim(), decls: m[2].split(';').map(d => d.trim()).filter(Boolean).map(d => { const i = d.indexOf(':'); return [d.slice(0, i).trim(), d.slice(i + 1).trim()]; }) }));
+const toHex = v => { v = v.trim().toLowerCase(); if (/^#[0-9a-f]{3}$/.test(v)) return '#' + [...v.slice(1)].map(c => c + c).join(''); if (/^#[0-9a-f]{6}$/.test(v)) return v; const m = v.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/); if (m) return '#' + m.slice(1).map(x => (+x).toString(16).padStart(2, '0')).join(''); return null; };
+// sRGB → OKLab（感知上均匀的颜色空间，距离接近“看起来差多少”）
+function oklab(hex) {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b), m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b), s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s];
+}
+const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
+// ---------- 颜色 ----------
+const uses = [];
+for (const r of rules) for (const [p, v] of r.decls) for (const tok of v.split(/\s+(?![^(]*\))/)) { const hex = toHex(tok.replace(/,$/, '')); if (hex) uses.push({ hex, raw: tok, sel: r.sel, prop: p }); }
+const clusters = [];
+for (const u of uses) { const lab = oklab(u.hex); let c = clusters.find(c => dist(c.lab, lab) < 0.02); if (!c) { c = { lab, members: [] }; clusters.push(c); } c.members.push(u); }
+// 命名：先给“基础值”起名（色系 ＋ 明度档），再按每次使用的场合列出“语义”角色
+function primitive(c) {
+  const [L, a, b] = c.lab, C = Math.hypot(a, b), h = (Math.atan2(b, a) * 180 / Math.PI + 360) % 360;
+  const fam = C < 0.03 ? 'gray' : h < 45 || h > 330 ? 'red' : h < 100 ? 'orange' : h < 160 ? 'yellow' : h < 200 ? 'green' : 'blue';
+  const step = L > 0.985 ? 'white' : String(Math.min(900, Math.max(50, Math.round((1 - L) * 10) * 100 || 50)));
+  return step === 'white' ? 'color.white' : `color.${fam}.${step}`;
+}
+function role(m) {
+  if (/error/.test(m.sel)) return 'color.feedback.error';
+  if (/warning|notice/.test(m.sel)) return m.prop === 'background' ? 'color.feedback.warning.bg' : 'color.feedback.warning.text';
+  if (/tag/.test(m.sel)) return m.prop === 'background' ? 'color.tag.bg' : 'color.tag.text';
+  if (/badge/.test(m.sel)) return m.prop === 'background' ? 'color.badge.bg' : 'color.badge.text';
+  if (/btn|submit|cta/.test(m.sel)) return m.prop === 'background' ? 'color.action.primary' : 'color.action.on-primary';
+  if (/hover/.test(m.sel)) return 'color.action.primary.hover';
+  if (/^\.nav a|link/.test(m.sel)) return 'color.text.link';
+  if (/border/.test(m.prop)) return /input/.test(m.sel) ? 'color.border.input' : 'color.border.default';
+  if (m.prop === 'background') return /footer/.test(m.sel) ? 'color.bg.inverse' : 'color.bg.surface';
+  if (/footer/.test(m.sel)) return 'color.text.on-inverse';
+  return oklab(m.hex)[0] < 0.35 ? 'color.text.default' : 'color.text.muted';
+}
+const colorRows = clusters.sort((a, b) => b.members.length - a.members.length).map(c => {
+  const roles = {}; for (const m of c.members) { const r = role(m); roles[r] = (roles[r] || 0) + 1; }
+  return { name: primitive(c), roles, raws: [...new Set(c.members.map(m => m.raw))], n: c.members.length, sels: [...new Set(c.members.map(m => m.sel.split(/[ ,:]/)[0]))] };
+});
+const seenNames = {}; for (const r of colorRows) { seenNames[r.name] = (seenNames[r.name] || 0) + 1; if (seenNames[r.name] > 1) r.name += '-' + seenNames[r.name]; }
+for (const r of colorRows) { const tr = $('colors').insertRow(); tr.insertCell().innerHTML = `<b>${r.name}</b><br>${Object.entries(r.roles).map(([k, n]) => `${k}（${n}）`).join('<br>')}`; tr.insertCell().innerHTML = r.raws.map(x => `<span class="sw" style="background:${x}"></span>${x}`).join('<br>'); tr.insertCell().textContent = r.n; tr.insertCell().textContent = r.sels.slice(0, 4).join(' ') + (r.sels.length > 4 ? ' …' : ''); }
+// ---------- 尺寸：对齐到 4 像素尺度 ----------
+const sizeProps = { 'font-size': [11, 12, 13, 14, 16, 18, 24, 32], padding: null, 'margin-bottom': null, 'margin-right': null, 'border-radius': null, 'margin-top': null };
+const sizeUses = {};
+for (const r of rules) for (const [p, v] of r.decls) if (p in sizeProps) for (const px of v.match(/\d+(?:\.\d+)?px/g) || []) { const n = parseFloat(px), key = p.startsWith('margin') ? 'margin' : p; (sizeUses[key] ||= {})[n] = ((sizeUses[key] || {})[n] || 0) + 1; }
+const SCALE = { 'font-size': [11, 12, 13, 14, 16, 18, 24, 32], 'border-radius': [4, 6, 8, 12], space: [2, 4, 8, 12, 16, 20, 24, 32] };   // 间距：4 像素尺度，另保留 2 像素给小元素
+const snap = (key, n) => (SCALE[key] || SCALE.space).reduce((a, b) => Math.abs(b - n) < Math.abs(a - n) || (Math.abs(b - n) === Math.abs(a - n) && b > a) ? b : a);
+let sizeBefore = 0, sizeAfter = 0;
+for (const [key, vals] of Object.entries(sizeUses)) {
+  const before = Object.keys(vals).map(Number).sort((a, b) => a - b), after = [...new Set(before.map(n => snap(key, n)))].sort((a, b) => a - b);
+  sizeBefore += before.length; sizeAfter += after.length;
+  const changed = before.filter(n => snap(key, n) !== n).map(n => `${n}→${snap(key, n)}`);
+  const tr = $('sizes').insertRow(); [{ 'font-size': '字号', padding: '内边距', margin: '外边距', 'border-radius': '圆角' }[key], before.map(n => `${n}（${vals[n]}）`).join('、'), `${after.join('、')}${changed.length ? `；需要改动：${changed.join('、')}` : ''}`].forEach(v => tr.insertCell().textContent = v);
+}
+// ---------- 组件候选：声明集合相同（颜色按分组比较） ----------
+const clusterOf = hex => clusters.findIndex(c => c.members.some(m => m.hex === hex));
+const norm = decls => decls.filter(([p]) => !/margin/.test(p)).map(([p, v]) => p + ':' + v.split(/\s+(?![^(]*\))/).map(t => { const h = toHex(t); if (h) return 'C' + clusterOf(h); const px = t.match(/^(\d+(?:\.\d+)?)px$/); return px ? snap(p === 'font-size' || p === 'border-radius' ? p : 'space', +px[1]) + 'px' : t; }).join(' ')).sort().join(';');   // 颜色按分组、尺寸按尺度比较：找出“几乎相同”的规则块
+const groups = {}; for (const r of rules) (groups[norm(r.decls)] ||= []).push(r);
+const compRows = Object.values(groups).filter(g => g.length > 1);
+for (const g of compRows) { const tr = $('comps').insertRow(); [g.map(r => r.sel).join('、'), g[0].decls.filter(([p]) => !/margin/.test(p)).map(([p]) => p).join('、'), /btn|submit|cta/.test(g[0].sel) ? '提炼为“主按钮”组件' : /tag/.test(g[0].sel) ? '提炼为“标签”组件' : /warning|notice/.test(g[0].sel) ? '提炼为“提示条”组件（统一内边距）' : /card/.test(g[0].sel) ? '提炼为“卡片”组件' : '合并'].forEach(v => tr.insertCell().textContent = v); }
+const distinctColorsBefore = new Set(uses.map(u => u.hex)).size;
+$('stat').innerHTML = [[rules.length, '条规则'], [`${distinctColorsBefore} → ${clusters.length}`, '种颜色写法 → 颜色令牌'], [`${sizeBefore} → ${sizeAfter}`, '个尺寸值 → 尺度上的值'], [compRows.length, '组可以合并的规则块（组件候选）']].map(([b, s]) => `<div><b>${b}</b><span>${s}</span></div>`).join('');
+window.__au = { rules: rules.length, colors: [distinctColorsBefore, clusters.length], sizes: [sizeBefore, sizeAfter], comps: compRows.map(g => g.map(r => r.sel)), colorRows };
+</script>
+</body>
+</html>
