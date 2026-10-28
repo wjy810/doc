@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>综合项目：帮助理解技能前置关系的交互原型与对照</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .main { display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 14px; align-items: start; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  svg { display: block; width: 100%; height: auto; background: #fafbfc; border-radius: 8px; }
+  .node { cursor: pointer; }
+  .bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  select { font: inherit; padding: 1px 6px; border-radius: 6px; border: 1px solid #b9c0cc; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin: 0 4px 0 10px; vertical-align: -1px; }
+  .lv { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 11px; white-space: nowrap; }
+  .lv1 { background: #f6f7f9; color: #5b6475; } .lv2 { background: #fff4e0; color: #a15c00; } .lv3 { background: #eef7f1; color: #1f7a4d; } .lv0 { background: #eef3ff; color: #2456b0; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>任务：让学习者看懂“技能之间的前置关系”，并能规划自己的学习路径</h2>
+  <p class="sub">左边是现有的表达方式（课程目录常见的表格），作为对照；右边是交互原型：点一个技能，看到它的全部前置（包括间接的）和它能解锁什么；选择目标岗位，得到还需要学的最少技能和顺序；勾选已经会的技能，路径随之更新。</p>
+  <div class="main">
+    <div style="display:grid;gap:6px"><h3>对照：技能与前置技能表</h3><table id="ctrl"><tr><th>技能</th><th>前置技能</th></tr></table></div>
+    <div style="display:grid;gap:6px">
+      <div class="bar"><span>目标岗位</span><select id="role"><option value="">（不选）</option></select><span class="sub">点击节点选中；按住 Shift 点击＝标记“我已经会了”</span></div>
+      <svg id="graph" viewBox="0 0 760 420" aria-label="技能前置关系图"></svg>
+      <div class="legend sub"><i style="background:#2f6fdb"></i>选中<i style="background:#f0b429"></i>它的前置（含间接）<i style="background:#8cc5a4"></i>它能解锁的<i style="background:#e4572e"></i>目标岗位还要学的<i style="background:#d6dae1"></i>已经会了</div>
+      <p id="answer" class="sub"></p>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>三项任务：两种表达各要做多少事（分析估计）</h2>
+  <p class="sub">“查找行数”与“同时要记住的项数”直接由图的结构算出；时间用击键层次模型（KLM）粗略估计：每次查找 ≈ 心理准备 M 1.35 秒 ＋ 指向 P 1.1 秒；原型中每次点击 ≈ M ＋ P ＋ 按键 B 0.1 秒。估计不包括视觉搜索与阅读的时间，只能用来比较量级，必须用用户测试验证。</p>
+  <table id="tasks"><tr><th>任务</th><th>正确答案</th><th>表格：查找行数／要记住的项数</th><th>表格：KLM 估计</th><th>原型：操作</th><th>原型：KLM 估计</th></tr></table>
+</section>
+
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>观察记录：怎样探索、哪里困惑</h2><table id="obs"><tr><th>时间</th><th>条件</th><th>事件</th><th>信号</th></tr></table><p class="sub">记录由测试脚本模拟的一位参与者产生，用来检验记录与困惑信号的规则，不是研究数据。困惑信号规则：3 秒内对同一技能来回点击 2 次以上；选中后立即取消；迁移题回答错误。</p></div>
+    <div style="display:grid;gap:6px"><h2>报告：区分三级证据</h2><table id="report"><tr><th>级别</th><th>内容</th><th>依据</th></tr></table></div>
+  </div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs, parent, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; parent && parent.appendChild(e); return e; };
+const PRE = {
+  HTML: [], 'CSS': ['HTML'], 'JavaScript': ['HTML'], 'DOM': ['JavaScript', 'HTML'], '异步与网络': ['JavaScript'], 'TypeScript': ['JavaScript'], 'Git': [],
+  'React': ['DOM', '异步与网络'], '状态管理': ['React'], 'SVG': ['HTML', 'CSS'], 'Canvas': ['JavaScript', 'DOM'], '统计基础': [], '数据清洗': ['JavaScript', '统计基础'],
+  'D3': ['SVG', 'DOM', '数据清洗'], 'ECharts': ['JavaScript', '数据清洗'], '可访问性': ['HTML', 'CSS'], '测试': ['JavaScript', 'Git'], '作品集': ['React', 'D3', 'Git', '可访问性']
+};
+const ROLES = { '前端工程师': ['React', '状态管理', 'TypeScript', '测试', '可访问性'], '数据可视化工程师': ['D3', 'ECharts', 'Canvas', '可访问性', '作品集'] };
+const names = Object.keys(PRE), SUCC = Object.fromEntries(names.map(n => [n, names.filter(m => PRE[m].includes(n))]));
+function closure(start, next) { const seen = new Set(), stack = [...next(start)]; while (stack.length) { const x = stack.pop(); if (seen.has(x)) continue; seen.add(x); stack.push(...next(x)); } return seen; }
+const up = n => closure(n, x => PRE[x]), down = n => closure(n, x => SUCC[x]);
+// 用表格回答“全部前置”：每发现一个前置都要再查一行；记录同时要记住的“待查”项数
+function tableCost(start) { const todo = [...PRE[start]], seen = new Set(); let lookups = 1, maxMem = todo.length; while (todo.length) { const x = todo.shift(); if (seen.has(x)) continue; seen.add(x); lookups++; for (const p of PRE[x]) if (!seen.has(p) && !todo.includes(p)) todo.push(p); maxMem = Math.max(maxMem, todo.length + 1); } return { lookups, maxMem, ans: seen }; }
+// 表格回答“谁以它为前置”：要把整张表从头看到尾，找到的每一项还要再扫一遍
+function tableCostDown(start) { const found = down(start); return { lookups: names.length * (1 + found.size), maxMem: found.size, ans: found }; }
+function topo(set) { const out = [], done = new Set(); const vis = n => { if (done.has(n)) return; for (const p of PRE[n]) if (set.has(p)) vis(p); done.add(n); out.push(n); }; for (const n of names) if (set.has(n)) vis(n); return out; }
+function rolePlan(role, known) { const need = new Set(); for (const s of ROLES[role]) { need.add(s); for (const u of up(s)) need.add(u); } for (const k of known) need.delete(k); return topo(need); }
+
+// 对照表格
+for (const n of names) $('ctrl').insertAdjacentHTML('beforeend', `<tr data-n="${n}"><td>${n}</td><td>${PRE[n].join('、') || '—'}</td></tr>`);
+$('ctrl').addEventListener('click', e => { const tr = e.target.closest('tr'); if (!tr || !tr.dataset.n) return; [...$('ctrl').rows].forEach(r => r.style.background = ''); tr.style.background = '#fff1c9'; observe('对照', `查看“${tr.dataset.n}”这一行`); });
+for (const r of Object.keys(ROLES)) $('role').insertAdjacentHTML('beforeend', `<option>${r}</option>`);
+
+// 分层布局：层号＝最长前置链的长度；层内按前置的平均位置排序（重心法）
+const layer = {}; const L = n => layer[n] ?? (layer[n] = PRE[n].length ? 1 + Math.max(...PRE[n].map(L)) : 0); names.forEach(L);
+const layers = []; for (const n of names) (layers[layer[n]] ??= []).push(n);
+const pos = {};
+layers.forEach((ns, li) => {
+  if (li > 0) ns.sort((a, b) => { const m = x => PRE[x].reduce((s, p) => s + pos[p].y, 0) / PRE[x].length; return m(a) - m(b); });
+  ns.forEach((n, i) => { pos[n] = { x: 60 + li * (640 / (layers.length - 1)), y: 40 + (i + 0.5) * (340 / ns.length) }; });
+});
+const st = { sel: null, role: '', known: new Set(['HTML']) };
+const obs = []; const T0 = performance.now(); let lastClick = {};
+function observe(cond, ev, signal = '') { obs.push([((performance.now() - T0) / 1000).toFixed(1) + ' 秒', cond, ev, signal]); const t = $('obs'); [...t.rows].slice(1).forEach(r => r.remove()); for (const [a, b, c, d] of obs.slice(-10)) t.insertAdjacentHTML('beforeend', `<tr><td class="num">${a}</td><td style="white-space:nowrap">${b}</td><td>${c}</td><td class="${d ? 'mid' : ''}">${d}</td></tr>`); }
+function draw() {
+  const svg = $('graph'); svg.innerHTML = '';
+  const U = st.sel ? up(st.sel) : new Set(), D = st.sel ? down(st.sel) : new Set(), plan = st.role ? new Set(rolePlan(st.role, st.known)) : new Set();
+  const order = st.role ? rolePlan(st.role, st.known) : [];
+  el('defs', {}, svg).innerHTML = '<marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L8 4L0 8z" fill="#9aa3b0"/></marker>';
+  for (const n of names) for (const p of PRE[n]) {
+    const a = pos[p], b = pos[n], hot = st.sel && ((U.has(p) && (U.has(n) || n === st.sel)) || ((p === st.sel || D.has(p)) && D.has(n)));
+    el('path', { d: `M${a.x + 44} ${a.y}C${a.x + 90} ${a.y} ${b.x - 90} ${b.y} ${b.x - 46} ${b.y}`, fill: 'none', stroke: hot ? '#5b6475' : '#c9ced6', 'stroke-width': hot ? 2 : 1, 'marker-end': 'url(#ar)' }, svg);
+  }
+  for (const n of names) {
+    const p = pos[n], known = st.known.has(n);
+    let fill = '#fff', stroke = '#b9c0cc', color = '#1d2330';
+    if (plan.has(n)) { fill = '#fde3da'; stroke = '#e4572e'; }
+    if (U.has(n)) { fill = '#fff1c9'; stroke = '#f0b429'; } if (D.has(n)) { fill = '#e3f3e9'; stroke = '#8cc5a4'; }
+    if (n === st.sel) { fill = '#2f6fdb'; stroke = '#2f6fdb'; color = '#fff'; }
+    if (known) { fill = '#eceff3'; stroke = '#d6dae1'; color = '#8a93a3'; }
+    const g = el('g', { class: 'node', 'data-n': n, tabindex: 0, role: 'button', 'aria-label': n }, svg);
+    el('rect', { x: p.x - 44, y: p.y - 13, width: 88, height: 26, rx: 13, fill, stroke, 'stroke-width': 1.5 }, g);
+    el('text', { x: p.x, y: p.y + 4, 'text-anchor': 'middle', 'font-size': 12, fill: color, 'text-decoration': known ? 'line-through' : '' }, g, n);
+    const k = order.indexOf(n); if (k >= 0) { el('circle', { cx: p.x + 40, cy: p.y - 12, r: 8, fill: '#e4572e' }, g); el('text', { x: p.x + 40, y: p.y - 8.5, 'text-anchor': 'middle', 'font-size': 10, fill: '#fff' }, g, k + 1); }
+  }
+  const parts = [];
+  if (st.sel) parts.push(`<b>${st.sel}</b>：前置 ${U.size} 项（${[...U].join('、') || '无'}）；能解锁 ${D.size} 项（${[...D].join('、') || '无'}）。`);
+  if (st.role) parts.push(`目标“${st.role}”：已会 ${[...st.known].join('、') || '无'}，还要学 ${order.length} 项，按顺序：${order.join(' → ')}。`);
+  $('answer').innerHTML = parts.join('<br>');
+}
+$('graph').addEventListener('click', e => {
+  const g = e.target.closest('.node'); if (!g) return; const n = g.dataset.n, now = performance.now();
+  if (e.shiftKey) { st.known.has(n) ? st.known.delete(n) : st.known.add(n); observe('原型', `标记 ${n} 为${st.known.has(n) ? '已会' : '未会'}`); draw(); return; }
+  const rep = lastClick.n === n && now - lastClick.t < 3000 ? (lastClick.c || 1) + 1 : 1; lastClick = { n, t: now, c: rep };
+  const wasSel = st.sel === n; st.sel = wasSel ? null : n;
+  observe('原型', wasSel ? `取消选中 ${n}` : `选中 ${n}`, rep >= 3 ? '困惑信号：来回点击同一技能' : wasSel && rep === 2 ? '选中后立即取消' : ''); draw();
+});
+$('role').addEventListener('change', () => { st.role = $('role').value; observe('原型', `选择目标岗位：${st.role || '无'}`); draw(); });
+
+// 三项任务的分析比较
+const KLM = { M: 1.35, P: 1.1, B: 0.1 };
+function taskRows() {
+  const t1 = tableCost('D3'), t3 = tableCostDown('SVG');
+  const known = new Set(['HTML', 'CSS', 'JavaScript']), plan = rolePlan('数据可视化工程师', known);
+  // 表格回答任务 2：对岗位要求的 5 项各求一次全部前置，再合并、去掉已会的、排顺序
+  let l2 = 0, m2 = 0; for (const s of ROLES['数据可视化工程师']) { const c = tableCost(s); l2 += c.lookups; m2 = Math.max(m2, c.maxMem); }
+  const rows = [
+    ['任务 1：学 D3 之前要先学哪些？（含间接）', `${t1.ans.size} 项：${[...t1.ans].join('、')}`, t1.lookups, t1.maxMem, '点击 D3（1 次）', 1],
+    ['任务 2：已会 HTML、CSS、JavaScript，要成为数据可视化工程师还要学几项、什么顺序？', `${plan.length} 项：${plan.join(' → ')}`, l2, m2 + plan.length, '选岗位、标记 2 项已会（3 次）', 3],
+    ['任务 3：学完 SVG 能解锁哪些？', `${t3.ans.size} 项：${[...t3.ans].join('、')}`, t3.lookups, t3.maxMem, '点击 SVG（1 次）', 1]
+  ];
+  for (const [q, ans, look, mem, op, clicks] of rows) {
+    const tTable = look * (KLM.M + KLM.P), tProto = clicks * (KLM.M + KLM.P + KLM.B);
+    $('tasks').insertAdjacentHTML('beforeend', `<tr><td>${q}</td><td>${ans}</td><td class="num">${look} 行／${mem} 项</td><td class="num">≈ ${tTable.toFixed(0)} 秒</td><td>${op}</td><td class="num">≈ ${tProto.toFixed(1)} 秒</td></tr>`);
+  }
+  return rows.map(r => ({ q: r[0].slice(0, 4), ans: r[1], look: r[2], mem: r[3], clicks: r[5] }));
+}
+const taskData = taskRows();
+// 报告：三级证据
+const report = [
+  ['lv1', '个人观察', '模拟参与者在原型中来回点击“DOM”，记录规则正确标出了困惑信号', '1 次脚本运行；只说明记录工具可用'],
+  ['lv0', '分析预测', `任务 1 用表格要查 ${taskData[0].look} 行、同时记住 ${taskData[0].mem} 项；原型 1 次点击`, '由图结构与 KLM 算出；未包含视觉搜索，需要用户测试检验'],
+  ['lv2', '初步发现（待收集）', '5—8 名学习者完成三项任务与迁移题：记录正确率、用时、困惑信号的位置', '小样本、未控制顺序：只能提出假设'],
+  ['lv3', '充分验证的结论（待收集）', '组内对照实验（两种表达，Williams 平衡顺序），正确率与用时的差异及置信区间；一周后的迁移题', '预先登记的假设、足够的样本量（见 12-09）、可复现的材料']
+];
+for (const [c, a, b, d] of report) $('report').insertAdjacentHTML('beforeend', `<tr><td><span class="lv ${c}">${a}</span></td><td>${b}</td><td>${d}</td></tr>`);
+
+draw();
+window.__rel = { st, draw, observe, taskData, up, down, rolePlan, closure, obs, pos, tableCost };
+</script>
+</body>
+</html>

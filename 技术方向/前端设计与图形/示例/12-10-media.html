@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>媒介与创作方式：用“画”的方式做出会随数据变化的图</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .main { display: grid; grid-template-columns: 300px 520px minmax(0, 1fr); gap: 12px; align-items: start; }
+  svg { display: block; width: 100%; height: auto; background: #fafbfc; border-radius: 8px; touch-action: none; }
+  .steps { display: grid; gap: 4px; }
+  .step { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 12px; display: grid; gap: 2px; cursor: pointer; }
+  .step.sel { border-color: #2f6fdb; background: #eef3ff; }
+  .step b { font-size: 12px; } .step input { width: 56px; font: inherit; padding: 0 4px; border: 1px solid #b9c0cc; border-radius: 4px; }
+  .tools { display: flex; gap: 4px; flex-wrap: wrap; }
+  button { font: inherit; padding: 2px 8px; border-radius: 6px; border: 1px solid #b9c0cc; background: #fff; cursor: pointer; font-size: 12px; }
+  pre { margin: 0; background: #f6f7f9; border-radius: 6px; padding: 8px; font-size: 11px; line-height: 1.45; white-space: pre-wrap; }
+  textarea { width: 100%; height: 120px; font: 11px/1.45 ui-monospace, monospace; border: 1px solid #b9c0cc; border-radius: 6px; padding: 6px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>用“画”的方式做出会随数据变化的图</h2>
+  <p class="sub">在画布上拖出一个矩形，然后通过几次直接操作告诉系统：高度跟着数据、对每一行重复、加标签、画平均线、按条件上色。每一步都被记录成可以修改的步骤；右边同时生成等价的代码。改数据或改某一步的数值，整张图都会跟着变。</p>
+  <div class="main">
+    <div style="display:grid;gap:6px">
+      <h3>步骤（点击一步，画布上高亮它产生的图形）</h3>
+      <div class="tools"><button id="tBind">高度跟随数据</button><button id="tRepeat">对每一行重复</button><button id="tLabel">加标签</button><button id="tMean">平均线</button><button id="tColor">按条件上色</button></div>
+      <div class="steps" id="steps"></div>
+    </div>
+    <div style="display:grid;gap:6px">
+      <svg id="canvas" viewBox="0 0 520 320" aria-label="画布：在空白处拖动以画出矩形"></svg>
+      <h3>数据（可以直接改）</h3>
+      <textarea id="data" aria-label="数据"></textarea>
+    </div>
+    <div style="display:grid;gap:6px">
+      <h3>等价的代码（由步骤生成）</h3>
+      <pre id="code"></pre>
+      <table id="check"><tr><th>检查</th><th>结果</th></tr></table>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>同一张图的两种创作方式</h2>
+  <table id="cmp"><tr><th></th><th>直接画（本页）</th><th>写代码</th></tr></table>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs, parent, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; parent && parent.appendChild(e); return e; };
+
+let data = [{ name: '第1周', hours: 6 }, { name: '第2周', hours: 9 }, { name: '第3周', hours: 4 }, { name: '第4周', hours: 8 }, { name: '第5周', hours: 10 }, { name: '第6周', hours: 7 }];
+const GOAL = 8, BASE = 270;
+const steps = []; let selected = -1;
+const actions = [];
+
+// 执行步骤，得到图形列表（与生成的代码完全对应）
+function run(steps, data) {
+  const shapes = []; let proto = null, repeat = null;
+  for (const [si, s] of steps.entries()) {
+    if (s.op === 'rect') proto = { x: s.x, w: s.w, h: s.h, fill: '#8fb2f0', step: si };
+    if (s.op === 'bind') proto.hk = s.scale;
+    if (s.op === 'repeat') repeat = s.dx;
+    if (s.op === 'color') proto.cond = s;
+  }
+  if (!proto) return shapes;
+  const rows = repeat ? data : data.slice(0, 1);
+  rows.forEach((d, i) => {
+    const h = proto.hk ? d.hours * proto.hk : proto.h, x = proto.x + (repeat ? i * repeat : 0);
+    const fill = proto.cond ? (d.hours >= proto.cond.threshold ? proto.cond.yes : proto.cond.no) : proto.fill;
+    shapes.push({ t: 'rect', x, y: BASE - h, w: proto.w, h, fill, from: [0, ...steps.map((s, k) => ['bind', 'repeat', 'color'].includes(s.op) ? k : -1).filter(k => k >= 0)] });
+    const lab = steps.findIndex(s => s.op === 'label');
+    if (lab >= 0) shapes.push({ t: 'text', x: x + proto.w / 2, y: BASE + 16, text: d.name, from: [lab] });
+  });
+  const mi = steps.findIndex(s => s.op === 'mean');
+  if (mi >= 0 && proto.hk) { const m = rows.reduce((a, d) => a + d.hours, 0) / rows.length, y = BASE - m * proto.hk; shapes.push({ t: 'line', x1: proto.x - 10, x2: proto.x + (rows.length - 1) * (repeat || 0) + proto.w + 10, y, label: `平均 ${m.toFixed(1)} 小时`, from: [mi] }); }
+  return shapes;
+}
+function genCode(steps) {
+  const r = steps.find(s => s.op === 'rect'), b = steps.find(s => s.op === 'bind'), rep = steps.find(s => s.op === 'repeat'), c = steps.find(s => s.op === 'color');
+  if (!r) return '// 还没有图形';
+  const L = [];
+  L.push(`const shapes = [];`);
+  L.push(`${rep ? `data.forEach((d, i) => {` : `[data[0]].forEach((d, i) => {`}`);
+  L.push(`  const h = ${b ? `d.hours * ${b.scale}` : r.h};`);
+  L.push(`  const x = ${r.x}${rep ? ` + i * ${rep.dx}` : ''};`);
+  L.push(`  const fill = ${c ? `d.hours >= ${c.threshold} ? '${c.yes}' : '${c.no}'` : `'#8fb2f0'`};`);
+  L.push(`  shapes.push({ t: 'rect', x, y: ${BASE} - h, w: ${r.w}, h, fill });`);
+  if (steps.some(s => s.op === 'label')) L.push(`  shapes.push({ t: 'text', x: x + ${r.w / 2}, y: ${BASE + 16}, text: d.name });`);
+  L.push(`});`);
+  if (steps.some(s => s.op === 'mean') && b) { L.push(`const rows = ${rep ? 'data' : '[data[0]]'};`); L.push(`const m = rows.reduce((a, d) => a + d.hours, 0) / rows.length;`); L.push(`shapes.push({ t: 'line', x1: ${r.x - 10}, x2: ${r.x} + (rows.length - 1) * ${rep ? rep.dx : 0} + ${r.w + 10}, y: ${BASE} - m * ${b.scale}, label: \`平均 \${m.toFixed(1)} 小时\` });`); }
+  L.push(`return shapes;`);
+  return L.join('\n');
+}
+const strip = shapes => shapes.map(({ from, ...s }) => s);
+async function hash(obj) { const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(obj))); return [...new Uint8Array(buf)].slice(0, 6).map(b => b.toString(16).padStart(2, '0')).join(''); }
+
+function render() {
+  const svg = $('canvas'); svg.innerHTML = '';
+  el('line', { x1: 20, y1: BASE, x2: 510, y2: BASE, stroke: '#c2c8d0' }, svg);
+  const g = data.length && steps.find(s => s.op === 'bind') ? BASE - GOAL * steps.find(s => s.op === 'bind').scale : null;
+  const shapes = run(steps, data);
+  for (const s of shapes) {
+    const hl = selected >= 0 && s.from.includes(selected);
+    if (s.t === 'rect') el('rect', { x: s.x, y: s.y, width: s.w, height: s.h, rx: 3, fill: s.fill, stroke: hl ? '#e4572e' : 'none', 'stroke-width': 3 }, svg);
+    if (s.t === 'text') el('text', { x: s.x, y: s.y, 'text-anchor': 'middle', 'font-size': 11, fill: hl ? '#e4572e' : '#5b6475' }, svg, s.text);
+    if (s.t === 'line') { el('line', { x1: s.x1, x2: s.x2, y1: s.y, y2: s.y, stroke: hl ? '#e4572e' : '#1d2330', 'stroke-dasharray': '5 3', 'stroke-width': 1.5 }, svg); el('text', { x: s.x2 - 2, y: s.y - 5, 'text-anchor': 'end', 'font-size': 11, fill: '#1d2330' }, svg, s.label); }
+  }
+  if (drawing) el('rect', { x: Math.min(drawing.x0, drawing.x1), y: Math.min(drawing.y0, drawing.y1), width: Math.abs(drawing.x1 - drawing.x0), height: Math.abs(drawing.y1 - drawing.y0), fill: '#8fb2f0', 'fill-opacity': 0.5, stroke: '#2f6fdb', 'stroke-dasharray': '4 3' }, svg);
+  $('steps').innerHTML = steps.map((s, i) => `<div class="step${i === selected ? ' sel' : ''}" data-i="${i}"><b>${i + 1}. ${s.title}</b><span class="sub">${s.desc}</span>${s.edit ? `<span>${s.edit.label} <input data-i="${i}" data-k="${s.edit.key}" value="${s[s.edit.key]}"></span>` : ''}</div>`).join('');
+  $('code').textContent = genCode(steps);
+  return shapes;
+}
+// 在画布上拖出矩形
+let drawing = null;
+const svgPt = e => { const r = $('canvas').getBoundingClientRect(); return [(e.clientX - r.left) * 520 / r.width, (e.clientY - r.top) * 320 / r.height]; };
+$('canvas').addEventListener('pointerdown', e => { if (steps.length) return; const [x, y] = svgPt(e); drawing = { x0: x, y0: y, x1: x, y1: y }; $('canvas').setPointerCapture(e.pointerId); });
+$('canvas').addEventListener('pointermove', e => { if (!drawing) return; [drawing.x1, drawing.y1] = svgPt(e); render(); });
+$('canvas').addEventListener('pointerup', () => {
+  if (!drawing) return; const d = drawing; drawing = null;
+  const x = Math.round(Math.min(d.x0, d.x1)), w = Math.round(Math.abs(d.x1 - d.x0)), h = Math.round(BASE - Math.min(d.y0, d.y1));
+  steps.push({ op: 'rect', title: '画一个矩形', desc: `从地面线开始，宽 ${w}、高 ${h}`, x, w, h }); act('拖出矩形'); render();
+});
+function act(what) { actions.push(what); }
+$('tBind').onclick = () => { const r = steps[0]; const scale = +(r.h / data[0].hours).toFixed(1); steps.push({ op: 'bind', title: '高度跟随数据', desc: `把矩形顶边拖到“${data[0].name}＝${data[0].hours} 小时”：每小时 ${scale} 像素`, scale, edit: { key: 'scale', label: '每小时像素' } }); act('拖动顶边并选择数据列'); render(); };
+$('tRepeat').onclick = () => { steps.push({ op: 'repeat', title: '对每一行重复', desc: '把矩形向右拖出第二个，系统推断间距并对每一行数据重复', dx: 60, edit: { key: 'dx', label: '间距' } }); act('拖出第二个矩形'); render(); };
+$('tLabel').onclick = () => { steps.push({ op: 'label', title: '加标签', desc: '把数据的 name 列拖到矩形下方' }); act('拖动数据列到矩形下方'); render(); };
+$('tMean').onclick = () => { steps.push({ op: 'mean', title: '平均线', desc: '在高度刻度上点“平均”' }); act('点击平均'); render(); };
+$('tColor').onclick = () => { steps.push({ op: 'color', title: '按条件上色', desc: `达到每周目标的柱子用绿色`, threshold: GOAL, yes: '#1f7a4d', no: '#8fb2f0', edit: { key: 'threshold', label: '目标小时' } }); act('选择条件与两种颜色'); render(); };
+$('steps').addEventListener('click', e => { const s = e.target.closest('.step'); if (!s || e.target.tagName === 'INPUT') return; selected = +s.dataset.i === selected ? -1 : +s.dataset.i; render(); });
+$('steps').addEventListener('change', e => { const i = e.target.dataset.i, k = e.target.dataset.k; if (i == null) return; steps[i][k] = +e.target.value; act(`修改第 ${+i + 1} 步：${k} ＝ ${e.target.value}`); render(); });
+$('data').value = data.map(d => `${d.name},${d.hours}`).join('\n');
+$('data').addEventListener('change', () => { data = $('data').value.trim().split('\n').map(l => { const [name, h] = l.split(','); return { name: name.trim(), hours: +h }; }).filter(d => d.name && Number.isFinite(d.hours)); act(`修改数据：${data.length} 行`); render(); });
+
+// 检查：画出来的图形与代码运行出来的图形是否完全相同；柱高是否等于数据 × 比例
+const checks = [];
+async function check(label) {
+  const drawn = strip(run(steps, data)), coded = new Function('data', genCode(steps))(data);
+  const [h1, h2] = [await hash(drawn), await hash(coded)];
+  const b = steps.find(s => s.op === 'bind'), bars = [...$('canvas').querySelectorAll('rect')].filter(r => r.getAttribute('fill') !== 'none');
+  const heightsOk = b ? bars.every((r, i) => Math.abs(+r.getAttribute('height') - data[i].hours * b.scale) < 1e-6) : true;
+  checks.push([label, h1 === h2 ? `一致（${h1}）` : `不一致：${h1} ≠ ${h2}`, heightsOk && bars.length === data.length ? `${bars.length} 根柱子，高度＝小时 × ${b.scale}` : `柱子 ${bars.length} 根`]);
+  const t = $('check'); [...t.rows].slice(1).forEach(r => r.remove());
+  for (const [a, x, y] of checks) t.insertAdjacentHTML('beforeend', `<tr><td>${a}</td><td class="${x.startsWith('一致') ? 'good' : 'poor'}">画＝代码：${x}<br><span class="sub">${y}</span></td></tr>`);
+  return { same: h1 === h2, h1, bars: bars.length, heightsOk };
+}
+function compare() {
+  const lines = genCode(steps).split('\n').length;
+  const rows = [['创作者做了什么', `${actions.length} 次直接操作：${actions.slice(0, 6).join('、')}${actions.length > 6 ? '……' : ''}`, `写 ${lines} 行代码`],
+    ['看到的是什么', '始终是图本身；选中一步，高亮它产生的图形', '代码；运行后才看到图'],
+    ['怎样修改', '改某一步的数值、或直接改数据', '改代码中的常量或逻辑'],
+    ['擅长', '视觉判断、快速尝试、与数据的映射一目了然', '复杂逻辑、复用、版本管理'],
+    ['不擅长', '复杂的条件与循环嵌套', '“看着调”的视觉细节']];
+  for (const [a, b, c] of rows) $('cmp').insertAdjacentHTML('beforeend', `<tr><td>${a}</td><td>${b}</td><td>${c}</td></tr>`);
+}
+render();
+window.__md = { steps, check, compare, render, setData: v => { $('data').value = v; $('data').dispatchEvent(new Event('change')); }, select: i => { selected = i; render(); }, actions, getData: () => data };
+</script>
+</body>
+</html>

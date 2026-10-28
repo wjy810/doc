@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>原型与研究方法：选方法、算样本量、平衡顺序、知情同意与退出</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  tr.sel td { background: #eef3ff; }
+  .sq td { text-align: center; font-weight: 700; } .sq td:first-child { font-weight: 400; color: var(--muted); text-align: left; }
+  .A { color: #2f6fdb; } .B { color: #e4572e; } .C { color: #1f7a4d; } .D { color: #7b4bd1; }
+  .consent { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: grid; gap: 4px; }
+  .consent label { display: flex; gap: 6px; align-items: flex-start; }
+  button { font: inherit; padding: 2px 10px; border-radius: 6px; border: 1px solid #b9c0cc; background: #fff; cursor: pointer; }
+  button.primary { background: #2f6fdb; color: #fff; border-color: #2f6fdb; } button:disabled { opacity: .5; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 先写问题，再选方法和原型</h2>
+  <p class="sub">每种方法回答不同的问题。原型的保真度也要与问题匹配：问“这个流程是否合理”，纸面原型就够；问“延迟会不会让人放弃”，必须用真实技术实现的原型。</p>
+  <table id="qm"><tr><th>研究问题</th><th>方法</th><th>原型</th><th>能回答</th><th>不能回答</th></tr></table>
+</section>
+
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px">
+      <h2>2 实验要多少人：样本量与模拟验证</h2>
+      <p class="sub">比较两种界面的任务时间。效应量 d ＝ 两组平均值之差 ／ 标准差。显著性水平 α ＝ 0.05（双侧），希望有 80% 的把握发现真实存在的差异。组内设计：每人用两种界面；组间设计：每人只用一种。</p>
+      <table id="power"><tr><th>效应量 d</th><th>组内：需要的人数</th><th>模拟检验</th><th>组间：每组人数</th><th>模拟检验</th></tr></table>
+      <p class="sub" id="pnote"></p>
+    </div>
+    <div style="display:grid;gap:6px">
+      <h2>3 组内设计要平衡顺序：Williams 拉丁方</h2>
+      <p class="sub">四种界面 A—D。如果每人都按 A→B→C→D 的顺序，学习效应和疲劳会混进结果。Williams 设计让每种界面在每个位置出现一次，并且每种“紧接在后”的组合也恰好出现一次。</p>
+      <table id="sq" class="sq"></table>
+      <table id="sqcheck"><tr><th>检查</th><th>结果</th></tr></table>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px">
+      <h2>4 知情同意：参与者知道什么、同意什么</h2>
+      <div class="consent" id="consent">
+        <b>“学习计划工具”可用性研究 · 同意书 v1.2</b>
+        <label><input type="checkbox" data-k="purpose"> 我了解研究目的：评估学习计划工具是否容易使用（不是在测试我）。</label>
+        <label><input type="checkbox" data-k="time"> 我了解大约需要 30 分钟，有 50 元的感谢费，中途退出也照付。</label>
+        <label><input type="checkbox" data-k="record"> 我同意录制屏幕和声音；录像只用于分析，研究结束 6 个月后删除。</label>
+        <label><input type="checkbox" data-k="data"> 我了解数据用编号代替姓名保存，报告中不会出现可以识别我的信息。</label>
+        <label><input type="checkbox" data-k="quit"> 我了解可以随时退出、不用说明理由；退出后我的数据会被删除。</label>
+        <div style="display:flex;gap:6px;align-items:center"><button class="primary" id="agree" disabled>同意并开始</button><button id="quit">退出研究并删除我的数据</button><span class="sub" id="cstate"></span></div>
+      </div>
+    </div>
+    <div style="display:grid;gap:6px">
+      <h2>5 数据：记录了谁、退出后还剩什么</h2>
+      <table id="data"><tr><th>编号</th><th>同意书版本</th><th>任务记录</th><th>录像</th><th>状态</th></tr></table>
+      <table id="audit"><tr><th>时间</th><th>事件</th></tr></table>
+    </div>
+  </div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function gauss(r) { let u = 0; while (!u) u = r(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * r()); }
+
+// ---------- 1 问题与方法 ----------
+const QM = [
+  ['用户在上传简历时为什么放弃？', '半结构化访谈＋回看录像', '无（研究现状）', '原因、顾虑、使用情境', '有多少人这样想'],
+  ['人们平时怎样安排学习时间？', '情境观察／日记研究', '无', '真实环境中的做法与变通', '新设计是否更好'],
+  ['新的计划流程是否合理、有没有遗漏的步骤？', '出声思考的任务测试（5—8 人）', '纸面或可点击原型', '哪里误解、卡住，为什么', '时间差异是否显著'],
+  ['新版是否比旧版更快完成“调整计划”？', '对照实验（组内设计）', '技术原型（真实数据与延迟）', '差异有多大、是否可信', '为什么更快或更慢'],
+  ['延迟 300 毫秒会不会让人觉得卡？', '对照实验＋主观评分', '技术原型（可控延迟）', '感知的阈值与影响', '长期使用的习惯'],
+  ['桌面物件能否帮助小组讨论计划？', '小组任务观察＋访谈', '实体原型（可以是“绿野仙踪”式人工模拟）', '协作方式的变化', '技术是否可靠（另行测试）']
+];
+QM.forEach((r, i) => $('qm').insertAdjacentHTML('beforeend', `<tr data-i="${i}">${r.map(x => `<td>${x}</td>`).join('')}</tr>`));
+
+// ---------- 2 样本量 ----------
+// 对数伽马（Lanczos），卡方分布密度
+function lgamma(x) { const g = 7, c = [0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7]; if (x < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * x)) - lgamma(1 - x); x -= 1; let a = c[0]; const t = x + g + 0.5; for (let i = 1; i < g + 2; i++) a += c[i] / (x + i); return 0.5 * Math.log(2 * Math.PI) + (x + 0.5) * Math.log(t) - t + Math.log(a); }
+function normCdf(z) { const t = 1 / (1 + 0.2316419 * Math.abs(z)), d = 0.3989422804014327 * Math.exp(-z * z / 2), p = d * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429)))); return z > 0 ? 1 - p : p; }
+// 非中心 t：P(T > c)，T = (Z + δ) ／ √(V／df)，对 V 的卡方分布做数值积分
+function tUpper(c, df, ncp) {
+  const lf = v => (df / 2 - 1) * Math.log(v) - v / 2 - (df / 2) * Math.log(2) - lgamma(df / 2);
+  const lo = Math.max(1e-9, df - 12 * Math.sqrt(2 * df)), hi = df + 14 * Math.sqrt(2 * df) + 20, N = 2000, h = (hi - lo) / N;
+  let s = 0; for (let i = 0; i <= N; i++) { const v = lo + i * h, w = i === 0 || i === N ? 1 : i % 2 ? 4 : 2; s += w * Math.exp(lf(v)) * (1 - normCdf(c * Math.sqrt(v / df) - ncp)); }
+  return s * h / 3;
+}
+function tCrit(df, alpha2) { let a = 0, b = 20; for (let i = 0; i < 60; i++) { const m = (a + b) / 2; if (tUpper(m, df, 0) > alpha2) a = m; else b = m; } return (a + b) / 2; }
+function power(df, ncp, alpha = 0.05) { const c = tCrit(df, alpha / 2); return tUpper(c, df, ncp) + tUpper(c, df, -ncp); }
+// 从正态近似 ((1.96 + 0.84)／d)² 往下几人开始逐个检查，找到第一个达到 80% 的人数
+const zSum2 = (1.959964 + 0.841621) ** 2;
+function nPaired(d) { for (let n = Math.max(3, Math.floor(zSum2 / d ** 2) - 3); n < 3000; n++) if (power(n - 1, d * Math.sqrt(n)) >= 0.8) return n; }
+function nTwo(d) { for (let n = Math.max(3, Math.floor(2 * zSum2 / d ** 2) - 3); n < 3000; n++) if (power(2 * n - 2, d * Math.sqrt(n / 2)) >= 0.8) return n; }
+// 模拟：按算出的人数做 4000 次实验，统计显著的比例
+function simPaired(d, n, reps, r) { const c = tCrit(n - 1, 0.025); let sig = 0; for (let k = 0; k < reps; k++) { let s = 0, ss = 0; for (let i = 0; i < n; i++) { const x = gauss(r) + d; s += x; ss += x * x; } const m = s / n, sd = Math.sqrt((ss - n * m * m) / (n - 1)); if (Math.abs(m / (sd / Math.sqrt(n))) > c) sig++; } return sig / reps; }
+function simTwo(d, n, reps, r) { const c = tCrit(2 * n - 2, 0.025); let sig = 0; for (let k = 0; k < reps; k++) { let s1 = 0, q1 = 0, s2 = 0, q2 = 0; for (let i = 0; i < n; i++) { const a = gauss(r), b = gauss(r) + d; s1 += a; q1 += a * a; s2 += b; q2 += b * b; } const m1 = s1 / n, m2 = s2 / n, v = ((q1 - n * m1 * m1) + (q2 - n * m2 * m2)) / (2 * n - 2); if (Math.abs((m2 - m1) / Math.sqrt(v * 2 / n)) > c) sig++; } return sig / reps; }
+const powerRows = [];
+{
+  const r = rng(2026);
+  for (const [d, label] of [[0.2, '小'], [0.5, '中'], [0.8, '大']]) {
+    const np = nPaired(d), nt = nTwo(d), sp = simPaired(d, np, 4000, r), st = simTwo(d, nt, 4000, r);
+    powerRows.push({ d, np, nt, sp, st });
+    $('power').insertAdjacentHTML('beforeend', `<tr><td>${d}（${label}）</td><td class="num"><b>${np}</b> 人</td><td class="num ${Math.abs(sp - 0.8) < 0.03 ? 'good' : 'mid'}">${(sp * 100).toFixed(1)}% 显著</td><td class="num"><b>${nt}</b> 人 × 2 组</td><td class="num ${Math.abs(st - 0.8) < 0.03 ? 'good' : 'mid'}">${(st * 100).toFixed(1)}% 显著</td></tr>`);
+  }
+  $('pnote').textContent = '人数由非中心 t 分布计算（取能达到 80% 把握的最少人数）；“模拟检验”按这个人数生成 4000 次假想实验，统计 t 检验显著的比例，应当接近 80%。组内设计需要的人少得多，但要平衡顺序（右侧）。真实研究还要预留退出与无效数据的余量。';
+}
+
+// ---------- 3 Williams 拉丁方 ----------
+function williams(n) {   // n 为偶数：第一行 0, 1, n−1, 2, n−2, …，其余各行依次加 1
+  const first = [0]; for (let i = 1, lo = 1, hi = n - 1; i < n; i++) first.push(i % 2 ? lo++ : hi--);
+  return Array.from({ length: n }, (_, r) => first.map(x => (x + r) % n));
+}
+const L = 'ABCD', W = williams(4);
+$('sq').innerHTML = '<tr><td></td>' + [1, 2, 3, 4].map(p => `<td style="font-weight:400;color:var(--muted)">第 ${p} 个</td>`).join('') + '</tr>' + W.map((row, i) => `<tr><td>参与者 ${i + 1}、${i + 5}、${i + 9}…</td>${row.map(x => `<td class="${L[x]}">${L[x]}</td>`).join('')}</tr>`).join('');
+const pos = W.every((_, p) => new Set(W.map(r => r[p])).size === 4);
+const pairs = new Map(); W.forEach(r => { for (let i = 0; i < 3; i++) { const k = L[r[i]] + L[r[i + 1]]; pairs.set(k, (pairs.get(k) || 0) + 1); } });
+const pairsOk = pairs.size === 12 && [...pairs.values()].every(v => v === 1);
+$('sqcheck').insertAdjacentHTML('beforeend', `<tr><td>每种界面在每个位置各出现一次</td><td class="${pos ? 'good' : 'poor'}">${pos ? '是' : '否'}</td></tr><tr><td>每个“X 紧接着 Y”的组合（共 12 种）</td><td class="${pairsOk ? 'good' : 'poor'}">${pairsOk ? '各出现 1 次' : '不平衡'}</td></tr><tr><td>需要的参与者人数</td><td>4 的倍数（每 4 人用完一轮顺序）</td></tr>`);
+
+// ---------- 4、5 同意与数据 ----------
+const consentVersion = 'v1.2';
+const people = [
+  { id: 'P05', v: 'v1.2', tasks: 3, video: '28 分钟', state: '完成' },
+  { id: 'P06', v: 'v1.2', tasks: 3, video: '31 分钟', state: '完成' }
+];
+const audit = []; let clock = 14 * 60 + 2;
+const hhmm = () => `${String(Math.floor(clock / 60)).padStart(2, '0')}:${String(clock % 60).padStart(2, '0')}`;
+function logA(e) { audit.push([hhmm(), e]); clock += 3; const t = $('audit'); [...t.rows].slice(1).forEach(r => r.remove()); for (const [a, b] of audit) t.insertAdjacentHTML('beforeend', `<tr><td class="num">${a}</td><td>${b}</td></tr>`); }
+function renderData() { const t = $('data'); [...t.rows].slice(1).forEach(r => r.remove()); for (const p of people) t.insertAdjacentHTML('beforeend', `<tr><td>${p.id}</td><td>${p.v}</td><td>${p.tasks ? p.tasks + ' 项' : '—'}</td><td>${p.video || '—'}</td><td class="${p.state === '已退出' ? 'mid' : 'good'}">${p.state}</td></tr>`); }
+const boxes = [...document.querySelectorAll('#consent input')];
+boxes.forEach(b => b.addEventListener('change', () => { $('agree').disabled = !boxes.every(x => x.checked); }));
+let current = null;
+$('agree').onclick = () => {
+  current = { id: 'P07', v: consentVersion, tasks: 0, video: null, state: '进行中', consented: boxes.map(b => b.dataset.k) };
+  people.push(current); renderData(); logA(`P07 同意（${consentVersion}，勾选 ${current.consented.length}／5 项），开始录制`); $('cstate').textContent = '已同意，研究进行中'; $('agree').disabled = true;
+};
+window.__task = n => { current.tasks = n; current.video = '12 分钟（进行中）'; renderData(); logA(`P07 完成第 ${n} 项任务`); };
+$('quit').onclick = () => {
+  if (!current) return;
+  const before = people.length;
+  current.tasks = 0; current.video = null; current.state = '已退出';   // 只保留“曾参加并退出”这一事实，不保留任何研究数据
+  renderData(); logA('P07 选择退出：删除任务记录 2 项、录像 12 分钟；不询问原因；感谢费照付');
+  $('cstate').textContent = '已退出，数据已删除'; boxes.forEach(b => { b.checked = false; b.disabled = true; });
+  window.__quit = { before, after: people.filter(p => p.tasks || p.video).length, exportRows: people.filter(p => p.state !== '已退出').map(p => p.id) };
+};
+renderData(); logA('研究开始：同意书 v1.2 已按所在机构的规定通过伦理审查');
+window.__methods = { powerRows, W, pos, pairsOk, people };
+</script>
+</body>
+</html>
