@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>国际化：文本扩展、复数、排序、搜索与语言资源</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-width: 1140px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: grid; gap: 6px; align-content: start; }
+  .card.wide { grid-column: span 2; }
+  h2 { font-size: 13.5px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .tabs { display: flex; gap: 0; border: 1px solid #c3c9d3; border-radius: 6px; overflow: hidden; width: 340px; }
+  .tabs span { padding: 3px 0; text-align: center; border-right: 1px solid #c3c9d3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+  .tabs.fixed span { width: 85px; flex: none; } .tabs.flex { flex-wrap: wrap; width: 340px; } .tabs.flex span { flex: 1 1 auto; padding: 3px 8px; }
+  .tabs span:last-child { border-right: 0; }
+  code { font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="card wide"><h2>1 文本扩展：同一组界面文字在五种语言中的宽度</h2><p class="sub">宽度用浏览器按 12 像素字号实际测量（中文以外的文字用系统字体）。翻译文本为演示而写，真实项目应由译者提供。</p><table id="exp"></table>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div><p class="m"><b>固定宽度的标签页（每个 85 像素）</b>，德文：</p><div class="tabs fixed" id="tf"></div></div><div><p class="m"><b>按内容伸缩、允许换行</b>，德文：</p><div class="tabs flex" id="tx"></div></div></div><p class="m" id="mexp"></p></div>
+  <div class="card"><h2>2 复数与消息模板：不要拼接字符串</h2><table id="plural"></table><table id="concat"></table></div>
+  <div class="card"><h2>3 排序：按语言的规则，而不是按编码</h2><table id="sort"></table><p class="m" id="msort"></p></div>
+  <div class="card"><h2>4 搜索：全角半角、大小写与变音符号</h2><table id="search"></table><p class="m" id="msearch"></p></div>
+  <div class="card"><h2>5 语言资源文件的自动检查</h2><pre id="res" style="margin:0;font-size:11px;background:#f6f7f9;border-radius:6px;padding:6px 8px;white-space:pre-wrap"></pre><table id="rescheck"></table></div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const R = {};
+// ---------- 1 文本扩展 ----------
+const STR = {
+  'zh-CN': ['保存', '我的学习计划', '最近更新', '设置', '没有找到匹配的课程'],
+  en: ['Save', 'My learning plan', 'Recently updated', 'Settings', 'No matching courses found'],
+  de: ['Speichern', 'Mein Lernplan', 'Zuletzt aktualisiert', 'Einstellungen', 'Keine passenden Kurse gefunden'],
+  ja: ['保存', 'マイ学習プラン', '最近の更新', '設定', '一致するコースが見つかりません'],
+  ar: ['حفظ', 'خطة التعلم الخاصة بي', 'تم التحديث مؤخرًا', 'الإعدادات', 'لم يتم العثور على دورات مطابقة'],
+};
+const pseudo = s => '[' + s.replace(/[a-z]/g, c => ({ a: 'à', e: 'é', i: 'ï', o: 'ö', u: 'ü', c: 'ç', n: 'ñ', s: 'š' })[c] || c) + ' ' + '~'.repeat(Math.ceil(s.length * 0.4)) + ']';
+STR['伪本地化（基于英文）'] = STR.en.map(pseudo);
+const ctx = document.createElement('canvas').getContext('2d'); ctx.font = '12px "Noto Sans SC", system-ui, sans-serif';
+const w = t => ctx.measureText(t).width;
+const LANGS = Object.keys(STR), base = STR['zh-CN'].map(w);
+$('exp').innerHTML = '<tr><th>语言</th>' + STR.en.map(s => `<th>${s}</th>`).join('') + '<th>合计相对中文</th></tr>' + LANGS.map(l => { const ws = STR[l].map(w); return `<tr><td>${l}</td>${STR[l].map((s, i) => `<td><span dir="auto">${s}</span><br><span class="sub">${ws[i].toFixed(0)} 像素</span></td>`).join('')}<td class="num ${ws.reduce((a, b) => a + b) / base.reduce((a, b) => a + b) > 2 ? 'poor' : ''}">${(ws.reduce((a, b) => a + b) / base.reduce((a, b) => a + b)).toFixed(2)} 倍</td></tr>`; }).join('');
+R.expansion = Object.fromEntries(LANGS.map(l => [l, +(STR[l].map(w).reduce((a, b) => a + b) / base.reduce((a, b) => a + b)).toFixed(2)]));
+const tabsDe = ['Speichern', 'Zuletzt aktualisiert', 'Einstellungen', 'Mein Lernplan'];
+$('tf').innerHTML = tabsDe.map(t => `<span title="${t}">${t}</span>`).join(''); $('tx').innerHTML = tabsDe.map(t => `<span>${t}</span>`).join('');
+document.fonts.ready.then(() => {
+  const cut = [...$('tf').children].filter(s => s.scrollWidth > s.clientWidth).map(s => s.textContent);
+  R.cut = cut; $('mexp').innerHTML = `固定宽度时 <b class="poor">${cut.length}／4</b> 个标签被截断（${cut.join('、')}）；伸缩并允许换行时 0 个。德文和阿拉伯文这一组文字的总宽度分别是中文的 ${R.expansion.de} 倍和 ${R.expansion.ar} 倍；伪本地化把英文拉长约 40%，并换掉字母，用来在翻译之前就发现写死的文字和放不下的地方。`;
+});
+// ---------- 2 复数 ----------
+const N = [0, 1, 2, 5, 11, 100];
+$('plural').innerHTML = '<tr><th>数量</th>' + N.map(n => `<th>${n}</th>`).join('') + '</tr>' + ['zh', 'en', 'ru', 'ar'].map(l => { const pr = new Intl.PluralRules(l); return `<tr><td>${l}</td>${N.map(n => `<td>${pr.select(n)}</td>`).join('')}</tr>`; }).join('') + '<tr><td colspan="7" class="sub">Intl.PluralRules 给出每种语言的复数类别：中文只有 other，英文有 one／other，俄文有 one／few／many，阿拉伯文有六种。</td></tr>';
+R.pluralCats = Object.fromEntries(['zh', 'en', 'ru', 'ar'].map(l => [l, new Intl.PluralRules(l).resolvedOptions().pluralCategories]));
+const MSG = { 'zh-CN': { other: '你有 {n} 条新消息' }, en: { one: 'You have {n} new message', other: 'You have {n} new messages' }, de: { one: 'Sie haben {n} neue Nachricht', other: 'Sie haben {n} neue Nachrichten' } };
+const fmt = (l, n) => { const m = MSG[l], c = new Intl.PluralRules(l).select(n); return (m[c] || m.other).replace('{n}', new Intl.NumberFormat(l).format(n)); };
+const concat = (n) => 'You have ' + n + ' new messages';
+$('concat').innerHTML = '<tr><th>做法</th><th>n = 1</th><th>n = 1200</th></tr>' + `<tr><td class="poor">拼接："You have " + n + " new messages"</td><td>${concat(1)}</td><td>${concat(1200)}</td></tr>` + ['en', 'de', 'zh-CN'].map(l => `<tr><td class="good">模板 ＋ 复数规则（${l}）</td><td>${fmt(l, 1)}</td><td>${fmt(l, 1200)}</td></tr>`).join('');
+R.msg = ['en', 'de', 'zh-CN'].map(l => [fmt(l, 1), fmt(l, 1200)]);
+// ---------- 3 排序 ----------
+const LISTS = { 'zh-CN': ['张伟', '安娜', '李娜', '欧阳明', '王芳', '陈静'], de: ['Zander', 'Äpfel', 'Apfel', 'Österreich', 'Ober', 'zebra'], sv: ['Zander', 'Åsa', 'Anna', 'Örjan', 'Olle', 'Ärla'] };
+const sortRows = Object.entries(LISTS).map(([l, arr]) => ({ l, code: arr.slice().sort(), coll: arr.slice().sort(new Intl.Collator(l).compare) }));
+$('sort').innerHTML = '<tr><th>语言</th><th>默认 sort()（按编码）</th><th>Intl.Collator</th></tr>' + sortRows.map(r => `<tr><td>${r.l}</td><td class="poor">${r.code.join('、')}</td><td class="good">${r.coll.join('、')}</td></tr>`).join('');
+R.sort = sortRows.map(r => ({ l: r.l, code: r.code, coll: r.coll }));
+$('msort').innerHTML = '中文按拼音排（安、陈、李、欧阳、王、张）；德文把 Ä 当作 A 的变体；瑞典文的 Å、Ä、Ö 是排在 Z 后面的独立字母——同一组字母，不同语言的规则不同。默认的 sort() 按编码排：带变音符号的 Ä、Ö、Å 都跑到了最后，汉字也没有按读音排。';
+// ---------- 4 搜索 ----------
+const ITEMS = ['Café 设计课', 'ＪａｖａＳｃｒｉｐｔ 入门', 'javascript 进阶', 'Résumé 写作', 'Data Visualization', '数据可视化'];
+const QUERIES = ['cafe', 'JavaScript', 'resume', 'ｄａｔａ'];
+const plain = (q, s) => s.includes(q);
+const norm = s => s.normalize('NFKC').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+const smart = (q, s) => norm(s).includes(norm(q));
+const res = QUERIES.map(q => ({ q, plain: ITEMS.filter(s => plain(q, s)), smart: ITEMS.filter(s => smart(q, s)) }));
+$('search').innerHTML = '<tr><th>搜索词</th><th>直接 includes()</th><th>规范化后（NFKC → 去变音 → 小写）</th></tr>' + res.map(r => `<tr><td><code>${r.q}</code></td><td class="${r.plain.length ? '' : 'poor'}">${r.plain.join('、') || '无结果'}</td><td class="good">${r.smart.join('、')}</td></tr>`).join('');
+R.search = res.map(r => [r.q, r.plain.length, r.smart.length]);
+$('msearch').innerHTML = 'NFKC 把全角字母变成半角，NFD 加去掉变音符号让 é 与 e 相同，再统一大小写。简体与繁体（数据／數據）、拼音首字母等需要专门的数据，规范化解决不了；而有些语言里变音符号会改变意思（例如瑞典文的 å），是否忽略要看用户与语言。';
+// ---------- 5 语言资源 ----------
+const RES = {
+  'zh-CN': { 'plan.title': '我的学习计划', 'plan.empty': '还没有任务。从“课程”里选一门开始吧。', 'plan.count': { other: '共 {count} 项任务' }, 'error.save': '保存失败：{reason}。已填写的内容不会丢失。', 'btn.save': '保存' },
+  en: { 'plan.title': 'My learning plan', 'plan.empty': 'No tasks yet. Pick a course to get started.', 'plan.count': { one: '{count} task', other: '{count} tasks' }, 'error.save': 'Could not save: {reson}. Your changes are kept.', 'btn.save': 'Save changes to your learning plan now' }
+};
+const META = { 'btn.save': { max: 16, note: '按钮，空间有限' }, 'plan.title': { max: 40 }, 'plan.empty': { max: 80 }, 'error.save': { max: 120 }, 'plan.count': { max: 24 } };
+$('res').textContent = JSON.stringify(RES, null, 1).slice(0, 640) + '\n…';
+const vars = s => [...new Set([...String(typeof s === 'object' ? Object.values(s).join(' ') : s).matchAll(/\{(\w+)\}/g)].map(m => m[1]))].sort().join(',');
+const issues = [];
+for (const k of Object.keys(RES['zh-CN'])) {
+  if (!(k in RES.en)) { issues.push([k, '英文缺少这个键']); continue; }
+  if (vars(RES['zh-CN'][k]) !== vars(RES.en[k])) issues.push([k, `占位符不一致：中文 {${vars(RES['zh-CN'][k])}}，英文 {${vars(RES.en[k])}}`]);
+  for (const l of ['zh-CN', 'en']) { const v = RES[l][k], text = typeof v === 'object' ? Object.values(v) : [v]; if (META[k] && text.some(t => t.length > META[k].max)) issues.push([k, `${l} 超过长度上限 ${META[k].max} 个字符（${META[k].note || ''}）`]); }
+  if (typeof RES.en[k] === 'object') { const need = new Intl.PluralRules('en').resolvedOptions().pluralCategories, has = Object.keys(RES.en[k]); if (need.some(c => !has.includes(c))) issues.push([k, `英文缺少复数类别 ${need.filter(c => !has.includes(c)).join('、')}`]); }
+}
+for (const k of Object.keys(RES.en)) if (!(k in RES['zh-CN'])) issues.push([k, '中文缺少这个键']);
+R.resIssues = issues;
+$('rescheck').innerHTML = '<tr><th>键</th><th>发现的问题</th></tr>' + (issues.length ? issues.map(([k, t]) => `<tr><td><code>${k}</code></td><td class="poor">${t}</td></tr>`).join('') : '<tr><td colspan="2" class="good">没有问题</td></tr>') + '<tr><td colspan="2" class="sub">资源文件按“键 → 文字”组织，复数写成按类别的对象，并为译者记下长度上限与说明。检查脚本可以放进持续集成：缺键、占位符拼错（{reson}）、超长都在发布前发现。</td></tr>';
+window.__i18n = R;
+</script>
+</body>
+</html>
