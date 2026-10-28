@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>地图项目：校园设施地图</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .main { display: grid; grid-template-columns: 700px minmax(0, 1fr); gap: 14px; }
+  #map { height: 470px; border-radius: 8px; background: #eef1f4; font: 12px "Noto Sans SC", sans-serif; }
+  .bar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .bar button { font: inherit; font-size: 12px; border: 1px solid var(--line); background: #fff; border-radius: 14px; padding: 0 10px; min-height: 28px; cursor: pointer; }
+  .bar button[aria-pressed="true"] { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .fac { display: grid; place-items: center; }   /* 44 × 44 的透明点击区，中间是 14 像素的点 */
+  .fac .dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
+  .fac .cnt { position: absolute; transform: translate(9px, -9px); background: #1d2330; color: #fff; font-size: 10px; border-radius: 8px; padding: 0 4px; line-height: 14px; }
+  .fac.hi .dot { width: 20px; height: 20px; box-shadow: 0 0 0 3px #ffd400; }
+  .blabel { background: transparent; border: 0; box-shadow: none; color: #3a4252; font-size: 11px; padding: 0; white-space: nowrap; }
+  .blabel::before { display: none; }
+  #list { max-height: 250px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+  #list li { list-style: none; padding: 4px 8px; border-bottom: 1px solid var(--line); cursor: pointer; display: flex; gap: 6px; align-items: baseline; min-height: 32px; }
+  #list li.hi { background: #fff8d6; } #list ul { margin: 0; padding: 0; }
+  #list .d { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
+  .sw { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+  #detail { border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 12px; min-height: 96px; }
+  #msg { font-size: 12px; padding: 4px 8px; border-radius: 6px; background: #f1f2f4; }
+  #msg.err { background: #fbe4dd; color: #8a1c14; } #msg.ok { background: #eef7f1; color: #1f7a4d; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>校园设施地图（虚构的校园，坐标与数据为演示而构造）</h2>
+  <div class="main">
+    <div style="display:grid;gap:6px">
+      <div class="bar" id="zones"></div>
+      <div id="map" role="application" aria-label="校园设施地图；同样的内容见右侧列表"></div>
+      <div class="bar" id="layers"></div>
+    </div>
+    <div style="display:grid;gap:6px;align-content:start">
+      <div class="bar"><button id="locate">定位到我</button><span class="sub">演示：</span><select id="sim"><option value="real">真实定位</option><option value="ok">校内，精度 15 米</option><option value="denied">拒绝授权</option><option value="unavailable">无法确定位置</option><option value="timeout">超时</option><option value="outside">在校外</option><option value="inaccurate">精度只有 350 米</option><option value="unsupported">浏览器不支持</option></select></div>
+      <div id="msg" role="status" aria-live="polite">尚未定位。不定位也可以使用全部功能。</div>
+      <h3 id="listTitle">设施列表</h3><div id="list"><ul></ul></div>
+      <h3>详情</h3><div id="detail" class="sub">点击地图上的点或列表中的一项。</div>
+    </div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>验收检查</h2><table id="chk"></table><h3>坐标核对：打印点整体偏移</h3><table id="shift"></table></div>
+    <div style="display:grid;gap:6px"><h2>定位失败的七种状态</h2><table id="geo"></table><h3>数据来源记录</h3><table id="src"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const C = [31.2, 121.0], KLAT = 111320, KLON = 111320 * Math.cos(C[0] * Math.PI / 180);
+const ll = (x, y) => [C[0] + y / KLAT, C[1] + x / KLON];   // 以校园中心为原点的米 → 经纬度（WGS 84）
+const xy = ([lat, lon]) => [(lon - C[1]) * KLON, (lat - C[0]) * KLAT];
+const rect = (x0, y0, x1, y1) => [ll(x0, y0), ll(x1, y0), ll(x1, y1), ll(x0, y1)];
+const BOUNDARY = [ll(-600, -400), ll(600, -400), ll(600, 400), ll(100, 400), ll(100, 340), ll(-600, 340)];
+const ZONES = { 西区: [-600, -200], 中区: [-200, 200], 东区: [200, 600] };
+const B = { 图书馆: [-60, 40, 60, 140, 3], 第一教学楼: [-150, -200, -40, -120, 2], 第二教学楼: [40, -200, 150, -120, 2], 第一食堂: [-480, 120, -380, 200, 2], 第二食堂: [380, 120, 480, 200, 2],
+  宿舍1号楼: [-560, -340, -460, -260, 1], 宿舍2号楼: [-440, -340, -340, -260, 1], 宿舍3号楼: [-320, -340, -220, -260, 1], 宿舍4号楼: [240, -340, 340, -260, 1], 宿舍5号楼: [360, -340, 460, -260, 1],
+  实验楼A: [250, 0, 380, 90, 2], 实验楼B: [400, 0, 530, 90, 2], 体育馆: [-500, -60, -330, 60, 2], 校医院: [-150, 250, -60, 320, 3], 行政楼: [-20, 250, 90, 320, 1] };
+const TYPES = { 学习: '#2f6fdb', 餐饮: '#e08a3c', 医疗: '#c0392b', 生活: '#1f7a4d', 实验室: '#7b4fd6', 交通: '#5b6475', 打印: '#a15c00' };
+const center = n => { const b = B[n]; return [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]; };
+let FAC = [
+  ['图书馆', '学习', '图书馆', '8:00—22:00'], ['自习室', '学习', '第一教学楼', '7:00—23:00'], ['咖啡角', '餐饮', '图书馆', '9:00—21:00'], ['第一食堂', '餐饮', '第一食堂', '6:30—20:00'], ['第二食堂', '餐饮', '第二食堂', '6:30—21:00'],
+  ['校医院', '医疗', '校医院', '全天'], ['体育馆', '生活', '体育馆', '8:00—21:30'], ['行政服务中心', '生活', '行政楼', '工作日 9:00—17:00'],
+  ...[1, 2, 3, 4, 5].map(i => [`宿舍 ${i} 号楼`, '生活', `宿舍${i}号楼`, '全天']), ['化学实验室', '实验室', '实验楼A', '预约'], ['物理实验室', '实验室', '实验楼A', '预约'], ['生物实验室', '实验室', '实验楼B', '预约'], ['计算中心', '实验室', '实验楼B', '8:00—22:00'],
+  ['校车·北门站', '交通', null, '7:00—22:00', [150, 380]], ['校车·西门站', '交通', null, '7:00—22:00', [-590, 0]], ['校车·东门站', '交通', null, '7:00—22:00', [590, -100]]
+].map(([name, type, bld, hours, p], i) => ({ id: i, name, type, bld, hours, src: '后勤处设施台账', pos: ll(...(p || center(bld).map((v, k) => v + (k ? -12 : 10) * (i % 3 - 1)))) }));
+// 一批来自打印服务商的数据：用的是另一个坐标系，整体偏了约 300 米（构造）
+const SHIFT = [0.0028, -0.0014];
+['图书馆', '第一教学楼', '第二教学楼', '实验楼A'].forEach((bld, k) => { const p = ll(...center(bld)); FAC.push({ id: FAC.length, name: `打印点 ${k + 1}`, type: '打印', bld, hours: '8:00—22:00', src: '打印服务商接口', raw: true, pos: [p[0] + SHIFT[1], p[1] + SHIFT[0]] }); });
+FAC.push({ id: FAC.length, name: '自助借还机', type: '学习', bld: '图书馆', hours: '全天', src: '图书馆系统导出', pos: [121.0003, 31.2008] });   // 纬度与经度填反了
+// ---------- 坐标核对 ----------
+const inPoly = ([x, y], poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
+const BXY = BOUNDARY.map(xy);
+function audit() {
+  const bad = FAC.filter(f => Math.abs(f.pos[0]) > 90), valid = FAC.filter(f => Math.abs(f.pos[0]) <= 90);
+  const outside = valid.filter(f => !inPoly(xy(f.pos), BXY)), notInB = valid.filter(f => f.bld && (() => { const b = B[f.bld], [x, y] = xy(f.pos); return !(x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]); })());
+  return { bad, outside, notInB };
+}
+const before = audit();
+const shifted = before.notInB.map(f => { const [x, y] = xy(f.pos), [cx, cy] = center(f.bld); return { f, dx: x - cx, dy: y - cy }; });
+const med = a => a.slice().sort((p, q) => p - q)[a.length >> 1];
+const off = { dx: med(shifted.map(s => s.dx)), dy: med(shifted.map(s => s.dy)) };
+const spread = Math.max(...shifted.map(s => Math.hypot(s.dx - off.dx, s.dy - off.dy)));
+// 修正：同一来源整体偏移一致 → 判断为坐标系不同（演示中减去中位偏移；真实项目应按来源的坐标系做正式转换）；填反的经纬度交换回来
+for (const s of shifted) { const [x, y] = xy(s.f.pos); s.f.pos = ll(x - off.dx, y - off.dy); s.f.fixed = '坐标系偏移已修正'; }
+for (const f of before.bad) { f.pos = [f.pos[1], f.pos[0]]; f.fixed = '经纬度对调已修正'; }
+const after = audit();
+// ---------- 地图 ----------
+const map = L.map('map', { zoomSnap: 0.5, minZoom: 14, maxZoom: 19 }).setView(C, 16);
+map.attributionControl.setPrefix(false).addAttribution('示例数据：虚构校园');
+L.polygon(BOUNDARY, { color: '#9aa6b5', weight: 2, fillColor: '#f7f8f5', fillOpacity: 1 }).addTo(map);
+const zoneLayer = L.layerGroup().addTo(map);
+const blds = Object.entries(B).map(([n, b]) => { L.polygon(rect(b[0], b[1], b[2], b[3]), { color: '#c3c9d3', weight: 1, fillColor: '#e3e7ec', fillOpacity: 1 }).addTo(map);   // 楼名放在楼的上沿，不和楼中心的点重叠
+  return { n, pri: b[4], tip: L.tooltip({ permanent: true, direction: 'top', className: 'blabel', offset: [0, 2] }).setLatLng(ll((b[0] + b[2]) / 2, b[3])).setContent(n).addTo(map) }; });
+const roads = [[[-600, 220], [600, 220]], [[-600, -230], [600, -230]], [[0, -400], [0, 400]], [[200, -400], [200, 220]], [[-200, -400], [-200, 220]]];
+roads.forEach(r => L.polyline(r.map(p => ll(...p)), { color: '#fff', weight: 6, opacity: 1 }).addTo(map).bringToBack());
+const S = { zone: null, types: new Set(Object.keys(TYPES)), sel: null, me: null };
+const markers = L.layerGroup().addTo(map);
+const visible = () => FAC.filter(f => S.types.has(f.type) && (!S.zone || (() => { const x = xy(f.pos)[0], [a, b] = ZONES[S.zone]; return x >= a && x < b; })()));
+const dist = f => S.me ? map.distance(S.me, f.pos) : null;
+function drawMarkers() {
+  markers.clearLayers();
+  const vis = visible(), z = map.getZoom(), group = z < 18, zoneOf = f => Object.keys(ZONES).find(k => { const x = xy(f.pos)[0]; return x >= ZONES[k][0] && x < ZONES[k][1]; });
+  if (z < 15.5) {   // 15.5 级以下：按区域合成一个点
+    const units = Object.values(Object.groupBy(vis, zoneOf)).map(g => ({ u: g, pos: ll((ZONES[zoneOf(g[0])][0] + ZONES[zoneOf(g[0])][1]) / 2, 0) }));
+    return finish(units, vis);
+  }
+  const byB = Object.values(Object.groupBy(vis, f => f.bld || 'f' + f.id)), units = [];   // 15.5—18 级：同一栋楼的设施合成一个带数字的点
+  for (const g of byB) {
+    if (group || g.length === 1) { units.push({ u: g, pos: g.length > 1 ? ll(...center(g[0].bld)) : g[0].pos }); continue; }
+    const c = map.latLngToLayerPoint(ll(...center(g[0].bld)));   // 18 级以上：在楼的中心周围展开成一圈，间距不小于 44 像素
+    g.forEach((f, k) => { const a = 2 * Math.PI * k / g.length - Math.PI / 2; units.push({ u: [f], pos: map.layerPointToLatLng(L.point(c.x + 46 * Math.cos(a), c.y + 46 * Math.sin(a))) }); });
+  }
+  finish(units, vis);
+}
+function finish(units, vis) {
+  for (const { u, pos } of units) {
+    const f = u[0];
+    const m = L.marker(pos, { icon: L.divIcon({ className: 'fac' + (u.some(g => g.id === S.sel) ? ' hi' : ''), html: `<span class="dot" style="background:${new Set(u.map(g => g.type)).size > 1 ? '#3a4252' : TYPES[f.type]}"></span>${u.length > 1 ? `<span class="cnt">${u.length}</span>` : ''}`, iconSize: [44, 44] }), keyboard: true, title: u.map(g => g.name).join('、') });
+    m.on('click', () => { if (u.length > 1) map.setView(pos, map.getZoom() < 15.5 ? 16 : 18); else select(f.id); });
+    m.addTo(markers); m.units = u;
+  }
+  drawList(vis); placeLabels();
+}
+function drawList(vis) {
+  const items = vis.slice().sort((a, b) => S.me ? dist(a) - dist(b) : a.id - b.id);
+  $('listTitle').textContent = `设施列表（${items.length} 项${S.zone ? '，' + S.zone : ''}${S.me ? '，按距离排序' : ''}）`;
+  $('list').firstElementChild.innerHTML = items.map(f => `<li data-id="${f.id}" class="${f.id === S.sel ? 'hi' : ''}" tabindex="0"><span class="sw" style="background:${TYPES[f.type]}"></span>${f.name}<span class="d">${S.me ? Math.round(dist(f)) + ' 米' : f.bld || '室外'}</span></li>`).join('');
+}
+$('list').onclick = e => { const li = e.target.closest('li'); if (li) { const f = FAC[+li.dataset.id]; if (!map.getBounds().pad(-0.1).contains(f.pos)) map.panTo(f.pos); select(f.id); } };
+$('list').onmouseover = e => { const li = e.target.closest('li'); markers.eachLayer(m => m.getElement()?.classList.toggle('hi', !!li && m.units.some(g => g.id === +li.dataset.id))); };
+function select(id) {
+  S.sel = id; const f = FAC[id];
+  $('detail').className = ''; $('detail').innerHTML = `<b>${f.name}</b>　<span class="sub">${f.type} · ${f.bld || '室外'}</span><br>开放时间：${f.hours}${S.me ? `<br>距离你约 ${Math.round(dist(f))} 米（直线）` : ''}<br><span class="sub">来源：${f.src}${f.fixed ? '；' + f.fixed : ''}　坐标（WGS 84）：${f.pos[0].toFixed(5)}, ${f.pos[1].toFixed(5)}</span>`;
+  drawMarkers(); const li = $('list').querySelector(`li[data-id="${id}"]`); if (li) li.scrollIntoView({ block: 'nearest' });
+}
+// 区域与图层
+$('zones').innerHTML = '<span class="sub">区域：</span>' + ['全部', ...Object.keys(ZONES)].map(z => `<button data-z="${z}" aria-pressed="${z === '全部'}">${z}</button>`).join('');
+$('zones').onclick = e => { const z = e.target.dataset.z; if (!z) return; S.zone = z === '全部' ? null : z; $('zones').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.z === z)); zoneLayer.clearLayers(); if (S.zone) { const [a, b] = ZONES[S.zone]; L.rectangle([ll(a, -400), ll(b, 400)], { color: '#2f6fdb', weight: 1.5, fillOpacity: 0.06, dashArray: '4 3', interactive: false }).addTo(zoneLayer); map.fitBounds([ll(a, -400), ll(b, 400)], { padding: [24, 24], maxZoom: 16.5, animate: false }); } drawMarkers(); };
+$('layers').innerHTML = '<span class="sub">图层：</span>' + Object.entries(TYPES).map(([t, c]) => `<button data-t="${t}" aria-pressed="true"><span class="sw" style="background:${c}"></span> ${t}</button>`).join('');
+$('layers').onclick = e => { const b = e.target.closest('button'); if (!b) return; const t = b.dataset.t; S.types.has(t) ? S.types.delete(t) : S.types.add(t); b.setAttribute('aria-pressed', S.types.has(t)); drawMarkers(); };
+// 标注避让：重要的楼名先放，和已放的重叠就隐藏
+let labelStats = {};
+function placeLabels() {
+  const els = blds.map(b => ({ b, el: b.tip.getElement() })).filter(o => o.el);
+  els.forEach(o => o.el.style.visibility = 'visible');
+  const rects = els.map(o => ({ ...o, r: o.el.getBoundingClientRect() }));
+  const ov = (a, b) => !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
+  let overlapsBefore = 0; for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) if (ov(rects[i].r, rects[j].r)) overlapsBefore++;
+  const kept = [], hidden = [];
+  for (const o of rects.sort((a, b) => b.b.pri - a.b.pri)) { if (kept.some(k => ov(k.r, o.r))) { o.el.style.visibility = 'hidden'; hidden.push(o.b.n); } else kept.push(o); }
+  labelStats[map.getZoom()] = { overlapsBefore, hidden };
+}
+map.on('zoomend', drawMarkers);
+// ---------- 定位与失败状态 ----------
+function stub(mode) {
+  if (mode === 'unsupported') return null;
+  return { getCurrentPosition(ok, err) {
+    const e = code => setTimeout(() => err({ code, PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 }), 30);
+    if (mode === 'denied') return e(1); if (mode === 'unavailable') return e(2); if (mode === 'timeout') return e(3);
+    const p = mode === 'outside' ? ll(5200, -3100) : ll(95, -160), acc = mode === 'inaccurate' ? 350 : 15;
+    setTimeout(() => ok({ coords: { latitude: p[0], longitude: p[1], accuracy: acc } }), 30);
+  } };
+}
+const meLayer = L.layerGroup().addTo(map);
+function locate(mode) {
+  return new Promise(done => {
+    const geo = mode === 'real' ? navigator.geolocation : stub(mode), msg = (t, cls) => { $('msg').textContent = t; $('msg').className = cls; done({ mode, msg: t, cls }); };
+    const fallback = '可以在列表中选择你所在的楼。';
+    if (!geo) return msg('这个浏览器不支持定位。' + fallback, 'err');
+    $('msg').textContent = '正在定位……'; $('msg').className = '';
+    geo.getCurrentPosition(pos => {
+      const p = [pos.coords.latitude, pos.coords.longitude], acc = Math.round(pos.coords.accuracy); meLayer.clearLayers();
+      if (!inPoly(xy(p), BXY)) { const d = map.distance(p, ll(150, 400)); S.me = null; drawMarkers(); return msg(`你现在不在校园内（离北门约 ${(d / 1000).toFixed(1)} 千米）。地图仍显示校园；距离不按你的位置计算。`, 'err'); }
+      L.circle(p, { radius: acc, color: '#2f6fdb', weight: 1, fillOpacity: 0.1, interactive: false }).addTo(meLayer);
+      if (acc > 100) { S.me = null; drawMarkers(); return msg(`定位精度只有约 ${acc} 米，不足以判断你在哪栋楼。地图上的圆是可能的范围；${fallback}`, 'err'); }
+      L.circleMarker(p, { radius: 7, color: '#fff', weight: 2, fillColor: '#2f6fdb', fillOpacity: 1 }).addTo(meLayer);
+      S.me = p; drawMarkers(); msg(`已定位（精度约 ${acc} 米）。列表按距离排序。`, 'ok');
+    }, e => msg({ 1: '没有获得定位权限。可以在浏览器设置中允许，或者' + fallback, 2: '暂时无法确定位置（室内或信号弱时常见）。可以稍后重试，或者' + fallback, 3: '定位超时。可以重试，或者' + fallback }[e.code] || '定位失败。' + fallback, 'err'), { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 });
+  });
+}
+$('locate').onclick = () => locate($('sim').value);
+// ---------- 检查 ----------
+function targets() {
+  const els = [...document.querySelectorAll('.fac')].map(e => e.getBoundingClientRect());
+  let pairs = 0; for (let i = 0; i < els.length; i++) for (let j = i + 1; j < els.length; j++) { const a = els[i], b = els[j]; if (!(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom)) pairs++; }
+  return { n: els.length, min: Math.min(...els.map(r => Math.min(r.width, r.height))), pairs };
+}
+window.__cm = { map, locate, select, ll, before, after, off, spread, labelStats: () => labelStats, targets,
+  measureAt: async z => { map.setView(C, z, { animate: false }); await new Promise(r => setTimeout(r, 120)); drawMarkers(); return { z, t: targets(), l: labelStats[z] }; },
+  report(rows, geo) {
+    const B0 = this.before, A0 = this.after;
+    $('chk').innerHTML = '<tr><th>检查</th><th>结果</th></tr>' + [
+      ['数据坐标：经纬度在合法范围内', `修正前 ${B0.bad.length} 个不合法（${B0.bad.map(f => f.name).join('')}：纬度写成了 121.0003）→ 修正后 ${A0.bad.length}`, A0.bad.length === 0],
+      ['数据坐标：点在校园边界内', `修正前 ${B0.outside.length} 个在外 → 修正后 ${A0.outside.length}`, A0.outside.length === 0],
+      ['数据坐标：点在所属的楼内', `修正前 ${B0.notInB.length} 个不在（${B0.notInB.map(f => f.name).join('、')}）→ 修正后 ${A0.notInB.length}`, A0.notInB.length === 0],
+      ...rows.map(r => [`缩放 ${r.z}：触控目标 ≥ 44 像素`, `${r.t.n} 个点，最小 ${Math.round(r.t.min)} 像素；点击区相互重叠 ${r.t.pairs} 对`, r.t.min >= 44 && r.t.pairs === 0]),
+      ...rows.map(r => [`缩放 ${r.z}：楼名标注遮挡`, `避让前重叠 ${r.l.overlapsBefore} 对；隐藏 ${r.l.hidden.length} 个${r.l.hidden.length ? '（' + r.l.hidden.join('、') + '）' : ''}，显示出的标注 0 重叠`, true]),
+      ['定位失败状态', `${geo.filter(g => g.cls === 'err').length}／6 种失败都有说明和退路；成功时按距离排序`, geo.filter(g => g.cls === 'err').length === 6]
+    ].map(([a, b, ok]) => `<tr><td>${a}</td><td class="${ok ? 'good' : 'poor'}">${b}</td></tr>`).join('');
+    $('shift').innerHTML = '<tr><th>点</th><th>相对所属楼中心的偏移</th></tr>' + shifted.map(s => `<tr><td>${s.f.name}（${s.f.bld}）</td><td class="num">向${s.dx >= 0 ? '东' : '西'} ${Math.abs(s.dx).toFixed(0)} 米，向${s.dy >= 0 ? '北' : '南'} ${Math.abs(s.dy).toFixed(0)} 米</td></tr>`).join('') + `<tr><td colspan="2" class="sub">四个点的偏移几乎相同（与中位数最多相差 ${this.spread.toFixed(1)} 米），而且都来自同一个来源：这是坐标系不同造成的整体偏移（国内地图服务常用的 GCJ-02 与 GPS 的 WGS 84 之间有几百米的差），不是个别录入错误。应按来源的坐标系做转换，并在来源记录里写明。</td></tr>`;
+    $('geo').innerHTML = '<tr><th>状态</th><th>显示的说明</th></tr>' + geo.map(g => `<tr><td style="white-space:nowrap">${$('sim').querySelector(`option[value="${g.mode}"]`).textContent}</td><td class="${g.cls === 'ok' ? 'good' : ''}">${g.msg}</td></tr>`).join('');
+    $('src').innerHTML = '<tr><th>图层</th><th>来源</th><th>坐标系</th><th>更新</th></tr>' + [['校园边界、建筑、道路', '基建处测绘图', 'WGS 84', '2026-09'], ['设施（学习、餐饮、医疗、生活、实验室、交通）', '后勤处设施台账', 'WGS 84', '2026-10'], ['打印点', '打印服务商接口', 'GCJ-02（已转换）', '2026-10'], ['自助借还机', '图书馆系统导出', 'WGS 84（经纬度对调已修正）', '2026-10']].map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('') + '<tr><td colspan="4" class="sub">以上来源均为演示而构造；真实项目还要写明许可、负责人和更新周期。</td></tr>';
+  }
+};
+drawMarkers();
+</script>
+</body>
+</html>
