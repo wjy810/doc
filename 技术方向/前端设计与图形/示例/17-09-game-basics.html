@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>游戏体验：难度、节奏与分支叙事的检查</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 4px 0 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .col { display: grid; gap: 6px; align-content: start; }
+  svg { width: 100%; height: auto; display: block; }
+  .tag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 9px; background: #fff3d6; color: #7a4a00; }
+  .key { display: inline-block; width: 14px; height: 3px; margin: 0 3px 0 8px; vertical-align: 3px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 难度与节奏：同一个点击小游戏的两种关卡设计</h2>
+  <p class="sub"><span class="tag">模拟玩家</span> 规则：圆形目标出现在随机位置，限时内点中算成功。玩家的反应时间、移动时间（菲茨定律）和落点误差都按假设的参数生成，分新手、熟练、高手三种，每关每种各模拟 400 次（种子 11）。结果只用来比较关卡设计，不代表真实玩家。</p>
+  <div class="two">
+    <div class="col"><h3>设计 A：每关均匀变难</h3><svg id="chartA" viewBox="0 0 540 230"></svg></div>
+    <div class="col"><h3>设计 B：开头平缓、每 4 关一次喘息，并按表现微调</h3><svg id="chartB" viewBox="0 0 540 230"></svg></div>
+  </div>
+  <table id="levels"></table><div class="two"><div class="col"><table id="flow"></table></div><div class="col"><p class="m" id="mflow"></p></div></div>
+</section>
+<section class="panel">
+  <h2>2 分支叙事：一段互动故事的结构检查</h2>
+  <p class="sub">故事为演示而写：新生第一周，在选课、社团和作业之间做选择。每个方框是一段文字，箭头是玩家的选择，双线框是结局，带 ⟲ 的是存档点（可以回到这里重新选择）。</p>
+  <div class="two">
+    <div class="col"><h3>初稿</h3><svg id="gA" viewBox="0 0 540 300"></svg></div>
+    <div class="col"><h3>修改后</h3><svg id="gB" viewBox="0 0 540 300"></svg></div>
+  </div>
+  <table id="story"></table><p class="m" id="mstory"></p>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const fmt = (v, d = 0) => v == null || Number.isNaN(v) ? '—' : v.toFixed(d);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const R = {};
+const mulberry32 = a => () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+const rnd = mulberry32(11), gauss = () => { let u = 0, v = 0; while (!u) u = rnd(); while (!v) v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+
+// ---------- 1 难度 ----------
+// 玩家模型（假设）：反应时间 ~ N(rt, 40)；移动时间 = 100 + b·log2(D/W + 1)；落点误差 ~ N(0, sd) 像素
+const PLAYERS = { 新手: { rt: 420, b: 190, sd: 9, color: '#c77700' }, 熟练: { rt: 330, b: 150, sd: 7, color: '#2f6fdb' }, 高手: { rt: 260, b: 120, sd: 5, color: '#1f7a4d' } };
+const LEVELS_A = Array.from({ length: 10 }, (_, i) => ({ W: 60 - i * 5.5, T: 1500 - i * 110 }));
+const LEVELS_B = Array.from({ length: 10 }, (_, i) => { const k = [0, 0.6, 1.4, 2.4, 2.4, 3.2, 4.2, 5.2, 5.2, 6.2][i]; return { k, W: 60 - k * 6, T: 1500 - k * 115, rest: [4, 8].includes(i) }; });
+function trial(p, W, T) {
+  const D = 120 + rnd() * 280, rt = p.rt + 40 * gauss(), mt = 100 + p.b * Math.log2(D / W + 1), err = Math.hypot(p.sd * gauss(), p.sd * gauss());
+  return rt + mt <= T && err <= W / 2;
+}
+const rate = (p, L, n = 400) => { let k = 0; for (let i = 0; i < n; i++) if (trial(p, L.W, L.T)) k++; return k / n; };
+// 按表现微调（阶梯法）：连续成功 2 次难一点、失败 1 次容易一点，步长相同时成功率会稳定在约 71%；
+// 调整量跨关卡保留；喘息关在此基础上容易约一档，并且不调整
+function adaptive(p, levels) {
+  let off = 0;
+  return levels.map(L => {
+    let k = 0, run = 0;
+    for (let i = 0; i < 400; i++) {
+      const eff = L.k + off - (L.rest ? 0.8 : 0), W = Math.max(8, 60 - eff * 6), T = Math.max(350, 1500 - eff * 115);
+      const hit = trial(p, W, T); if (hit) k++;
+      if (L.rest) continue;
+      if (hit) { run++; if (run >= 2) { off = Math.min(off + 0.1, 6); run = 0; } } else { run = 0; off = Math.max(off - 0.1, -6); }
+    }
+    return k / 400;
+  });
+}
+const resA = Object.fromEntries(Object.entries(PLAYERS).map(([n, p]) => [n, LEVELS_A.map(L => rate(p, L))]));
+const resB = Object.fromEntries(Object.entries(PLAYERS).map(([n, p]) => [n, adaptive(p, LEVELS_B)]));
+const FLOW = [0.6, 0.85];
+function chart(svg, res, levels) {
+  const X = i => 46 + i * 50, Y = v => 200 - v * 170;
+  let s = `<rect x="46" y="${Y(FLOW[1])}" width="450" height="${Y(FLOW[0]) - Y(FLOW[1])}" fill="#e3f1e8"/><text x="52" y="${Y(FLOW[0]) - 4}" font-size="10" fill="#1f7a4d" font-family="Noto Sans SC">目标区间 60%—85%（设计约定）</text>`;
+  [0, 0.25, 0.5, 0.75, 1].forEach(v => { s += `<line x1="46" x2="496" y1="${Y(v)}" y2="${Y(v)}" stroke="#e6e8ec"/><text x="40" y="${Y(v) + 4}" text-anchor="end" font-size="10" fill="#8a93a3">${v * 100}%</text>`; });
+  levels.forEach((L, i) => { s += `<text x="${X(i)}" y="216" text-anchor="middle" font-size="10" fill="#5b6475" font-family="Noto Sans SC">${i + 1}${L.rest ? '·歇' : ''}</text>`; });
+  for (const [n, arr] of Object.entries(res)) { const c = PLAYERS[n].color; s += `<polyline fill="none" stroke="${c}" stroke-width="2" points="${arr.map((v, i) => `${X(i)},${Y(v)}`).join(' ')}"/>` + arr.map((v, i) => `<circle cx="${X(i)}" cy="${Y(v)}" r="2.5" fill="${c}"/>`).join(''); }
+  Object.keys(res).forEach((n, j) => { s += `<line x1="${300 + j * 70}" x2="${318 + j * 70}" y1="9" y2="9" stroke="${PLAYERS[n].color}" stroke-width="2.5"/><text x="${322 + j * 70}" y="13" font-size="10.5" fill="${PLAYERS[n].color}" font-family="Noto Sans SC">${n}</text>`; });
+  s += `<text x="46" y="12" font-size="10.5" fill="#5b6475" font-family="Noto Sans SC">成功率</text><text x="496" y="228" text-anchor="end" font-size="10" fill="#8a93a3" font-family="Noto Sans SC">关卡</text>`;
+  svg.innerHTML = s;
+}
+chart($('chartA'), resA, LEVELS_A); chart($('chartB'), resB, LEVELS_B);
+$('levels').innerHTML = '<tr><th>关卡</th>' + LEVELS_A.map((_, i) => `<th>${i + 1}</th>`).join('') + '</tr>' +
+  `<tr><th>A 目标直径／限时</th>${LEVELS_A.map(L => `<td class="num">${fmt(L.W)}／${fmt(L.T / 1000, 2)}</td>`).join('')}</tr>` +
+  `<tr><th>B 基准直径／限时</th>${LEVELS_B.map(L => `<td class="num">${fmt(L.W)}／${fmt(L.T / 1000, 2)}${L.rest ? '·歇' : ''}</td>`).join('')}</tr>`;
+const inFlow = arr => arr.filter(v => v >= FLOW[0] && v <= FLOW[1]).length, below = arr => arr.filter(v => v < 0.5).length, bored = arr => arr.filter(v => v > 0.95).length;
+$('flow').innerHTML = '<tr><th>10 关里</th><th>A 新手</th><th>A 熟练</th><th>A 高手</th><th>B 新手</th><th>B 熟练</th><th>B 高手</th></tr>' +
+  [['在目标区间内', inFlow], ['成功率低于 50%（容易放弃）', below], ['成功率高于 95%（容易无聊）', bored]].map(([n, f]) => `<tr><th>${n}</th>${Object.keys(PLAYERS).map(k => `<td class="num">${f(resA[k])}</td>`).join('')}${Object.keys(PLAYERS).map(k => `<td class="num">${f(resB[k])}</td>`).join('')}</tr>`).join('');
+$('mflow').innerHTML = `A 对三种玩家都不合适：新手很快掉到 50% 以下，高手前半段几乎不会失败。B 的开头更平缓，并按表现微调（连续成功 2 次就难一点，失败 1 次就容易一点），每个人很快稳定在自己合适的难度上；第 5、9 关是“喘息关”，在微调的基础上容易约一档、这一关里也不再调整，让紧张和放松交替——这就是节奏；B 里成功率高于 95% 的正是这两关，是有意安排的。目标区间本身是设计约定，要用真实玩家的测试来校准。`;
+R.diff = { A: resA, B: resB, flowA: Object.keys(PLAYERS).map(k => inFlow(resA[k])), flowB: Object.keys(PLAYERS).map(k => inFlow(resB[k])), belowA: Object.keys(PLAYERS).map(k => below(resA[k])), boredA: Object.keys(PLAYERS).map(k => bored(resA[k])), belowB: Object.keys(PLAYERS).map(k => below(resB[k])), boredB: Object.keys(PLAYERS).map(k => bored(resB[k])) };
+
+// ---------- 2 分支叙事 ----------
+// 节点：id → [文字, x, y, 类型（end 结局，save 存档点）]；边：[从, 到, 选择的文字]
+const DRAFT = {
+  nodes: { 开学: ['开学第一天', 14, 40, 'save'], 选课: ['选课', 124, 40], 社团: ['社团招新', 124, 130], 难课: ['选了难课', 236, 20], 易课: ['选了易课', 236, 80], 熬夜: ['熬夜赶作业', 346, 40], 求助: ['去答疑', 346, 110], 乐队: ['加入乐队', 236, 180], 演出: ['周末演出', 346, 190], 失眠: ['连续失眠', 236, 260], 结局1: ['期中优秀', 452, 40, 'end'], 结局2: ['平稳度过', 452, 120, 'end'], 结局3: ['身心俱疲', 452, 260, 'end'] },
+  edges: [['开学', '选课', '先去选课'], ['开学', '社团', '先看社团'], ['选课', '难课', '挑战自己'], ['选课', '易课', '稳妥一点'], ['难课', '熬夜', '自己硬扛'], ['难课', '熬夜', '先打游戏再说'], ['易课', '求助', '有问题就问'], ['熬夜', '结局1', '撑下来了'], ['求助', '结局2', '按计划走'], ['社团', '乐队', '报名乐队'], ['社团', '乐队', '再看看'], ['乐队', '演出', '答应演出']]
+};
+const REVISED = {
+  nodes: { 开学: ['开学第一天', 14, 40, 'save'], 选课: ['选课', 124, 40, 'save'], 社团: ['社团招新', 124, 150, 'save'], 难课: ['选了难课', 236, 20], 易课: ['选了易课', 236, 80], 熬夜: ['熬夜赶作业', 346, 20], 求助: ['去答疑', 346, 95], 乐队: ['加入乐队', 236, 180], 演出: ['周末演出', 346, 190], 失眠: ['连续失眠', 346, 260], 结局1: ['期中优秀', 452, 40, 'end'], 结局2: ['平稳度过', 452, 120, 'end'], 结局3: ['身心俱疲', 452, 260, 'end'], 结局4: ['舞台与课堂', 452, 190, 'end'] },
+  edges: [['开学', '选课', '先去选课'], ['开学', '社团', '先看社团'], ['选课', '难课', '挑战自己'], ['选课', '易课', '稳妥一点'], ['难课', '熬夜', '自己硬扛'], ['难课', '求助', '去答疑'], ['易课', '求助', '有问题就问'], ['易课', '社团', '时间多，去看看社团'], ['熬夜', '结局1', '撑下来了'], ['熬夜', '失眠', '连着三天'], ['求助', '结局2', '按计划走'], ['求助', '结局1', '多做一套题'], ['社团', '乐队', '报名乐队'], ['社团', '选课', '先把课选好'], ['乐队', '演出', '答应演出'], ['乐队', '易课', '退出，专心学习'], ['演出', '结局4', '演出前一晚复习'], ['演出', '失眠', '彻夜排练'], ['失眠', '结局3', '硬撑到期中'], ['失眠', '求助', '去心理中心聊聊']]
+};
+function analyze(G, start = '开学') {
+  const ids = Object.keys(G.nodes), out = id => G.edges.filter(e => e[0] === id), isEnd = id => G.nodes[id][3] === 'end';
+  const reach = new Set([start]), q = [start]; while (q.length) { const u = q.shift(); for (const e of out(u)) if (!reach.has(e[1])) { reach.add(e[1]); q.push(e[1]); } }
+  const unreachable = ids.filter(id => !reach.has(id));
+  const dead = ids.filter(id => !isEnd(id) && out(id).length === 0 && reach.has(id));
+  const fake = []; for (const id of ids) { const o = out(id), seen = {}; for (const e of o) { if (seen[e[1]]) fake.push(`${G.nodes[id][0]}：“${seen[e[1]]}”与“${e[2]}”去同一处`); else seen[e[1]] = e[2]; } }
+  const ends = ids.filter(isEnd);
+  // 不重复经过同一节点的路径数与长度
+  const paths = {}; ends.forEach(e => paths[e] = []);
+  const dfs = (u, seen, len) => { if (isEnd(u)) { paths[u].push(len); return; } for (const e of out(u)) if (!seen.has(e[1])) { seen.add(e[1]); dfs(e[1], seen, len + 1); seen.delete(e[1]); } };
+  dfs(start, new Set([start]), 0);
+  const reachableEnds = ends.filter(e => paths[e].length);
+  const choices = ids.filter(id => out(id).length > 1).length, saves = ids.filter(id => G.nodes[id][3] === 'save').length;
+  // 从每个可达节点能否回到一个存档点之后的不同结局：这里统计“离最近存档点的选择次数”
+  const lens = Object.values(paths).flat();
+  return { unreachable, dead, fake, ends: ends.length, reachableEnds: reachableEnds.length, paths: Object.fromEntries(ends.map(e => [G.nodes[e][0], paths[e].length])), minLen: Math.min(...lens), maxLen: Math.max(...lens), choices, saves, nodes: ids.length };
+}
+function drawGraph(svg, G, A) {
+  let s = `<defs><marker id="m${svg.id}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L8 4L0 8z" fill="#8a93a3"/></marker></defs>`;
+  const W = 74, H = 26, seenPair = {};
+  for (const [a, b] of G.edges) {
+    const [, x1, y1] = G.nodes[a], [, x2, y2] = G.nodes[b], k = a + b, dup = seenPair[k]; seenPair[k] = true;
+    const sx = x1 + W / 2, sy = y1 + H / 2, ex = x2 + W / 2, ey = y2 + H / 2, dx = ex - sx, dy = ey - sy, L = Math.hypot(dx, dy);
+    const ax = ex - dx / L * 40, ay = ey - dy / L * 15;
+    const bend = dup ? 14 : 0, mx = (sx + ax) / 2 - dy / L * bend, my = (sy + ay) / 2 + dx / L * bend;
+    s += `<path d="M${sx + dx / L * 38} ${sy + dy / L * 13} Q${mx} ${my} ${ax} ${ay}" fill="none" stroke="${dup ? '#b3261e' : '#9aa2b1'}" stroke-width="${dup ? 1.6 : 1}" marker-end="url(#m${svg.id})"/>`;
+  }
+  for (const [id, [t, x, y, type]] of Object.entries(G.nodes)) {
+    const bad = A.unreachable.includes(id) || A.dead.includes(id), c = bad ? '#b3261e' : type === 'end' ? '#1f7a4d' : '#5b6475';
+    s += `<rect x="${x}" y="${y}" width="${W}" height="${H}" rx="${type === 'end' ? 4 : 8}" fill="${bad ? '#fbe1de' : '#fff'}" stroke="${c}" stroke-width="${type === 'end' ? 3 : 1.2}" ${type === 'end' ? 'stroke-dasharray="0"' : ''}/>`;
+    if (type === 'end') s += `<rect x="${x + 3}" y="${y + 3}" width="${W - 6}" height="${H - 6}" rx="2" fill="none" stroke="#fff" stroke-width="1.5"/>`;
+    s += `<text x="${x + W / 2}" y="${y + 17}" text-anchor="middle" font-size="11" fill="${bad ? '#b3261e' : '#1d2330'}" font-family="Noto Sans SC">${type === 'save' ? '⟲ ' : ''}${esc(t)}</text>`;
+  }
+  svg.innerHTML = s;
+}
+const AD = analyze(DRAFT), AR = analyze(REVISED);
+drawGraph($('gA'), DRAFT, AD); drawGraph($('gB'), REVISED, AR);
+const nm = (G, l) => l.map(id => G.nodes[id][0]).join('、');
+$('story').innerHTML = '<tr><th>检查</th><th>初稿</th><th>修改后</th><th>为什么重要</th></tr>' + [
+  ['节点／结局', `${AD.nodes}／${AD.ends}`, `${AR.nodes}／${AR.ends}`, '—'],
+  ['走不到的节点', AD.unreachable.length ? `<span class="poor">${nm(DRAFT, AD.unreachable)}</span>` : '无', AR.unreachable.length ? `<span class="poor">${nm(REVISED, AR.unreachable)}</span>` : '<span class="good">无</span>', '写了却没人能读到'],
+  ['死胡同（不是结局却没有出路）', AD.dead.length ? `<span class="poor">${nm(DRAFT, AD.dead)}</span>` : '无', AR.dead.length ? `<span class="poor">${nm(REVISED, AR.dead)}</span>` : '<span class="good">无</span>', '玩家卡住，只能关掉'],
+  ['假选择（两个选项去同一处）', AD.fake.length ? `<span class="poor">${AD.fake.length} 处</span>：${esc(AD.fake.join('；'))}` : '无', AR.fake.length ? `<span class="poor">${AR.fake.length} 处</span>` : '<span class="good">无</span>', '玩家发现选择没有意义'],
+  ['能走到的结局', `${AD.reachableEnds}／${AD.ends}`, `${AR.reachableEnds}／${AR.ends}`, '每个结局都应当有路可走'],
+  ['走到各结局的路线数', Object.entries(AD.paths).map(([k, v]) => `${k} ${v}`).join('、'), Object.entries(AR.paths).map(([k, v]) => `${k} ${v}`).join('、'), '只有一条路的结局像“彩蛋”，要有意为之'],
+  ['从开始到结局的选择次数', `${AD.minLen}—${AD.maxLen}`, `${AR.minLen}—${AR.maxLen}`, '决定一次游玩多长，进度条按这个估计'],
+  ['有两个以上选项的节点', AD.choices, AR.choices, '选择的密度'],
+  ['存档点（可以回到这里重选）', AD.saves, AR.saves, '回溯：不必从头再来']
+].map(r => `<tr><th>${r[0]}</th><td>${r[1]}</td><td>${r[2]}</td><td class="sub">${r[3]}</td></tr>`).join('');
+$('mstory').innerHTML = `检查由程序读故事的结构完成，不看文字写得好不好。初稿里“连续失眠”和它的结局“身心俱疲”根本走不到，“周末演出”之后没有出路，“自己硬扛”和“先打游戏再说”、“报名乐队”和“再看看”都去同一处。修改后每个节点都能走到、都有出路，选择会带来不同的结果，并且可以在选课、社团处回到存档点重新选择。`;
+R.story = { draft: AD, revised: AR };
+document.fonts.ready.then(() => { window.__gb = R; });
+</script>
+</body>
+</html>
