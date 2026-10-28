@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>批评与评价：从“我觉得”到可以推动改进的意见</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .main { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 14px; align-items: start; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .mock { border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: #fbfaf7; display: grid; gap: 8px; }
+  .mock h1 { margin: 0; font-size: 22px; } .mock .lead { color: #9aa0a8; font-size: 12px; } .mock .body { font-size: 12px; color: #3b4252; }
+  .mock .btns { display: flex; gap: 6px; align-items: center; } .mock .cta { background: #2f6fdb; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 4px; } .mock .ghost { font-size: 11px; color: #2f6fdb; }
+  .tag { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 11px; white-space: nowrap; }
+  .tag.pref { background: #f6f7f9; color: #5b6475; } .tag.task { background: #eef7f1; color: #1f7a4d; } .tag.ask { background: #eef3ff; color: #2456b0; }
+  .f { display: inline-block; min-width: 26px; text-align: center; font-size: 11px; border-radius: 3px; } .f.y { background: #eef7f1; color: #1f7a4d; } .f.n { background: #fbe4dd; color: #b3261e; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="main">
+    <div style="display:grid;gap:6px"><h3>被评审的设计：学习计划首页</h3>
+      <div class="mock" id="mock"><h1>你的三个月计划</h1><p class="lead" id="lead">根据你的简历，我们为你安排了 8 项学习任务。完成全部任务后，你可以申请更多的数据可视化岗位，并在作品集中展示两个完整的项目，这会让你的简历在筛选时更有竞争力。</p><p class="body" id="body">本周：JavaScript 基础（8 小时）</p><div class="btns"><span class="cta" id="cta">开始本周任务</span><span class="ghost">调整计划</span></div></div>
+      <p class="sub">设计目标（评审前写下）：让刚上传简历的用户在 10 秒内知道“这周要做什么”，并愿意开始。</p></div>
+    <div style="display:grid;gap:6px"><h2>评审意见的整理（以下意见是为演示而构造的）</h2>
+      <table id="cm"><tr><th>#</th><th>原话</th><th>类型</th><th>目标</th><th>观察</th><th>影响</th><th>建议</th><th>附上的证据</th></tr></table><p class="sub">类型与四项字段由简单的关键词规则给出初稿，必须人工复核：例如第 8 条被标为“有目标”，只是因为句子里出现了“开始”，其实并没有提到设计目标。</p></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>汇总</h2><table id="sum"><tr><th>项目</th><th>数量</th></tr></table>
+      <h3>把偏好改写成可以讨论的意见</h3><table id="rew"><tr><th>原话</th><th>改写（需要说话人补充）</th></tr></table></div>
+    <div style="display:grid;gap:6px"><h2>取舍记录</h2><table id="dec"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const COMMENTS = [
+  '我不太喜欢这个蓝色，感觉不够高级。',
+  '副标题的灰字在浅底上看不清，对比度不够，用户可能直接跳过说明。建议把文字加深。',
+  '按钮太小了。',
+  '“开始本周任务”和“调整计划”看起来不像同一级别，用户可能找不到怎样改计划。',
+  '这个页面的目标是让用户马上开始，还是先了解整个计划？',
+  '我觉得字体可以再好看一点。',
+  '副标题太长，要读很久才知道这周做什么，和“10 秒内知道”的目标冲突。建议只保留第一句，其余放进“查看完整计划”。',
+  '标题换成“开始学习吧！”会不会更有活力？',
+  '本周任务写了小时数，很好，用户能估计时间。',
+  '整体有点空。'
+];
+// ---------- 从页面实测证据 ----------
+const rgb = s => s.match(/[\d.]+/g).slice(0, 3).map(Number);
+const lum = c => { const f = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]); };
+const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+function evidence() {
+  const lead = $('lead'), mock = $('mock'), cta = $('cta').getBoundingClientRect();
+  const c = ratio(rgb(getComputedStyle(lead).color), rgb(getComputedStyle(mock).backgroundColor));
+  const chars = lead.textContent.length, readSec = chars / 400 * 60;
+  return { contrast: c, cta: [Math.round(cta.width), Math.round(cta.height)], chars, readSec };
+}
+// ---------- 分类与字段检查（简单的关键词规则，人工复核） ----------
+const RULES = {
+  ask: t => /[？?]$/.test(t) && /(目标|是.+还是|为什么)/.test(t),
+  pref: t => /(喜欢|好看|高级|有活力|有点空|感觉)/.test(t) && !/(用户|目标|对比度|找不到|看不清)/.test(t),
+  goal: t => /(目标|用户|10 秒|找到|开始)/.test(t),
+  obs: t => /(看不清|太长|太小|不像|写了|空|蓝色|字体|标题)/.test(t),
+  impact: t => /(可能|冲突|找不到|跳过|估计时间|要读很久)/.test(t),
+  suggest: t => /(建议|换成|改成|放进|加深|只保留)/.test(t)
+};
+let EV;
+function attach(t) {
+  const out = [];
+  if (/(灰字|对比度|看不清)/.test(t)) out.push(`副标题对比度 ${EV.contrast.toFixed(2)}（正文要求 ≥ 4.5）`);
+  if (/按钮太小/.test(t)) out.push(`主按钮 ${EV.cta[0]} × ${EV.cta[1]} 像素（点击目标建议至少 24 × 24）`);
+  if (/(太长|要读很久)/.test(t)) out.push(`副标题 ${EV.chars} 字，按每分钟 400 字约需 ${EV.readSec.toFixed(0)} 秒`);
+  return out;
+}
+const rows = [];
+document.fonts.ready.then(() => {
+  EV = evidence();
+  COMMENTS.forEach((t, i) => {
+    const type = RULES.ask(t) ? 'ask' : RULES.pref(t) ? 'pref' : 'task';
+    const f = { goal: RULES.goal(t), obs: RULES.obs(t), impact: RULES.impact(t), suggest: RULES.suggest(t) };
+    const ev = attach(t); rows.push({ t, type, f, ev });
+    const tag = { pref: '<span class="tag pref">个人偏好</span>', task: '<span class="tag task">任务问题</span>', ask: '<span class="tag ask">澄清目标</span>' }[type];
+    const cell = v => `<td><span class="f ${v ? 'y' : 'n'}">${v ? '有' : '缺'}</span></td>`;
+    $('cm').insertAdjacentHTML('beforeend', `<tr><td>${i + 1}</td><td>${t}</td><td>${tag}</td>${cell(f.goal)}${cell(f.obs)}${cell(f.impact)}${cell(f.suggest)}<td class="${ev.length ? 'good' : 'sub'}">${ev.join('；') || '—'}</td></tr>`);
+  });
+  const n = k => rows.filter(r => r.type === k).length, complete = rows.filter(r => r.type === 'task' && Object.values(r.f).every(Boolean)).length;
+  const items = [['个人偏好', n('pref')], ['任务问题', n('task')], ['澄清目标的提问', n('ask')], ['四项（目标、观察、影响、建议）齐全的任务问题', complete], ['自动附上实测证据的意见', rows.filter(r => r.ev.length).length], ['肯定的意见（说明哪里做对了，避免被改掉）', rows.filter(r => /很好/.test(r.t)).length]];
+  for (const [a, b] of items) $('sum').insertAdjacentHTML('beforeend', `<tr><td>${a}</td><td class="num">${b} 条</td></tr>`);
+  const REW = [[0, '蓝色和品牌的“安静、可信”是否一致？如果是想让主按钮更醒目，可以用对比度和首次点击来检验。'], [5, '字体的哪一点影响了阅读或气质？例如标题字重太轻、和品牌字体不一致。'], [9, '“空”指哪里？是首屏信息不足以完成“知道这周做什么”，还是版面比例失衡？']];
+  for (const [i, r] of REW) $('rew').insertAdjacentHTML('beforeend', `<tr><td>${COMMENTS[i]}</td><td>${r}</td></tr>`);
+  $('dec').innerHTML = `<tr><th style="width:90px">问题</th><td>副标题太长（意见 2、7）</td></tr><tr><th>方案</th><td>甲：只保留第一句，其余放进“查看完整计划”；乙：保留全文，加深颜色；丙：改成三条要点</td></tr><tr><th>依据</th><td>设计目标“10 秒内知道这周做什么”；副标题 ${EV.chars} 字约需 ${EV.readSec.toFixed(0)} 秒；对比度 ${EV.contrast.toFixed(2)}</td></tr><tr><th>决定</th><td><b>甲</b>，同时把颜色加深到对比度 ≥ 4.5</td></tr><tr><th>放弃的</th><td>乙：仍然太长；丙：要点会让人以为这是全部任务</td></tr><tr><th>怎样验证</th><td>5 人首次访问测试：多少人能在 10 秒内说出本周任务</td></tr>
+    <tr><th style="width:90px">问题</th><td>标题语气（意见 8）</td></tr><tr><th>决定</th><td>暂不改。“开始学习吧！”更活泼，但与“安静”的原则冲突；记录下来，若首次访问测试显示动力不足再讨论</td></tr>`;
+  window.__cr = { ev: { contrast: +EV.contrast.toFixed(2), cta: EV.cta, chars: EV.chars, readSec: +EV.readSec.toFixed(1) }, counts: { pref: n('pref'), task: n('task'), ask: n('ask'), complete, withEv: rows.filter(r => r.ev.length).length }, types: rows.map(r => r.type) };
+});
+</script>
+</body>
+</html>
