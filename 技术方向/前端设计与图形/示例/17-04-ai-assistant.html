@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>资料分析助手：进度、可编辑结果、来源、版本与导出</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 4px 0 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 14px; align-items: start; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .col { display: grid; gap: 6px; align-content: start; }
+  .tag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 9px; background: #fff3d6; color: #7a4a00; }
+  button { font: inherit; font-size: 12px; padding: 1px 9px; border: 1px solid #b9c3d3; background: #f3f6fb; border-radius: 6px; cursor: pointer; }
+  button.primary { background: #2f6fdb; color: #fff; border-color: #2f6fdb; }
+  button.risk { border-color: #d9a39d; background: #fdf3f2; color: #8c2a20; }
+  button:focus-visible, [contenteditable]:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+  .files label { display: flex; gap: 6px; align-items: baseline; font-size: 12px; }
+  .files .st { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
+  ol.steps { margin: 0; padding-left: 18px; font-size: 12px; } ol.steps li { margin: 1px 0; } ol.steps .done { color: var(--ok); } ol.steps .run { color: var(--accent); font-weight: 700; } ol.steps .todo { color: #9aa2b1; }
+  .report { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; background: #fbfbfa; }
+  .para { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; padding: 3px 0; border-bottom: 1px dashed #e6e8ec; }
+  .para:last-child { border-bottom: 0; }
+  .para .txt { padding: 1px 4px; border-radius: 4px; }
+  .para.edited .txt { box-shadow: inset 3px 0 0 #2f6fdb; background: #eef3fc; }
+  .para.gen .txt { background: #fdf3ec; }
+  .para .tools { display: flex; gap: 3px; align-items: start; }
+  .para .tools button { font-size: 11px; padding: 0 6px; }
+  .chip { display: inline-block; font-size: 10.5px; padding: 0 5px; border-radius: 8px; background: #e8eefb; color: #1f4fae; margin: 0 1px; cursor: pointer; border: 0; vertical-align: 1px; }
+  .chip.on { background: #2f6fdb; color: #fff; }
+  .pending { background: #fff3d6; border-radius: 3px; padding: 0 3px; }
+  .vers { display: flex; gap: 4px; flex-wrap: wrap; font-size: 11px; }
+  .vers span { border: 1px solid var(--line); border-radius: 10px; padding: 0 7px; }
+  .vers span.cur { border-color: var(--accent); color: var(--accent); }
+  .src { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font-size: 12px; background: #fff; }
+  .src mark { background: #ffe59a; }
+  del { background: #fbe1de; color: #8c2a20; } ins { background: #dff1e5; color: #1f5f3d; text-decoration: none; }
+  pre { margin: 0; font: 11px/1.45 ui-monospace, Menlo, monospace; background: #f6f7f9; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; max-height: 260px; overflow: hidden; }
+  .dialog { border: 2px solid #d9a39d; border-radius: 8px; padding: 8px 10px; background: #fffaf9; font-size: 12px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; font-size: 12px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <p class="sub"><span class="tag">模拟</span> 这个“助手”按规则从资料中逐句找出提到的问题、统计并套用模板写成报告，不调用任何模型；六份资料是为演示而构造的。测试脚本用真实的点击和输入完成一次任务。</p>
+  <div class="layout">
+    <div class="col"><h2>1 资料与任务进度</h2>
+      <p class="sub" id="scope">只根据下面勾选的资料回答；不上网，也不使用其他对话的内容。</p>
+      <div class="files" id="files"></div>
+      <div class="bar"><b>任务</b>：总结本周反馈的主要问题，并给出改进建议。<button class="primary" id="run" type="button">开始分析</button><button id="stop" type="button" disabled>停止</button></div>
+      <ol class="steps" id="steps"></ol>
+      <h3>3 来源查看</h3><div class="src" id="srcView"><span class="sub">点报告里的来源编号，在这里看到原文与对应的句子。</span></div>
+      <h3>待你确认</h3><div id="confirm" class="m"></div></div>
+    <div class="col"><h2>2 报告（可以直接编辑，也可以只改写其中一段）</h2>
+      <div class="vers" id="vers"></div>
+      <div class="report" id="report"><p class="sub">还没有开始。</p></div>
+      <div class="bar"><button id="export" type="button">导出 Markdown</button><button class="risk" id="send" type="button">发送给全班（52 人）</button><span class="sub" id="saved"></span></div>
+      <div id="sendDlg"></div>
+      <table id="verify"></table></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div class="col"><h2>4 版本比较与恢复</h2><div id="diff"></div><table id="vtable"></table><p class="m" id="mver"></p></div>
+    <div class="col"><h2>5 导出：重要成果能独立保存</h2><pre id="md"></pre><p class="m" id="mexport"></p></div>
+  </div>
+  <h2>6 对照人机交互指南：每一条落在哪个功能上</h2><table id="hax"></table>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ok = (b, y = '是', n = '否') => b ? `<span class="good">${y}</span>` : `<span class="poor">${n}</span>`;
+const fnv = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(16).padStart(8, '0'); };
+const R = { log: [] };
+
+// ---------- 构造的资料 ----------
+const DOCS = [
+  { id: 'D1', title: '学生问卷摘录 A', kind: '问卷', text: '作业 2 的提交格式写得不清楚，我交了两次才对。视频还好，就是第 5 讲有点长。' },
+  { id: 'D2', title: '学生问卷摘录 B', kind: '问卷', text: '环境装了一晚上，Windows 上 Python 版本总是不对。希望有一份一步一步的安装说明。' },
+  { id: 'D3', title: '学生问卷摘录 C', kind: '问卷', text: '答疑时间和我上课冲突，能不能晚上也有一次？作业说明倒是看懂了。' },
+  { id: 'D4', title: '助教周记', kind: '周记', text: '本周答疑 41 次，18 次是环境配置问题，其中 Windows 12 次。好几位同学问作业 2 要交 zip 还是链接。' },
+  { id: 'D5', title: '学生问卷摘录 D', kind: '问卷', text: '第 5 讲视频 48 分钟，看到一半就走神了，能不能拆短一点？环境配置也卡了很久。' },
+  { id: 'D6', title: '平台统计', kind: '统计', text: '视频平均完成率 64%，第 5 讲最低，为 41%；第 5 讲时长 48 分钟，其他讲平均 22 分钟。' }
+];
+const THEMES = { 环境配置: ['环境', '安装', 'Python 版本'], 作业说明: ['作业 2', '作业说明', '提交格式'], 视频长度: ['视频', '第 5 讲'], 答疑时间: ['答疑时间'] };
+const POSITIVE = /看懂了|没问题|还好/;
+const sentences = t => t.split(/(?<=[。？！])/).filter(s => s.trim());
+
+$('files').innerHTML = DOCS.map(d => `<label><input type="checkbox" checked data-id="${d.id}"> ${d.id} ${d.title}<span class="st" id="st-${d.id}">未读取</span></label>`).join('');
+const STEPS = ['读取资料', '逐句找出提到的问题', '统计并核对数字', '写成报告'];
+const drawSteps = (cur, info = {}) => { $('steps').innerHTML = STEPS.map((s, i) => `<li class="${i < cur ? 'done' : i === cur ? 'run' : 'todo'}">${s}${info[i] ? `：${info[i]}` : ''}${i < cur ? ' ✓' : ''}</li>`).join(''); };
+drawSteps(-1);
+
+// ---------- 分析 ----------
+let HITS = [], DECIDED = {}, VERSIONS = [], CUR = -1, ABORT = null;
+function extract(docs) {
+  const hits = [];
+  for (const d of docs) for (const s of sentences(d.text)) for (const [th, kws] of Object.entries(THEMES)) if (kws.some(k => s.includes(k))) hits.push({ doc: d.id, theme: th, s, uncertain: POSITIVE.test(s), key: d.id + th });
+  return hits;
+}
+const counted = th => [...new Set(HITS.filter(h => h.theme === th && (!h.uncertain || DECIDED[h.key] === true)).map(h => h.doc))];
+const pendingOf = th => HITS.filter(h => h.theme === th && h.uncertain && DECIDED[h.key] === undefined);
+const cites = ids => ids.map(i => `[${i}]`).join('');
+function compose(short = {}) {
+  const docs = DOCS.filter(d => used().includes(d.id)), nq = docs.filter(d => d.kind === '问卷').length;
+  const c = th => counted(th).length, pend = Object.keys(THEMES).reduce((n, th) => n + pendingOf(th).length, 0);
+  const d4 = DOCS[3].text.match(/答疑 (\d+) 次，(\d+) 次是环境配置问题，其中 Windows (\d+) 次/);
+  const d6 = DOCS[5].text.match(/第 5 讲最低，为 (\d+)%；第 5 讲时长 (\d+) 分钟，其他讲平均 (\d+) 分钟/);
+  const stu = th => counted(th).filter(i => DOCS.find(d => d.id === i).kind === '问卷');
+  const p = [
+    `共读取 ${docs.length} 份资料（${nq} 份学生问卷摘录、1 份助教周记、1 份平台统计）。提到较多的问题是环境配置（${c('环境配置')} 份）、作业说明（${c('作业说明')} 份）和视频长度（${c('视频长度')} 份）；答疑时间 ${c('答疑时间')} 份${cites(counted('答疑时间'))}。${pend ? `还有 ${pend} 处可能是正面评价，待你确认后再计入。` : ''}`,
+    short[1] ? `环境配置：${c('环境配置')} 份提到${cites(counted('环境配置'))}，答疑 ${d4[1]} 次中 ${d4[2]} 次与此有关[D4]。`
+      : `环境配置：${cites(counted('环境配置'))}提到安装与配置困难；助教周记记录本周答疑 ${d4[1]} 次，其中 ${d4[2]} 次与环境配置有关，Windows 用户 ${d4[3]} 次[D4]。`,
+    `作业说明：${cites(counted('作业说明'))}提到作业 2 的提交格式不清楚（交 zip 还是链接）。${pendingOf('作业说明').map(h => `另有 1 份[${h.doc}]提到作业说明，但可能是正面评价，待确认。`).join('')}`,
+    `视频长度：第 5 讲时长 ${d6[2]} 分钟、完成率 ${d6[1]}%，为各讲最低（其他讲平均 ${d6[3]} 分钟）[D6]；${cites(stu('视频长度'))}提到第 5 讲太长或看到一半走神。${pendingOf('视频长度').map(h => `[${h.doc}]的说法待确认。`).join('')}`,
+    '建议（生成，需要你判断）：① 写一份分系统的安装说明，先做 Windows；② 在作业 2 的说明里给出提交格式的示例；③ 把第 5 讲拆成两段。'
+  ];
+  return p.map((t, i) => ({ i, t, kind: i === 4 ? 'gen' : 'data' }));
+}
+const used = () => [...document.querySelectorAll('#files input:checked')].map(i => i.dataset.id);
+function pushVersion(paras, how) { VERSIONS.push({ n: VERSIONS.length + 1, how, paras: paras.map(p => ({ ...p })) }); CUR = VERSIONS.length - 1; R.log.push(how); render(); }
+const cur = () => VERSIONS[CUR].paras;
+
+$('run').addEventListener('click', async () => {
+  ABORT = new AbortController(); $('run').disabled = true; $('stop').disabled = false;
+  const wait = ms => new Promise((res, rej) => { const t = setTimeout(res, ms); ABORT.signal.addEventListener('abort', () => { clearTimeout(t); rej(new Error('stopped')); }); });
+  try {
+    drawSteps(0);
+    for (const id of used()) { await wait(60); $('st-' + id).textContent = '已读取'; drawSteps(0, { 0: `${used().indexOf(id) + 1}／${used().length}` }); }
+    drawSteps(1, { 0: `${used().length} 份` }); await wait(120);
+    HITS = extract(DOCS.filter(d => used().includes(d.id)));
+    drawSteps(2, { 0: `${used().length} 份`, 1: `${HITS.length} 句，${HITS.filter(h => h.uncertain).length} 句可能是正面评价` }); await wait(120);
+    drawSteps(3, { 0: `${used().length} 份`, 1: `${HITS.length} 句`, 2: '数字全部来自资料' }); await wait(120);
+    drawSteps(4, { 0: `${used().length} 份`, 1: `${HITS.length} 句`, 2: '数字全部来自资料', 3: '5 段' });
+    pushVersion(compose(), '生成');
+  } catch (e) { drawSteps(-1); $('steps').insertAdjacentHTML('beforeend', '<li class="mid">已停止，没有生成报告</li>'); }
+  $('run').disabled = false; $('stop').disabled = true;
+});
+$('stop').addEventListener('click', () => ABORT && ABORT.abort());
+
+// ---------- 渲染 ----------
+const withChips = t => esc(t).replace(/\[(D\d)\]/g, '<button class="chip" type="button" data-doc="$1">[$1]</button>').replace(/(还有 \d+ 处可能是正面评价[^。]*。|另有 1 份[^。]*待确认。|<button class="chip" type="button" data-doc="D\d">\[D\d\]<\/button>的说法待确认。)/g, '<span class="pending">$1</span>');
+function render() {
+  const V = VERSIONS[CUR];
+  $('vers').innerHTML = VERSIONS.map((v, i) => `<span class="${i === CUR ? 'cur' : ''}">版本 ${v.n} · ${v.how}</span>`).join('');
+  $('report').innerHTML = V.paras.map(p => `<div class="para ${p.kind === 'edited' ? 'edited' : p.kind === 'gen' ? 'gen' : ''}" data-i="${p.i}"><div class="txt" contenteditable="true" id="p${p.i}" aria-label="第 ${p.i + 1} 段">${withChips(p.t)}</div><div class="tools">${p.kind === 'data' && p.i > 0 ? `<button type="button" data-short="${p.i}">改写得更短</button>` : ''}</div></div>`).join('') +
+    '<p class="sub">橙底：生成的建议；蓝线：你改过的段落；黄底：待你确认。点编号看来源。</p>';
+  // 待确认
+  const pend = HITS.filter(h => h.uncertain);
+  $('confirm').innerHTML = pend.length ? pend.map(h => `<div>[${h.doc}] “${esc(h.s)}”——算作“${h.theme}”的问题吗？ ${DECIDED[h.key] === undefined ? `<button type="button" data-yes="${h.key}">算</button><button type="button" data-no="${h.key}">不算</button>` : `<b>${DECIDED[h.key] ? '算' : '不算'}</b>（你的纠正已记录）`}</div>`).join('') : '<span class="sub">没有。</span>';
+  verifyNumbers();
+  $('vtable').innerHTML = '<tr><th>版本</th><th>怎么来的</th><th>内容指纹</th></tr>' + VERSIONS.map(v => `<tr><td>${v.n}</td><td>${esc(v.how)}</td><td class="num">${fnv(v.paras.map(p => p.t).join('|'))}</td></tr>`).join('');
+  const m = V.how.match(/恢复到版本 (\d+)/);
+  if (m) { const same = fnv(V.paras.map(p => p.t).join('|')) === fnv(VERSIONS[m[1] - 1].paras.map(p => p.t).join('|')); $('mver').innerHTML = `“恢复”不删除任何版本，而是把版本 ${m[1]} 复制成新的版本 ${V.n}：两者内容指纹相同 ${ok(same, '✓', '✗')}，被恢复掉的改写仍在历史里，随时可以再恢复回来。`; R.restoreSame = same; }
+}
+$('report').addEventListener('click', e => {
+  const c = e.target.closest('.chip'); if (c) { showSource(c.dataset.doc, c); return; }
+  const s = e.target.closest('[data-short]'); if (s) { const i = Number(s.dataset.short); const fresh = compose({ [i]: true }); const paras = cur().map(p => p.i === i ? { ...fresh[i] } : { ...p }); pushVersion(paras, `改写第 ${i + 1} 段`); }
+});
+$('report').addEventListener('focusout', e => {
+  const el = e.target.closest('.txt'); if (!el) return;
+  const i = Number(el.closest('.para').dataset.i), text = el.innerText.trim(), old = cur().find(p => p.i === i);
+  if (text !== old.t) pushVersion(cur().map(p => p.i === i ? { i, t: text, kind: 'edited' } : { ...p }), `你修改了第 ${i + 1} 段`);
+});
+$('confirm').addEventListener('click', e => {
+  const y = e.target.dataset.yes, n = e.target.dataset.no; if (!y && !n) return;
+  DECIDED[y || n] = !!y;
+  const fresh = compose(); pushVersion(cur().map(p => p.kind === 'edited' ? { ...p } : { ...fresh[p.i] }), `按你的纠正重新统计（${(y || n).slice(0, 2)}${y ? '算' : '不算'}）`);
+});
+function showSource(id, btn) {
+  document.querySelectorAll('.chip.on').forEach(c => c.classList.remove('on')); btn.classList.add('on');
+  const d = DOCS.find(x => x.id === id), para = btn.closest('.para') ? Number(btn.closest('.para').dataset.i) : -1, ptext = para >= 0 ? cur().find(p => p.i === para).t : '';
+  const nums = (ptext.match(/\d+/g) || []), html = sentences(d.text).map(s => HITS.some(h => h.doc === id && h.s === s) || nums.some(n => s.includes(n + ' ') || s.includes(n + '%') || s.includes(n + ' 次') || s.includes(n + ' 分钟')) ? `<mark>${esc(s)}</mark>` : esc(s)).join('');
+  $('srcView').innerHTML = `<b>[${d.id}] ${d.title}</b>（${d.kind}，指纹 ${fnv(d.text)}）<br>${html}`;
+  R.source = { id, marked: (html.match(/<mark>/g) || []).length };
+}
+// 报告里的每个数字都要在它引用的资料里找得到
+function verifyNumbers() {
+  const rows = [];
+  for (const p of cur()) {
+    if (p.kind === 'gen') continue;
+    const ids = [...p.t.matchAll(/\[(D\d)\]/g)].map(m => m[1]), text = ids.map(i => DOCS.find(d => d.id === i).text).join(' ');
+    const nums = [...p.t.replace(/\[D\d\]/g, '').matchAll(/(\d+)(?=\s*(?:次|%|分钟))/g)].map(m => m[1]);
+    for (const n of nums) rows.push({ p: p.i + 1, n, found: new RegExp(`(^|\\D)${n}(\\D|$)`).test(text) });
+  }
+  const bad = rows.filter(r => !r.found);
+  $('verify').innerHTML = `<tr><th>数字核对</th><td>报告里带单位的数字 ${rows.length} 个，在所引资料中找到 ${rows.length - bad.length} 个 ${ok(!bad.length, '✓', '✗')}${bad.length ? '：' + bad.map(b => `第 ${b.p} 段的 ${b.n}`).join('、') : ''}；建议段是生成的，不参加核对，并标明“需要你判断”。</td></tr>`;
+  R.verify = { total: rows.length, bad: bad.length };
+}
+
+// ---------- 4 版本比较 ----------
+function diff(a, b) {
+  const tok = x => x.split(/(?<=[，。；：])/).filter(Boolean);
+  const A = tok(a), B = tok(b), n = A.length, m = B.length, L = Array.from({ length: n + 1 }, () => new Int16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = A[i] === B[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const out = []; let i = 0, j = 0, add = 0, del = 0;
+  const push = (t, c) => { if (out.length && out[out.length - 1].t === t) out[out.length - 1].c += c; else out.push({ t, c }); };
+  while (i < n && j < m) { if (A[i] === B[j]) { push('=', A[i]); i++; j++; } else if (L[i + 1][j] >= L[i][j + 1]) { push('-', A[i++]); del++; } else { push('+', B[j++]); add++; } }
+  while (i < n) { push('-', A[i++]); del++; } while (j < m) { push('+', B[j++]); add++; }
+  return { html: out.map(o => o.t === '=' ? esc(o.c) : o.t === '-' ? `<del>${esc(o.c)}</del>` : `<ins>${esc(o.c)}</ins>`).join(''), add, del };
+}
+function compare(a, b) {
+  const va = VERSIONS[a - 1].paras, vb = VERSIONS[b - 1].paras, rows = [];
+  va.forEach((p, k) => { const q = vb[k]; if (p.t !== q.t) rows.push({ i: p.i, ...diff(p.t, q.t) }); });
+  $('diff').innerHTML = `<p class="m"><b>版本 ${a} → 版本 ${b}</b>：${rows.length} 段有变化（其余 ${va.length - rows.length} 段逐字相同）</p>` + rows.map(r => `<div class="src"><b>第 ${r.i + 1} 段</b>（删 ${r.del} 个短句，加 ${r.add} 个短句）<br>${r.html}</div>`).join('');
+  return rows.map(r => ({ i: r.i + 1, add: r.add, del: r.del }));
+}
+function restore(n) { pushVersion(VERSIONS[n - 1].paras, `恢复到版本 ${n}`); }
+
+// ---------- 5 导出 ----------
+function exportMd() {
+  const V = VERSIONS[CUR], ids = [...new Set(V.paras.flatMap(p => [...p.t.matchAll(/\[(D\d)\]/g)].map(m => m[1])))].sort();
+  const md = ['# 本周课程反馈：主要问题与建议', '', `- 任务：总结本周反馈的主要问题，并给出改进建议`, `- 版本：${V.n}（${V.how}）；历史共 ${VERSIONS.length} 个版本`, `- 资料：${used().length} 份；纠正：${Object.entries(DECIDED).map(([k, v]) => `${k.slice(0, 2)} 的“${k.slice(2)}”${v ? '算' : '不算'}`).join('、') || '无'}`, '- 说明：数字均来自所引资料；“建议”段为生成内容，需要人判断', '',
+    ...V.paras.map(p => (p.kind === 'edited' ? '（人工修改）' : '') + p.t), '', '## 来源', '', ...ids.map(i => { const d = DOCS.find(x => x.id === i); return `- [${i}] ${d.title}（指纹 ${fnv(d.text)}）：${d.text}`; })].join('\n');
+  $('md').textContent = md.split('\n').slice(0, 20).join('\n') + (md.split('\n').length > 20 ? '\n……' : '');
+  const allCited = ids.every(i => md.includes(`- [${i}]`)), noBroken = V.paras.every(p => [...p.t.matchAll(/\[(D\d)\]/g)].every(m => ids.includes(m[1])));
+  $('mexport').innerHTML = `导出的是当前版本的完整内容：任务、版本与历史数、资料与纠正记录、正文（人工修改的段落有标记），以及每个被引用资料的原文和指纹——离开这个页面、过几个月再看，也能核对每个数字从哪里来。共 ${md.length} 字，引用 ${ids.length} 份资料，全部附原文 ${ok(allCited && noBroken, '✓', '✗')}。`;
+  R.export = { chars: md.length, cited: ids, allCited, noBroken, version: V.n };
+  return md;
+}
+$('export').addEventListener('click', exportMd);
+$('send').addEventListener('click', () => {
+  $('sendDlg').innerHTML = `<div class="dialog" role="dialog" aria-label="发送前确认"><b>这一步会产生实际影响</b>：把版本 ${VERSIONS[CUR].n} 的报告发给“数据可视化入门”全班 52 人，发出后不能撤回。<br>会发出：5 段正文、${R.export ? R.export.cited.length : 0} 份资料的引用；不会发出：资料原文中的学生原话。<br>${VERSIONS[CUR].paras.some(p => p.kind === 'gen') ? '<span class="poor">报告里还有生成的建议没有人改过。</span>' : '<span class="good">生成的建议已经由你改过。</span>'}<div class="bar"><button id="sendCancel" type="button">先不发</button><button class="risk" type="button" disabled title="演示中不发送">确认发送给 52 人</button></div></div>`;
+  $('sendCancel').addEventListener('click', () => { $('sendDlg').innerHTML = '<p class="sub">已取消，没有发送。</p>'; R.sent = false; });
+  R.sendPreview = true;
+});
+
+// ---------- 6 指南对照 ----------
+const HAX = [
+  ['G1 说明系统能做什么', '“只根据勾选的资料回答；不上网”', () => /只根据/.test($('scope').textContent)],
+  ['G2 说明做得有多好', '可能判断错的句子交给你确认；生成的建议单独标出', () => HITS.some(h => h.uncertain) && VERSIONS.some(v => v.paras.some(p => p.kind === 'gen'))],
+  ['G8 方便地取消', '分析过程中的“停止”', () => !!$('stop')],
+  ['G9 方便地纠正', '“算／不算”、直接编辑任意一段', () => !!document.querySelector('[contenteditable]')],
+  ['G11 说明为什么这样做', '每个数字带来源编号，点开看原文', () => document.querySelectorAll('.chip').length > 0],
+  ['G12 记住最近的交互', '每次生成、修改、改写、恢复都是一个版本', () => VERSIONS.length > 1],
+  ['G16 说明操作的后果', '发送全班之前的预览与“不能撤回”', () => !!R.sendPreview],
+  ['G17 提供全局控制', '勾选资料、导出、停止', () => !!$('export')]
+];
+function haxTable() {
+  $('hax').innerHTML = '<tr><th>指南（Amershi 等，2019；HAX 工具包）</th><th>本例中的做法</th><th>页面里有</th></tr>' + HAX.map(([g, f, t]) => `<tr><td>${g}</td><td>${f}</td><td>${ok(t())}</td></tr>`).join('');
+  R.hax = HAX.map(([g, , t]) => [g.split(' ')[0], t()]);
+}
+haxTable();
+window.__aa = { compare, restore, exportMd, haxTable, R, versions: () => VERSIONS.map(v => ({ n: v.n, how: v.how, h: fnv(v.paras.map(p => p.t).join('|')) })) };
+</script>
+</body>
+</html>
