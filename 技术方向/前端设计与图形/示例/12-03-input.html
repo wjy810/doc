@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>输入方式：指针事件、误触、校准、驻留选择与替代操作</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .pad { height: 150px; border: 1px dashed #b9c0cc; border-radius: 8px; background: #fafbfc; position: relative; touch-action: none; display: grid; place-items: center; color: var(--muted); }
+  .pad canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  svg { display: block; width: 100%; height: auto; background: #fafbfc; border-radius: 8px; }
+  .items { display: grid; gap: 4px; }
+  .item { display: flex; gap: 8px; align-items: center; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; user-select: none; }
+  .item span { flex: 1; } .item.gone { display: none; }
+  button { font: inherit; padding: 3px 10px; border-radius: 6px; border: 1px solid #b9c0cc; background: #fff; cursor: pointer; }
+  input { font: inherit; padding: 3px 8px; border: 1px solid #b9c0cc; border-radius: 6px; }
+  .menu { position: absolute; background: #fff; border: 1px solid #b9c0cc; border-radius: 6px; box-shadow: 0 4px 12px #0002; padding: 4px; display: none; }
+  .toast { color: var(--ok); min-height: 1.6em; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 同一个页面，收到的输入并不一样：指针事件检查器</h2>
+  <p class="sub">在下方区域用鼠标、笔或手指操作。Pointer Events 用同一套事件描述三种指针，但每种指针带来的信息不同：能否悬停、有没有压力和倾斜、接触面有多大、一帧之内合并了多少个采样点。</p>
+  <div class="two">
+    <div class="pad" id="pad"><canvas id="padc"></canvas><span>在这里移动、按下、拖动</span></div>
+    <table id="ptab"><tr><th>特征</th><th>鼠标</th><th>笔</th><th>触摸</th></tr></table>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>2 误触：目标大小、间距与落点的离散程度</h2>
+  <p class="sub">假设用户瞄准目标中心，实际落点按正态分布散开（标准差 σ）。每个条件模拟 4000 次点击（固定种子），统计“落在空白处”和“落到相邻目标上”的比例。σ 是假设值：真实数值随设备、姿势、单手或行走而变化，需要在目标设备上测量。</p>
+  <div class="two">
+    <div style="display:grid;gap:4px"><svg id="miss" viewBox="0 0 640 220"></svg><p class="sub" id="missNote"></p></div>
+    <table id="mtab"><tr><th>目标边长</th><th>间距</th><th>σ</th><th>落在空白</th><th>点到相邻目标</th><th>Fitts 难度（距离 200）</th></tr></table>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>3 眼动输入：先校准，再处理“看到就触发”的问题（模拟）</h2>
+  <p class="sub">模拟的眼动仪有系统偏差（整体偏移、比例误差）和随机抖动。九点校准：请用户依次注视九个点，用最小二乘拟合一个仿射变换来修正偏差。驻留选择：注视超过阈值就触发——阈值太短，用户只是“看一看”也会误触发（Midas touch 问题）。</p>
+  <div class="two">
+    <div style="display:grid;gap:4px"><svg id="cal" viewBox="0 0 520 300"></svg><p class="sub" id="calNote"></p></div>
+    <div style="display:grid;gap:6px">
+      <table id="caltab"><tr><th>测试点误差（16 个点）</th><th>平均</th><th>最大</th></tr></table>
+      <table id="dwell"><tr><th>驻留阈值</th><th>浏览 60 秒中的误触发</th><th>有意选择用时</th><th>说明</th></tr></table>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>4 同一个操作，提供多种方式：替代操作与反馈</h2>
+  <p class="sub">“删除一条记录”可以用鼠标点按钮、键盘（Tab 到记录后按 Delete）、触摸长按出菜单、或输入语音命令的文字（这里用文本框代替语音识别）。每种方式都给出同样的反馈，并且都可以撤销。</p>
+  <div class="two">
+    <div style="display:grid;gap:6px;position:relative">
+      <div class="items" id="items"></div>
+      <div style="display:flex;gap:6px"><input id="voice" placeholder="语音命令，例如：删除第二条" aria-label="语音命令" style="flex:1"><button id="undo">撤销</button></div>
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+      <div class="menu" id="menu"><button id="menuDel">删除</button></div>
+    </div>
+    <table id="alt"><tr><th>方式</th><th>操作</th><th>结果</th></tr></table>
+  </div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function gauss(r) { let u = 0; while (!u) u = r(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * r()); }
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent && parent.appendChild(e); return e; };
+
+// ---------- 1 指针事件检查器 ----------
+const stats = {};      // pointerType → 观察到的特征
+const pad = $('pad'), pc = $('padc'), g = pc.getContext('2d');
+function sizeCanvas() { pc.width = pad.clientWidth; pc.height = pad.clientHeight; }
+sizeCanvas();
+const colors = { mouse: '#2f6fdb', pen: '#e4572e', touch: '#1f7a4d' };
+function note(e, kind) {
+  const s = stats[e.pointerType] ??= { hover: false, maxPressure: 0, maxTilt: 0, maxW: 0, coalesced: 0, frames: 0, buttons: new Set(), events: 0 };
+  s.events++;
+  if (kind === 'move' && e.buttons === 0) s.hover = true;
+  s.maxPressure = Math.max(s.maxPressure, e.pressure);
+  s.maxTilt = Math.max(s.maxTilt, Math.abs(e.tiltX), Math.abs(e.tiltY));
+  s.maxW = Math.max(s.maxW, e.width, e.height);
+  if (e.button >= 0) s.buttons.add(e.button);
+  if (kind === 'move' && e.buttons) { const n = e.getCoalescedEvents ? e.getCoalescedEvents().length : 1; s.coalesced += n; s.frames++; }
+  const r = pad.getBoundingClientRect();
+  g.fillStyle = colors[e.pointerType] || '#888'; g.globalAlpha = e.buttons ? 0.8 : 0.25;
+  const rad = e.buttons ? 1 + 5 * (e.pressure || 0.5) : 1.5;
+  g.beginPath(); g.arc(e.clientX - r.left, e.clientY - r.top, rad, 0, 7); g.fill();
+}
+pad.addEventListener('pointermove', e => note(e, 'move'));
+pad.addEventListener('pointerdown', e => { pad.setPointerCapture(e.pointerId); note(e, 'down'); });
+pad.addEventListener('pointerup', e => note(e, 'up'));
+window.__renderPointers = () => {
+  const t = $('ptab'); [...t.rows].slice(1).forEach(r => r.remove());
+  const types = ['mouse', 'pen', 'touch'], s = types.map(k => stats[k]);
+  const row = (name, f) => t.insertAdjacentHTML('beforeend', `<tr><td>${name}</td>${s.map(x => `<td>${x ? f(x) : '未观察到'}</td>`).join('')}</tr>`);
+  row('悬停（未按下时也报告位置）', x => x.hover ? '有' : '没有');
+  row('压力 pressure', x => x.maxPressure === 0.5 ? '0.5（固定值：没有压力信息）' : x.maxPressure.toFixed(2));
+  row('倾斜 tiltX／tiltY', x => x.maxTilt ? `最大 ${x.maxTilt}°` : '0');
+  row('接触面 width／height', x => x.maxW > 1 ? `${x.maxW.toFixed(0)} 像素` : '1 像素（一个点）');
+  row('拖动时每个事件合并的采样', x => x.frames ? (x.coalesced / x.frames).toFixed(1) : '—');
+  row('记录到的事件数', x => x.events);
+  t.insertAdjacentHTML('beforeend', '<tr><td colspan="4" class="sub">截图中的三种输入由测试脚本经浏览器的输入管线发送：每个事件只带一个采样。真实的高刷新率笔和触摸屏常在一帧内合并多个采样，绘图应用应当用 getCoalescedEvents() 取回全部采样。</td></tr>');
+  return stats;
+};
+
+// ---------- 2 误触模拟 ----------
+const conds = [];
+for (const size of [20, 24, 32, 44]) for (const gap of [0, 8]) for (const sigma of [4, 8]) conds.push({ size, gap, sigma });
+function simulate({ size, gap, sigma }, n = 4000, seed = 7) {
+  const r = rng(seed); let miss = 0, wrong = 0; const pts = [];
+  // 一行三个目标，瞄准中间那个；中心间距 = size + gap
+  for (let i = 0; i < n; i++) {
+    const x = gauss(r) * sigma, y = gauss(r) * sigma, half = size / 2, pitch = size + gap;
+    let hit = 'miss';
+    if (Math.abs(y) <= half) {
+      if (Math.abs(x) <= half) hit = 'ok';
+      else if (Math.abs(Math.abs(x) - pitch) <= half) hit = 'wrong';
+    }
+    if (hit === 'miss') miss++; if (hit === 'wrong') wrong++;
+    if (i < 400) pts.push([x, y, hit]);
+  }
+  return { miss: miss / n, wrong: wrong / n, pts };
+}
+const fitts = w => Math.log2(200 / w + 1);
+const mres = conds.map(c => ({ ...c, ...simulate(c) }));
+for (const m of mres) {
+  const cls = v => v < 0.02 ? 'good' : v < 0.1 ? 'mid' : 'poor';
+  $('mtab').insertAdjacentHTML('beforeend', `<tr><td>${m.size} 像素</td><td>${m.gap}</td><td>${m.sigma}</td><td class="num ${cls(m.miss)}">${(100 * m.miss).toFixed(1)}%</td><td class="num ${cls(m.wrong)}">${(100 * m.wrong).toFixed(1)}%</td><td class="num">${fitts(m.size).toFixed(2)} 比特</td></tr>`);
+}
+// 画两个条件的落点：24 像素、无间距、σ 8 对比 44 像素、间距 8、σ 8
+function drawMiss() {
+  const svg = $('miss'), show = [mres.find(m => m.size === 24 && m.gap === 0 && m.sigma === 8), mres.find(m => m.size === 44 && m.gap === 8 && m.sigma === 8)];
+  show.forEach((m, k) => {
+    const cx = 160 + k * 310, cy = 95, S = 2, pitch = (m.size + m.gap) * S, half = m.size * S / 2;
+    for (const dx of [-1, 0, 1]) el('rect', { x: cx + dx * pitch - half, y: cy - half, width: 2 * half, height: 2 * half, rx: 4, fill: dx ? '#eef0f3' : '#dfe9fb', stroke: dx ? '#b9c0cc' : '#2f6fdb' }, svg);
+    for (const [x, y, h] of m.pts) el('circle', { cx: cx + x * S, cy: cy + y * S, r: 1.6, fill: h === 'ok' ? '#1f7a4d' : h === 'wrong' ? '#b3261e' : '#8a93a3', 'fill-opacity': 0.75 }, svg);
+    el('text', { x: cx, y: 188, 'text-anchor': 'middle', 'font-size': 13, fill: '#1d2330' }, svg).textContent = `${m.size} 像素，间距 ${m.gap}，σ ${m.sigma}`;
+    el('text', { x: cx, y: 206, 'text-anchor': 'middle', 'font-size': 13, fill: '#5b6475' }, svg).textContent = `空白 ${(100 * m.miss).toFixed(1)}%，相邻目标 ${(100 * m.wrong).toFixed(1)}%`;
+  });
+  $('missNote').textContent = '绿色：点中目标；红色：点到相邻目标；灰色：落在空白处。图中放大 2 倍。';
+}
+drawMiss();
+
+// ---------- 3 眼动校准与驻留 ----------
+const W = 520, H = 300;
+const A = [[1.06, 0.03], [-0.02, 0.95]], B = [28, -18], NOISE = 10;
+function measure(p, r) { return [A[0][0] * p[0] + A[0][1] * p[1] + B[0] + gauss(r) * NOISE, A[1][0] * p[0] + A[1][1] * p[1] + B[1] + gauss(r) * NOISE]; }
+function solve3(M, v) {   // 3×3 线性方程组（克拉默法则）
+  const det = m => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+  const d = det(M); return [0, 1, 2].map(i => det(M.map((row, r) => row.map((x, c) => c === i ? v[r] : x))) / d);
+}
+function fitAffine(pairs) {   // 拟合 真实 = f(测量)：x' = a·mx + b·my + c，y' 同理
+  const M = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], vx = [0, 0, 0], vy = [0, 0, 0];
+  for (const [m, p] of pairs) { const row = [m[0], m[1], 1]; for (let i = 0; i < 3; i++) { for (let j = 0; j < 3; j++) M[i][j] += row[i] * row[j]; vx[i] += row[i] * p[0]; vy[i] += row[i] * p[1]; } }
+  const cx = solve3(M, vx), cy = solve3(M, vy);
+  return m => [cx[0] * m[0] + cx[1] * m[1] + cx[2], cy[0] * m[0] + cy[1] * m[1] + cy[2]];
+}
+const r3 = rng(11);
+const calPts = []; for (const fy of [0.15, 0.5, 0.85]) for (const fx of [0.12, 0.5, 0.88]) calPts.push([fx * W, fy * H]);
+const pairs = []; for (const p of calPts) for (let k = 0; k < 30; k++) pairs.push([measure(p, r3), p]);
+const corr = fitAffine(pairs);
+const testPts = []; for (const fy of [0.25, 0.42, 0.58, 0.75]) for (const fx of [0.25, 0.42, 0.58, 0.75]) testPts.push([fx * W, fy * H]);
+const before = [], after = [];
+for (const p of testPts) { let sb = 0, sa = 0; for (let k = 0; k < 20; k++) { const m = measure(p, r3), c = corr(m); sb += Math.hypot(m[0] - p[0], m[1] - p[1]); sa += Math.hypot(c[0] - p[0], c[1] - p[1]); } before.push(sb / 20); after.push(sa / 20); }
+const mean = a => a.reduce((s, x) => s + x, 0) / a.length;
+$('caltab').insertAdjacentHTML('beforeend', `<tr><td>校准前</td><td class="num poor">${mean(before).toFixed(1)} 像素</td><td class="num">${Math.max(...before).toFixed(1)} 像素</td></tr><tr><td>九点校准后</td><td class="num good">${mean(after).toFixed(1)} 像素</td><td class="num">${Math.max(...after).toFixed(1)} 像素</td></tr><tr><td colspan="3" class="sub">校准消除了系统偏差；剩下的是随机抖动（单次采样 σ ＝ ${NOISE} 像素，每个点平均 20 个采样），所以眼动界面的目标仍要做大。</td></tr>`);
+(function drawCal() {
+  const svg = $('cal'); el('rect', { x: 0, y: 0, width: W, height: H, fill: '#fafbfc' }, svg);
+  for (const p of calPts) { el('circle', { cx: p[0], cy: p[1], r: 7, fill: 'none', stroke: '#2f6fdb', 'stroke-width': 2 }, svg); el('circle', { cx: p[0], cy: p[1], r: 2, fill: '#2f6fdb' }, svg); }
+  const r = rng(5);
+  for (const p of testPts) {
+    el('path', { d: `M${p[0] - 5} ${p[1]}h10M${p[0]} ${p[1] - 5}v10`, stroke: '#1d2330', 'stroke-width': 1.5 }, svg);
+    for (let k = 0; k < 8; k++) { const m = measure(p, r), c = corr(m); el('circle', { cx: m[0], cy: m[1], r: 2.2, fill: '#b3261e', 'fill-opacity': 0.6 }, svg); el('circle', { cx: c[0], cy: c[1], r: 2.2, fill: '#1f7a4d', 'fill-opacity': 0.7 }, svg); }
+  }
+  $('calNote').textContent = '蓝色圆圈：九个校准点；黑色十字：测试点；红点：校准前的测量值；绿点：校准后。';
+})();
+
+// 驻留选择：浏览时的注视时长取对数正态分布（中位数 250 毫秒），其中 10% 是“仔细看”（中位数 700 毫秒）
+function browseFixations(seconds, seed) {
+  const r = rng(seed), out = []; let t = 0;
+  while (t < seconds * 1000) { const careful = r() < 0.1; const d = Math.exp(Math.log(careful ? 700 : 250) + gauss(r) * (careful ? 0.25 : 0.35)); out.push(d); t += d + 40; }
+  return out;
+}
+const fx = browseFixations(60, 21);
+for (const th of [300, 600, 1000]) {
+  const fa = fx.filter(d => d >= th).length;
+  const note = th === 300 ? '用户只是在看，按钮却不断被触发' : th === 600 ? '仔细阅读标签时仍会误触发' : '误触发很少，但每次选择都要等';
+  $('dwell').insertAdjacentHTML('beforeend', `<tr><td>${th} 毫秒</td><td class="num ${fa > 10 ? 'poor' : fa > 0 ? 'mid' : 'good'}">${fa} 次</td><td class="num">约 ${th + 200} 毫秒</td><td>${note}</td></tr>`);
+}
+$('dwell').insertAdjacentHTML('beforeend', `<tr><td>注视＋确认键</td><td class="num good">0 次</td><td class="num">约 ${250 + 200 + 300} 毫秒</td><td>用第二个通道（按键、眨眼、头部动作）确认；驻留时显示进度环作为反馈</td></tr><tr><td colspan="4" class="sub">浏览模拟：60 秒内 ${fx.length} 次注视。“有意选择用时”＝ 阈值 ＋ 约 200 毫秒的眼跳与系统延迟（假设值）。</td></tr>`);
+
+// ---------- 4 替代操作 ----------
+const data = ['数据可视化', '用户研究方法', '前端工程基础', '可访问性入门'];
+let removed = [];
+const altLog = [];
+function renderItems() {
+  $('items').innerHTML = data.map((d, i) => `<div class="item${removed.includes(i) ? ' gone' : ''}" tabindex="0" data-i="${i}" aria-label="${d}，按 Delete 删除"><span>${d}</span><button data-del="${i}" aria-label="删除 ${d}">删除</button></div>`).join('');
+}
+function del(i, how) {
+  if (removed.includes(i)) return;
+  removed.push(i); renderItems();
+  $('toast').textContent = `已删除“${data[i]}”。可以撤销。`;
+  altLog.push([how, `删除“${data[i]}”`, '已删除，可撤销']);
+  renderAlt();
+}
+function renderAlt() { const t = $('alt'); [...t.rows].slice(1).forEach(r => r.remove()); for (const [a, b, c] of altLog) t.insertAdjacentHTML('beforeend', `<tr><td>${a}</td><td>${b}</td><td class="${c.startsWith('已') ? 'good' : 'mid'}">${c}</td></tr>`); }
+$('items').addEventListener('click', e => { const b = e.target.closest('[data-del]'); if (b) del(+b.dataset.del, '鼠标：点击“删除”按钮'); });
+$('items').addEventListener('keydown', e => { const it = e.target.closest('.item'); if (it && (e.key === 'Delete' || e.key === 'Backspace')) { const i = +it.dataset.i; del(i, '键盘：Tab 到记录，按 Delete'); const next = $('items').querySelector('.item:not(.gone)'); next && next.focus(); } });
+let lpTimer = null, lpIndex = -1;
+$('items').addEventListener('pointerdown', e => {
+  if (e.pointerType !== 'touch') return; const it = e.target.closest('.item'); if (!it || e.target.closest('button')) return;
+  lpIndex = +it.dataset.i;
+  lpTimer = setTimeout(() => { const m = $('menu'), r = it.getBoundingClientRect(), pr = $('items').getBoundingClientRect(); m.style.display = 'block'; m.style.left = (r.right - pr.left - 70) + 'px'; m.style.top = (r.top - pr.top + 4) + 'px'; }, 500);
+});
+$('items').addEventListener('pointerup', () => clearTimeout(lpTimer));
+$('items').addEventListener('contextmenu', e => e.preventDefault());
+$('menuDel').addEventListener('click', () => { $('menu').style.display = 'none'; del(lpIndex, '触摸：长按 0.5 秒，在菜单中选“删除”'); });
+const ordinals = { 一: 1, 二: 2, 三: 3, 四: 4 };
+$('voice').addEventListener('change', e => {
+  const m = e.target.value.match(/删除第([一二三四1-4])条/);
+  if (!m) { $('toast').textContent = `没有听懂“${e.target.value}”。可以说：删除第二条。`; altLog.push(['语音（文字代替）', e.target.value, '未识别，给出可用的说法']); renderAlt(); return; }
+  const n = ordinals[m[1]] || +m[1], visible = data.map((_, i) => i).filter(i => !removed.includes(i));
+  if (visible[n - 1] !== undefined) del(visible[n - 1], `语音（文字代替）：“${e.target.value}”`);
+  else { $('toast').textContent = `现在只有 ${visible.length} 条记录，没有第${m[1]}条。`; altLog.push(['语音（文字代替）', e.target.value, `没有第${m[1]}条，提示当前条数`]); renderAlt(); }
+  e.target.value = '';
+});
+$('undo').addEventListener('click', () => { const i = removed.pop(); if (i === undefined) return; renderItems(); $('toast').textContent = `已恢复“${data[i]}”。`; altLog.push(['撤销', `恢复“${data[i]}”`, '已恢复']); renderAlt(); });
+renderItems();
+window.__input = { mres, before: mean(before), after: mean(after), fx: fx.length, altLog, removed: () => removed.map(i => data[i]) };
+</script>
+</body>
+</html>

@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>交互度量：事件时长、先反馈后工作、任务记录</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  .btns { display: flex; flex-wrap: wrap; gap: 8px; }
+  button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid #b9c0cc; background: #fff; cursor: pointer; }
+  button.primary { background: #2f6fdb; color: #fff; border-color: #2f6fdb; }
+  .status { min-width: 220px; color: var(--muted); }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .bar { height: 10px; display: flex; border-radius: 3px; overflow: hidden; background: #eef0f3; min-width: 40px; }
+  .bar i { display: block; height: 100%; } .bar .d { background: #f0b429; } .bar .p { background: #e4572e; } .bar .r { background: #8fb2f0; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 10px; vertical-align: -1px; }
+  .task { border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: grid; gap: 6px; }
+  .courses { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .courses button { text-align: left; font-size: 12px; }
+  .courses button.added { background: #eef7f1; border-color: #8cc5a4; }
+  pre { margin: 0; background: #f6f7f9; border-radius: 6px; padding: 8px; font-size: 11px; line-height: 1.45; max-height: 150px; overflow: auto; white-space: pre-wrap; }
+  input { font: inherit; padding: 4px 8px; border: 1px solid #b9c0cc; border-radius: 6px; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 交互要多快：用 Event Timing API 测量“从按下到画面更新”</h2>
+  <p class="sub">每个按钮在点击处理函数里做不同量的工作。浏览器记录每次交互的三段时间：输入延迟（事件等待主线程）、处理时间（事件处理函数）、呈现延迟（处理结束到下一帧画出来）。界面响应的评价通常取页面上最慢的几次交互之一（INP）：≤ 200 毫秒为良好，200—500 毫秒需要改进，＞ 500 毫秒为差。</p>
+  <div class="btns">
+    <button id="b0">立即完成</button>
+    <button id="b80">处理 80 毫秒</button>
+    <button id="b300">处理 300 毫秒</button>
+    <button id="bsplit" class="primary">先反馈，再分段处理 300 毫秒</button>
+    <button id="blong">主线程被占用时点击“立即完成”</button>
+    <span class="status" id="status">等待点击</span>
+  </div>
+  <div class="legend sub">每段时间：<i style="background:#f0b429"></i>输入延迟<i style="background:#e4572e"></i>处理时间<i style="background:#8fb2f0"></i>呈现延迟</div>
+  <table id="ev"><tr><th>操作</th><th>交互时长</th><th>输入延迟</th><th>处理</th><th>呈现延迟</th><th style="width:30%">构成</th><th>任务真正完成</th><th>评价</th></tr></table>
+</section>
+
+<section class="panel">
+  <div class="two">
+    <div class="task">
+      <h2>2 任务测试记录器</h2>
+      <p class="sub" id="taskPrompt">先写清楚要支持的活动，再把它变成可以观察的任务。</p>
+      <div style="display:flex;gap:6px;align-items:center"><button id="start" class="primary">开始任务 1</button><input id="search" placeholder="搜索课程" aria-label="搜索课程" style="flex:1"><button id="giveup">放弃这个任务</button></div>
+      <div class="courses" id="courses"></div>
+    </div>
+    <div style="display:grid;gap:6px">
+      <h2>记录的结果</h2>
+      <table id="sum"><tr><th>任务</th><th>结果</th><th>用时</th><th>错误点击</th><th>搜索次数</th><th>步骤</th></tr></table>
+      <p class="sub" id="sumNote"></p>
+      <pre id="csv"></pre>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>3 每种指标能回答什么问题</h2>
+  <table>
+    <tr><th>指标</th><th>能回答</th><th>不能回答</th><th>怎样收集</th></tr>
+    <tr><td>完成率</td><td>用户能不能完成这项任务</td><td>为什么失败</td><td>任务记录：成功、放弃、超时</td></tr>
+    <tr><td>完成时间</td><td>哪种设计更快</td><td>用户是否满意；快不一定好</td><td>任务记录的开始与结束时间</td></tr>
+    <tr><td>错误与回退</td><td>哪里容易误解、误触</td><td>误解的原因</td><td>错误点击、撤销、返回的次数与位置</td></tr>
+    <tr><td>交互时长（INP）</td><td>界面对输入是否及时反馈</td><td>任务是否完成；体验是否顺畅</td><td>Event Timing API、性能面板</td></tr>
+    <tr><td>主观评分</td><td>用户的感受（负担、可用性）</td><td>具体问题在哪</td><td>标准问卷，如 SUS、NASA-TLX</td></tr>
+    <tr><td>出声思考与访谈</td><td>用户怎样理解、为什么这样做</td><td>问题有多普遍</td><td>录音、笔记、编码</td></tr>
+  </table>
+</section>
+
+<script>
+// ---------- 1 事件时长 ----------
+const $ = id => document.getElementById(id);
+const busy = ms => { const t = performance.now(); while (performance.now() - t < ms) {} };
+const nextFrame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+const pending = [];           // 等待与 Event Timing 条目对上的点击
+const rows = [];
+let label = '';
+
+function finish(name, t0) { $('status').textContent = `${name}：完成`; return performance.now() - t0; }
+function handler(name, work) {
+  return e => {
+    const t0 = e.timeStamp; label = name;
+    busy(work);
+    $('status').textContent = `${name}：完成`;
+    nextFrame().then(() => pending.push({ name, t0, done: performance.now() - t0 }));
+  };
+}
+$('b0').addEventListener('click', handler('立即完成', 0));
+$('b80').addEventListener('click', handler('处理 80 毫秒', 80));
+$('b300').addEventListener('click', handler('处理 300 毫秒', 300));
+$('bsplit').addEventListener('click', async e => {
+  const t0 = e.timeStamp, name = '先反馈，再分段处理 300 毫秒'; label = name;
+  $('status').textContent = '处理中…（已收到点击）';
+  $('bsplit').disabled = true;
+  for (let i = 0; i < 10; i++) { await new Promise(r => setTimeout(r, 0)); busy(30); }   // 每段 30 毫秒，中间把主线程还给浏览器
+  $('bsplit').disabled = false;
+  await nextFrame();
+  pending.push({ name, t0, done: finish(name, t0) });
+});
+$('blong').addEventListener('click', handler('主线程被占用时点击', 0));
+window.__longTask = ms => setTimeout(() => busy(ms), 0);
+
+const byInteraction = new Map();
+new PerformanceObserver(list => {
+  for (const en of list.getEntries()) {
+    if (!en.interactionId) continue;
+    const cur = byInteraction.get(en.interactionId) || { duration: 0 };
+    if (en.name === 'click') cur.click = en;
+    if (en.duration >= cur.duration) { cur.duration = en.duration; cur.main = en; }
+    byInteraction.set(en.interactionId, cur);
+  }
+}).observe({ type: 'event', buffered: true, durationThreshold: 16 });
+
+function grade(ms) { return ms <= 200 ? ['良好', 'good'] : ms <= 500 ? ['需要改进', 'mid'] : ['差', 'poor']; }
+window.__report = () => {
+  // 按时间顺序把交互与点击对应起来
+  const ents = [...byInteraction.values()].filter(x => x.click);
+  const out = [];
+  for (const p of pending) {
+    const it = ents.find(x => Math.abs(x.click.startTime - p.t0) < 1);
+    if (!it) { out.push({ name: p.name, duration: 0, delay: 0, proc: 0, pres: 0, done: p.done, below: true }); continue; }
+    const en = it.click, d = it.duration;
+    const delay = en.processingStart - en.startTime, proc = en.processingEnd - en.processingStart, pres = Math.max(0, d - delay - proc);
+    out.push({ name: p.name, duration: d, delay, proc, pres, done: p.done });
+  }
+  const t = $('ev'); [...t.rows].slice(1).forEach(r => r.remove());
+  const max = Math.max(...out.map(o => o.duration), 1);
+  for (const o of out) {
+    if (o.below) { t.insertAdjacentHTML('beforeend', `<tr><td>${o.name}</td><td class="num good">＜ 16 毫秒</td><td colspan="4" class="sub">低于浏览器的记录阈值（16 毫秒），没有生成条目</td><td class="num">${Math.round(o.done)} 毫秒</td><td class="good">良好</td></tr>`); continue; }
+    const [g, c] = grade(o.duration), w = v => (100 * v / max).toFixed(1) + '%';
+    t.insertAdjacentHTML('beforeend', `<tr><td>${o.name}</td><td class="num ${c}">${Math.round(o.duration)} 毫秒</td><td class="num">${o.delay.toFixed(0)}</td><td class="num">${o.proc.toFixed(0)}</td><td class="num">${o.pres.toFixed(0)}</td>
+      <td><div class="bar" style="width:${w(o.duration)}"><i class="d" style="width:${(100 * o.delay / o.duration).toFixed(1)}%"></i><i class="p" style="width:${(100 * o.proc / o.duration).toFixed(1)}%"></i><i class="r" style="flex:1"></i></div></td>
+      <td class="num">${Math.round(o.done)} 毫秒</td><td class="${c}">${g}</td></tr>`);
+  }
+  return out;
+};
+
+// ---------- 2 任务测试记录器 ----------
+const courses = ['前端工程基础', '数据可视化', '可访问性入门', '动效设计', '数据库设计', '数据分析与统计', '交互原型', '用户研究方法', '图形学入门'];
+const tasks = [
+  { id: 'T1', prompt: '任务 1：把“数据可视化”加入学习计划', target: '数据可视化', limit: 60000 },
+  { id: 'T2', prompt: '任务 2：把“用户研究方法”加入学习计划', target: '用户研究方法', limit: 60000 },
+  { id: 'T3', prompt: '任务 3：把“三维建模”加入学习计划（列表中没有这门课）', target: '三维建模', limit: 60000 }
+];
+const log = []; let cur = null, taskIdx = -1;
+function rec(type, detail = '') { log.push({ t: Math.round(performance.now()), task: cur ? cur.id : '-', type, detail }); }
+function renderCourses(q = '') {
+  $('courses').innerHTML = courses.filter(c => c.includes(q)).map(c => `<button data-c="${c}">${c}</button>`).join('') || '<span class="sub">没有找到匹配的课程</span>';
+}
+function startTask(i) {      // 先显示任务说明，参与者读完后点“开始”才计时
+  taskIdx = i; cur = null; const t = tasks[i];
+  if (!t) { $('taskPrompt').textContent = '全部任务结束'; $('start').disabled = true; $('start').textContent = '已结束'; return; }
+  $('taskPrompt').textContent = t.prompt; $('start').textContent = `开始任务 ${i + 1}`; $('start').disabled = false; $('search').value = ''; $('courses').innerHTML = '';
+}
+$('start').addEventListener('click', () => {
+  cur = tasks[taskIdx]; if (!cur) return;
+  cur.t0 = performance.now(); cur.errors = 0; cur.searches = 0; cur.steps = 0; $('start').disabled = true;
+  renderCourses(); rec('任务开始', cur.prompt);
+});
+function endTask(result) {
+  cur.result = result; cur.time = performance.now() - cur.t0; rec('任务结束', result);
+  $('sum').insertAdjacentHTML('beforeend', `<tr><td>${cur.id}</td><td class="${result === '成功' ? 'good' : 'poor'}">${result}</td><td class="num">${(cur.time / 1000).toFixed(1)} 秒</td><td class="num">${cur.errors}</td><td class="num">${cur.searches}</td><td class="num">${cur.steps}</td></tr>`);
+  startTask(taskIdx + 1); if (taskIdx >= tasks.length) summarize();
+}
+$('courses').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b || !cur) return;
+  cur.steps++;
+  if (b.dataset.c === cur.target) { b.classList.add('added'); rec('点击', b.dataset.c + '（正确）'); endTask('成功'); }
+  else { cur.errors++; rec('点击', b.dataset.c + '（不是目标）'); }
+});
+$('search').addEventListener('change', e => { if (!cur) return; cur.searches++; cur.steps++; rec('搜索', e.target.value); renderCourses(e.target.value); });
+$('giveup').addEventListener('click', () => { if (!cur) return; cur.steps++; rec('放弃'); endTask('放弃'); });
+function summarize() {
+  const ok = tasks.filter(t => t.result === '成功').length;
+  $('sumNote').textContent = `完成率 ${ok}/${tasks.length}；共记录 ${log.length} 条事件。截图中的操作由测试脚本完成，只用来演示记录格式，不代表真实用户的表现。`;
+  $('csv').textContent = 'ms,task,type,detail\n' + log.map(r => [r.t, r.task, r.type, `"${r.detail}"`].join(',')).join('\n');
+}
+window.__tasks = { tasks, log };
+startTask(0);
+</script>
+</body>
+</html>

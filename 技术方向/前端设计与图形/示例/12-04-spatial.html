@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>空间交互：深度线索、选取、遮挡、移动、导航与空间标注</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .main { display: grid; grid-template-columns: 640px minmax(0, 1fr); gap: 14px; align-items: start; }
+  .view { position: relative; border-radius: 8px; overflow: hidden; background: #e9edf2; }
+  .view canvas { display: block; width: 100%; height: auto; }
+  .cap { position: absolute; left: 8px; top: 6px; background: #fffd; border-radius: 4px; padding: 0 6px; font-size: 12px; }
+  .label { position: absolute; left: 0; top: 0; transform: translate(-50%, -100%); background: #1d2330; color: #fff; font-size: 11px; padding: 1px 6px; border-radius: 4px; white-space: nowrap; pointer-events: none; }
+  .label.occ { background: #8a93a3; opacity: .55; }
+  .label.sel { background: #e4572e; }
+  .bar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  button { font: inherit; padding: 3px 10px; border-radius: 6px; border: 1px solid #b9c0cc; background: #fff; cursor: pointer; }
+  pre { margin: 0; background: #f6f7f9; border-radius: 6px; padding: 6px 8px; font-size: 11px; line-height: 1.45; white-space: pre-wrap; }
+  :focus-visible { outline: 3px solid #e4572e; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 深度判断：同样的三个球，有没有深度线索</h2>
+  <p class="sub">屏幕是平的，用户要靠线索判断物体的远近和高低。左边只有明暗；右边加上地面网格、阴影和落地线。两边的球位置完全相同：在右边很容易看出“中间的球悬在半空、离相机更远”。</p>
+  <div class="two">
+    <div class="view"><canvas id="cueA" width="540" height="250"></canvas><span class="cap">没有深度线索</span></div>
+    <div class="view"><canvas id="cueB" width="540" height="250"></canvas><span class="cap">网格 ＋ 阴影 ＋ 落地线</span></div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>2 选取、遮挡、移动、导航与标注</h2>
+  <div class="main">
+    <div style="display:grid;gap:6px">
+      <div class="view" id="mainView"><canvas id="main" width="640" height="400" tabindex="0" aria-label="三维场景：点击选取物体，拖动所选物体在地面上移动，Q／E 旋转，F 聚焦"></canvas><div id="labels"></div></div>
+      <div class="bar"><button id="focus">聚焦所选（F）</button><button id="reset">复位视角</button><label><input type="checkbox" id="snap" checked> 吸附到 0.5 米网格</label><span class="sub" id="selInfo">未选中</span></div>
+    </div>
+    <div style="display:grid;gap:8px">
+      <div><h3>选取：指针有 σ ＝ 4 像素的抖动时，能否点中（每个目标 500 次）</h3>
+        <table id="pick"><tr><th>目标</th><th>屏幕上的大小</th><th>只用射线</th><th>射线 ＋ 12 像素容差</th></tr></table></div>
+      <div><h3>操作记录</h3><table id="log"><tr><th>操作</th><th>结果</th></tr></table></div>
+    </div>
+  </div>
+  <div class="two">
+    <div><h3>移动：同样拖动 100 像素，物体在地面上移动多远</h3><table id="drag"><tr><th>物体</th><th>到相机的距离</th><th>不吸附</th><th>吸附到 0.5 米网格</th></tr></table>
+      <p class="sub">把二维指针映射到三维时，需要先选一个约束平面（这里是物体所在的水平面）。透视让远处的物体“一拖就走很远”：远处的精细调整应当改用数值输入、键盘微调或先拉近视角。</p></div>
+    <div><h3>测试条件</h3><pre id="cond"></pre></div>
+  </div>
+</section>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+const $ = id => document.getElementById(id);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function gauss(r) { let u = 0; while (!u) u = r(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * r()); }
+
+// ---------- 1 深度线索对比 ----------
+function cueScene(withCues) {
+  const r = new THREE.WebGLRenderer({ canvas: withCues ? $('cueB') : $('cueA'), antialias: true });
+  r.setPixelRatio(1); r.shadowMap.enabled = withCues;
+  const s = new THREE.Scene(); s.background = new THREE.Color(0xe9edf2);
+  const cam = new THREE.PerspectiveCamera(40, 540 / 250, 0.1, 100); cam.position.set(0, 2.2, 9); cam.lookAt(0, 0.8, 0);
+  s.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, withCues ? 1.2 : 2.2));
+  if (withCues) {
+    const d = new THREE.DirectionalLight(0xffffff, 2.2); d.position.set(2, 8, 3); d.castShadow = true; d.shadow.mapSize.set(1024, 1024);
+    Object.assign(d.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8 }); s.add(d);
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.MeshStandardMaterial({ color: 0xdfe3e8 })); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; s.add(floor);
+    const grid = new THREE.GridHelper(30, 30, 0x9aa3b0, 0xc2c8d0); grid.position.y = 0.002; s.add(grid);
+  }
+  const balls = [[-2.4, 0.5, 1.5, 0x2f6fdb], [0, 1.6, -4, 0xe4572e], [2.4, 0.5, 0.5, 0x1f7a4d]];
+  for (const [x, y, z, c] of balls) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.5, 32, 16), new THREE.MeshStandardMaterial({ color: c, roughness: 0.5 }));
+    m.position.set(x, y, z); m.castShadow = true; s.add(m);
+    if (withCues) { const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, y - 0.5, z), new THREE.Vector3(x, 0, z)]); s.add(new THREE.Line(g, new THREE.LineDashedMaterial({ color: 0x5b6475, dashSize: 0.1, gapSize: 0.08 })).computeLineDistances()); }
+  }
+  r.render(s, cam);
+}
+cueScene(false); cueScene(true);
+
+// ---------- 2 主场景 ----------
+const W = 640, H = 400;
+const renderer = new THREE.WebGLRenderer({ canvas: $('main'), antialias: true }); renderer.setPixelRatio(1); renderer.shadowMap.enabled = true;
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0xe9edf2);
+const camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 200);
+const HOME = { pos: new THREE.Vector3(0, 5, 11), target: new THREE.Vector3(0, 0.5, -3) };
+camera.position.copy(HOME.pos);
+const controls = new OrbitControls(camera, renderer.domElement); controls.target.copy(HOME.target); controls.update();
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.3));
+const sun = new THREE.DirectionalLight(0xffffff, 2); sun.position.set(4, 10, 6); sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -16, right: 16, top: 16, bottom: -16, far: 40 }); scene.add(sun);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(160, 160), new THREE.MeshStandardMaterial({ color: 0xdfe3e8 })); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; floor.name = '地面'; scene.add(floor);
+const grid = new THREE.GridHelper(80, 80, 0x9aa3b0, 0xc2c8d0); grid.position.y = 0.002; scene.add(grid);
+scene.fog = new THREE.Fog(0xe9edf2, 30, 70);
+
+const objects = [];
+function add(name, geo, color, x, y, z) {
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, roughness: 0.55 }));
+  m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; m.name = name; m.userData.color = color; scene.add(m); objects.push(m);
+  const lab = document.createElement('div'); lab.className = 'label'; lab.textContent = name; $('labels').appendChild(lab); m.userData.label = lab;
+  return m;
+}
+add('近处的箱子', new THREE.BoxGeometry(1.6, 1.6, 1.6), 0x2f6fdb, -3, 0.8, 3);
+add('远处的小球', new THREE.SphereGeometry(0.25, 24, 12), 0xe4572e, 3.5, 0.25, -14);
+add('细杆', new THREE.CylinderGeometry(0.05, 0.05, 2.4, 12), 0x1f7a4d, 3, 1.2, 1);
+add('隔板', new THREE.BoxGeometry(3.2, 2.2, 0.2), 0x8a93a3, 0, 1.1, -2);
+add('隔板后的圆柱', new THREE.CylinderGeometry(0.45, 0.45, 1.4, 24), 0xf0b429, 0.3, 0.7, -4.2);
+
+const ray = new THREE.Raycaster();
+const ndc = (x, y) => new THREE.Vector2(x / W * 2 - 1, -(y / H) * 2 + 1);
+function hitsAt(x, y) { ray.setFromCamera(ndc(x, y), camera); return ray.intersectObjects(objects, false); }
+function project(v) { const p = v.clone().project(camera); return [(p.x + 1) / 2 * W, (1 - p.y) / 2 * H]; }
+function screenInfo(o) {   // 包围球在屏幕上的中心与半径
+  o.geometry.computeBoundingSphere(); const bs = o.geometry.boundingSphere, c = o.localToWorld(bs.center.clone());
+  const [cx, cy] = project(c), right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).multiplyScalar(bs.radius);
+  const [ex, ey] = project(c.clone().add(right)); return { cx, cy, r: Math.hypot(ex - cx, ey - cy) };
+}
+function pickTolerant(x, y, tol = 12) {
+  const h = hitsAt(x, y); if (h.length) return h[0].object;
+  let best = null, bd = Infinity;
+  for (const o of objects) { const s = screenInfo(o), d = Math.hypot(s.cx - x, s.cy - y) - s.r; if (d < tol && d < bd) { bd = d; best = o; } }
+  return best;
+}
+
+// 选取、循环选择、标注
+let selected = null, lastClick = null;
+const logRows = [];
+function log(a, b) { logRows.push([a, b]); const t = $('log'); [...t.rows].slice(1).forEach(r => r.remove()); for (const [x, y] of logRows.slice(-7)) t.insertAdjacentHTML('beforeend', `<tr><td>${x}</td><td>${y}</td></tr>`); }
+function select(o) {
+  if (selected) selected.material.emissive.setHex(0x000000);
+  selected = o; if (o) o.material.emissive.setHex(0x553311);
+  $('selInfo').textContent = o ? `已选中：${o.name}` : '未选中';
+}
+function clickAt(x, y, t = performance.now()) {
+  const h = hitsAt(x, y), list = [...new Set(h.map(i => i.object))];
+  const again = lastClick && Math.hypot(lastClick.x - x, lastClick.y - y) < 4 && t - lastClick.t < 1500 && list.length > 1;
+  let o;
+  if (again) { lastClick.i = (lastClick.i + 1) % list.length; o = list[lastClick.i]; log('在同一位置再点一次', `循环到下一层：${o.name}（这条射线穿过 ${list.length} 个物体）`); }
+  else { o = list[0] || pickTolerant(x, y); lastClick = { x, y, t, i: 0 }; log('点击', o ? `选中 ${o.name}${list.length ? '' : '（射线没有命中，按 12 像素容差选中）'}` : '没有选中任何物体'); }
+  select(o || null); return o;
+}
+
+// 拖动：约束在所选物体所在的水平面上
+let drag = null;
+const canvas = renderer.domElement;
+function local(e) { const r = canvas.getBoundingClientRect(); return [(e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height]; }
+function planeHit(x, y, h) { ray.setFromCamera(ndc(x, y), camera); const p = new THREE.Vector3(); return ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -h), p) ? p : null; }
+canvas.addEventListener('pointerdown', e => {
+  const [x, y] = local(e), o = clickAt(x, y);
+  if (o && o.name !== '隔板') {
+    const p = planeHit(x, y, o.position.y); if (!p) return;
+    drag = { o, off: o.position.clone().sub(p), start: o.position.clone(), sx: x, sy: y }; controls.enabled = false; canvas.setPointerCapture(e.pointerId);
+  }
+});
+canvas.addEventListener('pointermove', e => {
+  if (!drag) return; const [x, y] = local(e), p = planeHit(x, y, drag.o.position.y); if (!p) return;
+  const n = p.add(drag.off); if ($('snap').checked) { n.x = Math.round(n.x * 2) / 2; n.z = Math.round(n.z * 2) / 2; }
+  drag.o.position.x = n.x; drag.o.position.z = n.z;
+});
+canvas.addEventListener('pointerup', e => {
+  if (!drag) return; const d = drag.o.position.distanceTo(drag.start);
+  if (d > 0) log(`拖动 ${drag.o.name}`, `在地面上移动 ${d.toFixed(2)} 米`);
+  drag = null; controls.enabled = true;
+});
+canvas.addEventListener('keydown', e => {
+  if (!selected) return;
+  if (e.key === 'q' || e.key === 'e') { selected.rotation.y += (e.key === 'q' ? 1 : -1) * Math.PI / 12; log(`按 ${e.key.toUpperCase()}`, `${selected.name} 绕竖直轴旋转到 ${Math.round(THREE.MathUtils.radToDeg(selected.rotation.y))}°`); }
+  if (e.key === 'f') focusSel();
+});
+function focusSel() {   // 把相机移到能完整看到所选物体的位置
+  if (!selected) return; selected.geometry.computeBoundingSphere();
+  const c = selected.localToWorld(selected.geometry.boundingSphere.center.clone()), rad = selected.geometry.boundingSphere.radius;
+  const dist = Math.max(rad / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.6, 2.5);
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  controls.target.copy(c); camera.position.copy(c).add(dir.multiplyScalar(dist)); controls.update();
+  log('聚焦所选', `${selected.name}：相机距离 ${dist.toFixed(1)} 米`);
+}
+$('focus').onclick = focusSel;
+$('reset').onclick = () => { camera.position.copy(HOME.pos); controls.target.copy(HOME.target); controls.update(); log('复位视角', '回到初始相机位置'); };
+
+// 每帧更新标注：投影到屏幕；从相机到锚点之间若有其他物体，标为“被遮挡”
+const occState = {};
+function updateLabels() {
+  for (const o of objects) {
+    o.geometry.computeBoundingBox(); const top = o.localToWorld(new THREE.Vector3(0, o.geometry.boundingBox.max.y + 0.05, 0));
+    const [x, y] = project(top), lab = o.userData.label;
+    const dir = top.clone().sub(camera.position), dist = dir.length(); ray.set(camera.position, dir.normalize());
+    const block = ray.intersectObjects(objects, false).find(h => h.object !== o && h.distance < dist - 0.05);
+    const behind = top.clone().project(camera).z > 1;
+    lab.style.display = behind ? 'none' : '';
+    lab.style.left = (x / W * 100) + '%'; lab.style.top = (y / H * 100) + '%';
+    lab.className = 'label' + (block ? ' occ' : '') + (o === selected ? ' sel' : '');
+    lab.textContent = o.name + (block ? '（被遮挡）' : '');
+    occState[o.name] = !!block;
+  }
+}
+function loop() { controls.update(); renderer.render(scene, camera); updateLabels(); requestAnimationFrame(loop); }
+loop();
+
+// ---------- 选取测试 ----------
+function pickTest() {
+  const t = $('pick'); [...t.rows].slice(1).forEach(r => r.remove());
+  const res = [];
+  for (const name of ['近处的箱子', '细杆', '远处的小球']) {
+    const o = objects.find(x => x.name === name), s = screenInfo(o), r = rng(3);
+    let a = 0, b = 0;
+    for (let i = 0; i < 500; i++) {
+      const x = s.cx + gauss(r) * 4, y = s.cy + gauss(r) * 4, h = hitsAt(x, y);
+      if (h.length && h[0].object === o) a++;
+      if (pickTolerant(x, y) === o) b++;
+    }
+    // 屏幕尺寸：投影后包围盒的宽 × 高
+    o.geometry.computeBoundingBox(); const bb = o.geometry.boundingBox, xs = [], ys = [];
+    for (const cx of [bb.min.x, bb.max.x]) for (const cy of [bb.min.y, bb.max.y]) for (const cz of [bb.min.z, bb.max.z]) { const [px, py] = project(o.localToWorld(new THREE.Vector3(cx, cy, cz))); xs.push(px); ys.push(py); }
+    const sw = Math.max(...xs) - Math.min(...xs), sh = Math.max(...ys) - Math.min(...ys);
+    const cls = v => v >= 0.95 ? 'good' : v >= 0.7 ? 'mid' : 'poor';
+    t.insertAdjacentHTML('beforeend', `<tr><td>${name}</td><td class="num">${sw.toFixed(0)} × ${sh.toFixed(0)} 像素</td><td class="num ${cls(a / 500)}">${(a / 5).toFixed(1)}%</td><td class="num ${cls(b / 500)}">${(b / 5).toFixed(1)}%</td></tr>`);
+    res.push([name, sw.toFixed(0) + '×' + sh.toFixed(0), a / 5, b / 5]);
+  }
+  return res;
+}
+
+// ---------- 测试条件 ----------
+async function conditions() {
+  const gl = renderer.getContext(), dbg = gl.getExtension('WEBGL_debug_renderer_info');
+  const gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+  let xr = '浏览器不支持 WebXR（navigator.xr 不存在）';
+  if (navigator.xr) { try { const vr = await navigator.xr.isSessionSupported('immersive-vr'), ar = await navigator.xr.isSessionSupported('immersive-ar'); xr = `immersive-vr：${vr ? '支持' : '不支持'}；immersive-ar：${ar ? '支持' : '不支持'}`; } catch (e) { xr = 'WebXR 查询失败：' + e.message; } }
+  $('cond').textContent = [`渲染：WebGL ${renderer.capabilities.isWebGL2 ? '2' : '1'}，three.js r${THREE.REVISION}`, `图形处理器：${gpu}`, `画布：${W} × ${H} 像素，devicePixelRatio ${devicePixelRatio}`, `输入：鼠标（测试脚本发送真实鼠标事件）`, `头戴设备：${xr}`, `结论只适用于以上条件；在头戴设备中还要测试身体尺度、手臂疲劳、晕动与真实的空间深度。`].join('\n');
+}
+conditions();
+
+window.__sp = { objects, clickAt, pickTest, occState, project, screenInfo, camera, controls, focusSel, select, logRows, getSel: () => selected && selected.name, pos: n => objects.find(o => o.name === n).position.toArray().map(v => +v.toFixed(2)) };
+</script>
+</body>
+</html>
