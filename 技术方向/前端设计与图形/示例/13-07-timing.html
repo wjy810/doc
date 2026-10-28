@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>动作与时间知觉：反馈延迟、对象连续性与拖动滞后</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  button { font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 6px; border: 1px solid #b9c0cc; background: #fff; cursor: pointer; }
+  .lamp { display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: #d6dae1; vertical-align: -2px; margin-left: 6px; } .lamp.on { background: #1f7a4d; }
+  .list { position: relative; height: 200px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .item { position: absolute; left: 8px; right: 8px; height: 30px; border-radius: 6px; background: #eef1f6; padding: 4px 8px; font-size: 12px; display: flex; justify-content: space-between; }
+  .item.track { background: #2f6fdb; color: #fff; }
+  svg { display: block; width: 100%; height: auto; background: #fafbfc; border-radius: 8px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 反馈要多快：请求的延迟与实际呈现的延迟</h2>
+  <p class="sub">做时间知觉的实验或原型时，“设定 50 毫秒后反馈”并不等于用户在 50 毫秒后看到变化：变化要等到下一帧才画出来。每种延迟用真实的鼠标点击测 12 次：从点击事件的时间戳，到浏览器开始绘制包含变化的那一帧的时刻。常用的经验界限：约 0.1 秒内感觉“立即”，约 1 秒内思路不被打断，超过约 10 秒注意力就会离开。</p>
+  <div class="bar"><button id="probe">点击测试<span class="lamp" id="lamp"></span></button> <span class="sub" id="probeNote"></span></div>
+  <table id="lat"><tr><th>设定的延迟</th><th>实际：平均</th><th>标准差</th><th>最小—最大</th><th>平均多出</th><th>感受（经验界限）</th></tr></table>
+</section>
+
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px">
+      <h2>2 动效是否解释了变化：排序时跟住一个条目</h2>
+      <p class="sub">按薪资重新排序。直接跳变时，蓝色条目从第 4 行瞬间出现在第 1 行，眼睛要重新寻找；用 FLIP 动画（记下旧位置 → 改变布局 → 从旧位置过渡到新位置）时，它沿着连续的路径移动。下图把 300 毫秒的动画按帧画出来。</p>
+      <div class="two"><div class="list" id="listA"></div><div class="list" id="listB"></div></div>
+      <div class="two"><span class="sub">直接跳变</span><span class="sub">FLIP 动画 300 毫秒</span></div>
+    </div>
+    <div style="display:grid;gap:6px">
+      <svg id="film" viewBox="0 0 520 230"></svg>
+      <table id="cont"><tr><th>指标</th><th>直接跳变</th><th>FLIP 动画</th></tr></table>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>3 连续动作：拖动时，延迟变成了距离</h2>
+  <p class="sub">拖动一个物体时，画面上的物体落后于手指或指针的距离 ＝ 移动速度 × 延迟。快速拖动时，几十毫秒的延迟就会让物体明显“拖在后面”。</p>
+  <div class="two"><svg id="lag" viewBox="0 0 520 168"></svg><table id="lagt"><tr><th>延迟</th><th>慢速 300 像素／秒</th><th>快速 1500 像素／秒</th></tr></table></div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs, parent, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; parent && parent.appendChild(e); return e; };
+
+// ---------- 1 延迟测量 ----------
+let delay = 0; const samples = {};
+$('probe').addEventListener('click', e => {
+  const t0 = e.timeStamp, d = delay;
+  setTimeout(() => {
+    $('lamp').classList.toggle('on');
+    requestAnimationFrame(() => { (samples[d] ??= []).push(performance.now() - t0); });   // 下一帧开始绘制时的实际时刻（不用回调参数：它是这一帧的垂直同步时间，可能早于变化发生的时刻）
+  }, d);
+});
+window.__setDelay = d => { delay = d; $('probeNote').textContent = `当前设定：${d} 毫秒`; };
+window.__report = () => {
+  const t = $('lat'); [...t.rows].slice(1).forEach(r => r.remove());
+  const feel = d => d < 100 ? '立即' : d < 1000 ? '能察觉到停顿，思路不中断' : '明显等待，需要进度提示';
+  const out = [];
+  for (const d of Object.keys(samples).map(Number).sort((a, b) => a - b)) {
+    const xs = samples[d], m = xs.reduce((a, b) => a + b, 0) / xs.length, sd = Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / (xs.length - 1));
+    out.push({ d, n: xs.length, m, sd, min: Math.min(...xs), max: Math.max(...xs) });
+    t.insertAdjacentHTML('beforeend', `<tr><td class="num">${d} 毫秒</td><td class="num">${m.toFixed(1)} 毫秒</td><td class="num">${sd.toFixed(1)}</td><td class="num">${Math.min(...xs).toFixed(1)}—${Math.max(...xs).toFixed(1)}</td><td class="num">＋${(m - d).toFixed(1)}</td><td>${feel(m)}</td></tr>`);
+  }
+  t.insertAdjacentHTML('beforeend', `<tr><td colspan="6" class="sub">本次在无头浏览器中运行，没有真实显示器的刷新节拍：设定的延迟基本准确（多出约 2 毫秒），只有 0 毫秒时要等到下一次绘制。在真实显示器上，变化还要等下一次刷新（60 赫兹时最多约 16.7 毫秒），再加上输入设备与显示器本身的延迟。做实验时要在目标设备上测量实际呈现的时间（例如用光电传感器或高速摄像），并在报告中写明。</td></tr>`);
+  return out;
+};
+
+// ---------- 2 对象连续性 ----------
+const ITEMS = [['交互设计师', 22], ['数据可视化工程师', 26], ['前端工程师', 30], ['图形工程师', 34], ['全栈工程师', 18]];
+const ROW = 36;
+function build(id) { const L = $(id); L.innerHTML = ''; ITEMS.forEach(([n, p], i) => { const d = document.createElement('div'); d.className = 'item' + (i === 3 ? ' track' : ''); d.dataset.n = n; d.style.top = (8 + i * ROW) + 'px'; d.innerHTML = `<span>${n}</span><span>${p}K</span>`; L.appendChild(d); }); }
+build('listA'); build('listB');
+const sorted = [...ITEMS].sort((a, b) => b[1] - a[1]).map(x => x[0]);
+function sortJump() { for (const d of $('listA').children) d.style.top = (8 + sorted.indexOf(d.dataset.n) * ROW) + 'px'; }
+let anims = [];
+function sortFlip() {   // FLIP：First 记下旧位置 → Last 改变布局 → Invert 反向位移 → Play 播放到 0
+  const first = new Map([...$('listB').children].map(d => [d, d.offsetTop]));
+  for (const d of $('listB').children) d.style.top = (8 + sorted.indexOf(d.dataset.n) * ROW) + 'px';
+  anims = [...$('listB').children].map(d => d.animate([{ transform: `translateY(${first.get(d) - d.offsetTop}px)` }, { transform: 'translateY(0)' }], { duration: 300, easing: 'cubic-bezier(0.2, 0, 0, 1)' }));
+}
+window.__continuity = () => {
+  const tracked = [...$('listB').children].find(d => d.classList.contains('track')), a = anims[[...$('listB').children].indexOf(tracked)];
+  a.pause(); const frames = [];
+  for (let t = 0; t <= 300; t += 1000 / 60) { a.currentTime = t; frames.push(tracked.getBoundingClientRect().top - $('listB').getBoundingClientRect().top); }
+  anims.forEach(x => x.finish());
+  const jump = (3 - sorted.indexOf(tracked.dataset.n)) * ROW, steps = frames.slice(1).map((y, i) => Math.abs(y - frames[i]));
+  // 画胶片：横轴时间，纵轴位置；跳变只有起点与终点
+  const svg = $('film'); svg.innerHTML = ''; const X = t => 60 + t / 300 * 420, Y = y => 20 + y * 0.9;
+  for (let r = 0; r < 5; r++) { el('line', { x1: 60, x2: 480, y1: Y(8 + r * ROW + 15), y2: Y(8 + r * ROW + 15), stroke: '#eef0f3' }, svg); el('text', { x: 54, y: Y(8 + r * ROW + 15) + 4, 'text-anchor': 'end', 'font-size': 10, fill: '#5b6475' }, svg, `第 ${r + 1} 行`); }
+  const y0 = 8 + 3 * ROW + 15, y1 = y0 - jump;
+  el('path', { d: `M${X(0)} ${Y(y0)}L${X(150)} ${Y(y0)}M${X(150)} ${Y(y1)}L${X(300)} ${Y(y1)}`, stroke: '#e4572e', 'stroke-width': 3, fill: 'none' }, svg);
+  el('line', { x1: X(150), x2: X(150), y1: Y(y0), y2: Y(y1), stroke: '#e4572e', 'stroke-dasharray': '3 3' }, svg);
+  frames.forEach((y, i) => el('circle', { cx: X(i * 1000 / 60), cy: Y(y + 15), r: 3.2, fill: '#2f6fdb' }, svg));
+  el('text', { x: X(150) + 6, y: Y((y0 + y1) / 2), 'font-size': 11, fill: '#e4572e' }, svg, '跳变：一帧移动 ' + jump + ' 像素');
+  el('text', { x: X(40), y: 222, 'font-size': 11, fill: '#2f6fdb' }, svg, `● FLIP：每帧一个点，共 ${frames.length} 帧`);
+  for (const t of [0, 100, 200, 300]) el('text', { x: X(t), y: 208, 'text-anchor': 'middle', 'font-size': 10, fill: '#5b6475' }, svg, t + ' 毫秒');
+  const c = $('cont'); [...c.rows].slice(1).forEach(r => r.remove());
+  c.insertAdjacentHTML('beforeend', `<tr><td>被跟踪条目移动的距离</td><td class="num">${jump} 像素</td><td class="num">${jump} 像素</td></tr><tr><td>一帧内的最大位移</td><td class="num poor">${jump} 像素（一次完成）</td><td class="num good">${Math.max(...steps).toFixed(1)} 像素</td></tr><tr><td>中间位置（可以被眼睛跟住）</td><td class="num">0 帧</td><td class="num">${frames.length - 2} 帧</td></tr><tr><td>“减少动效”设置下</td><td colspan="2">不做位移动画，改为短暂高亮被移动的条目，并在旁边标出“↓ 移到第 ${sorted.indexOf(tracked.dataset.n) + 1} 行”</td></tr>`);
+  return { jump, maxStep: Math.max(...steps), frames: frames.length };
+};
+window.__sort = () => { sortJump(); sortFlip(); };
+
+// ---------- 3 拖动滞后 ----------
+const lags = [0, 16.7, 50, 100];
+for (const L of lags) $('lagt').insertAdjacentHTML('beforeend', `<tr><td class="num">${L} 毫秒${L === 16.7 ? '（一帧）' : ''}</td><td class="num ${300 * L / 1000 > 15 ? 'mid' : 'good'}">${(300 * L / 1000).toFixed(1)} 像素</td><td class="num ${1500 * L / 1000 > 15 ? 'poor' : 'good'}">${(1500 * L / 1000).toFixed(1)} 像素</td></tr>`);
+(function drawLag() {
+  const svg = $('lag'); lags.forEach((L, i) => { const y = 22 + i * 34, px = 420, lagPx = 1500 * L / 1000; el('text', { x: 6, y: y + 5, 'font-size': 11, fill: '#5b6475' }, svg, `${L} 毫秒`); el('line', { x1: 70, x2: 500, y1: y, y2: y, stroke: '#eef0f3' }, svg); el('rect', { x: px - lagPx - 14, y: y - 12, width: 28, height: 24, rx: 5, fill: '#2f6fdb', 'fill-opacity': 0.85 }, svg); el('path', { d: `M${px} ${y - 8}l0 16l4 -4l3 6l2.5 -1.2l-3 -6l5.5 0z`, fill: '#1d2330' }, svg); if (lagPx > 0) el('line', { x1: px - lagPx, x2: px, y1: y + 14, y2: y + 14, stroke: '#e4572e', 'stroke-width': 2 }, svg); });
+  el('text', { x: 300, y: 162, 'font-size': 11, fill: '#5b6475', 'text-anchor': 'middle' }, svg, '指针以 1500 像素／秒向右移动；蓝色方块是画面上被拖动的物体');
+})();
+</script>
+</body>
+</html>

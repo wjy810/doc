@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>个体、文化与情境差异：同一张卡片在八种情境下</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .grid { display: grid; grid-template-columns: 150px 1fr 1fr; gap: 6px 12px; align-items: start; }
+  .cond { font-size: 12px; color: var(--muted); padding-top: 6px; } .cond b { color: var(--ink); display: block; }
+  .frame { padding: 6px; border-radius: 8px; background: #f6f7f9; }
+  .frame.dark { background: #12161f; }
+  .issues { font-size: 11px; margin-top: 2px; } .issues .poor::before { content: "✗ "; } .issues .good::before { content: "✓ "; }
+  /* ---------- A：写死的实现 ---------- */
+  .cardA { width: 340px; border: 1px solid #dde1e7; border-radius: 8px; padding: 8px 10px; background: #fff; color: #333; font-family: "Noto Sans SC", sans-serif; }
+  .cardA .t { font-weight: 700; white-space: nowrap; overflow: hidden; width: 200px; display: inline-block; vertical-align: top; }
+  .cardA .tag { float: right; background: #eef3ff; color: #2456b0; border-radius: 4px; padding: 0 6px; font-size: 11px; }
+  .cardA .meta { color: #666; font-size: 12px; height: 18px; overflow: hidden; white-space: nowrap; }
+  .cardA .row { margin-top: 6px; height: 28px; }
+  .cardA .btn { display: inline-block; width: 84px; height: 26px; line-height: 26px; text-align: center; background: #2f6fdb; color: #fff; border-radius: 6px; overflow: hidden; white-space: nowrap; font-size: 12px; }
+  .cardA .arrow { margin-left: 6px; } .cardA .btn { text-decoration: none; } .cardA .btn:focus { outline: none; }   /* 常见做法：去掉了“难看的”默认焦点框 */
+  .dark .cardA { background: #1d2330; }   /* 深色主题只换了背景，文字颜色写死 */
+  /* ---------- B：考虑差异的实现 ---------- */
+  .cardB { max-width: 340px; width: 100%; border: 1px solid var(--line-c, #dde1e7); border-radius: 8px; padding: 8px 10px; background: var(--bg, #fff); color: var(--fg, #1d2330); }
+  .cardB .head { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+  .cardB .t { font-weight: 700; min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .cardB .tag { background: var(--tag-bg, #eef3ff); color: var(--tag-fg, #2456b0); border-radius: 4px; padding: 0 6px; font-size: 0.85em; }
+  .cardB .meta { color: var(--muted-c, #5b6475); font-size: 0.92em; overflow-wrap: anywhere; }
+  .cardB .row { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .cardB .btn { display: inline-flex; gap: 4px; align-items: center; padding: 3px 12px; background: #2f6fdb; color: #fff; border-radius: 6px; font-size: 0.92em; }
+  .cardB .btn { text-decoration: none; } .cardB .arrow { display: inline-block; } .cardB:dir(rtl) .arrow { transform: scaleX(-1); }
+  .dark .cardB { --bg: #1d2330; --fg: #e6ecf5; --muted-c: #a9b2c3; --line-c: #3a4253; --tag-bg: #263556; --tag-fg: #b9cdf5; }
+  .cardA:focus-within, .cardB:focus-within { outline: none; }
+  .cardB .btn:focus-visible { outline: 3px solid #f0b429; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>同一张岗位卡片，八种使用情境</h2>
+  <p class="sub">A 按设计稿“写死”：固定宽度与像素字号、文字不换行、箭头字符、自己拼接日期和数字、深色主题只换背景、去掉了按钮的焦点框。B 用弹性布局、逻辑方向、Intl 格式化与颜色变量。每张卡片下面是浏览器自动检测出的问题。</p>
+  <div class="grid" id="grid"><div></div><b>A：写死的实现</b><b>B：考虑差异的实现</b></div>
+</section>
+<section class="panel">
+  <h2>汇总：每种情境下检测到的问题数</h2>
+  <table id="sum"><tr><th>情境</th><th>A</th><th>B</th><th>检测的内容</th></tr></table>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+const TEXT = {
+  zh: { title: '数据可视化工程师', co: '星图科技', city: '上海', btn: '立即投递', tag: '可远程', posted: '发布于' },
+  en: { title: 'Data Visualization Engineer', co: 'Xingtu Technology', city: 'Shanghai', btn: 'Apply now', tag: 'Remote OK', posted: 'Posted' },
+  de: { title: 'Datenvisualisierungsingenieur', co: 'Xingtu Technologie GmbH', city: 'Schanghai', btn: 'Jetzt bewerben', tag: 'Fernarbeit möglich', posted: 'Veröffentlicht' },
+  ar: { title: 'مهندس تصور البيانات', co: 'شركة شينغتو', city: 'شنغهاي', btn: 'قدّم الآن', tag: 'عن بُعد', posted: 'نُشر في' }
+};
+const LOCALE = { zh: 'zh-CN', en: 'en-US', de: 'de-DE', ar: 'ar-EG' };
+const DATE = new Date(2026, 2, 4), PAY = [25000, 35000];
+const CONDS = [
+  { key: 'zh', name: '默认', desc: '中文，宽 360 像素', lang: 'zh' },
+  { key: 'en', name: '英文', desc: '文字变长约 1.5—2 倍', lang: 'en' },
+  { key: 'de', name: '德文', desc: '很长的复合词', lang: 'de' },
+  { key: 'ar', name: '阿拉伯文', desc: '从右到左', lang: 'ar', dir: 'rtl' },
+  { key: 'big', name: '字号 200%', desc: '视力较弱或系统放大文字', lang: 'zh', scale: 2 },
+  { key: 'narrow', name: '窄屏', desc: '宽 280 像素（小手机、分屏）', lang: 'zh', width: 280 },
+  { key: 'dark', name: '深色主题', desc: '夜间或省电模式', lang: 'zh', dark: true },
+  { key: 'kbd', name: '只用键盘', desc: '按 Tab 移到按钮', lang: 'zh', kbd: true }
+];
+function cardA(c) {
+  const t = TEXT[c.lang], d = `${DATE.getMonth() + 1}/${DATE.getDate()}`;   // 自己拼接的日期：3/4
+  return `<div class="cardA" lang="${LOCALE[c.lang]}"${c.dir ? ` dir="${c.dir}"` : ''}><span class="t">${t.title}</span><span class="tag">${t.tag}</span>
+    <div class="meta">${t.co} · ${t.city} · ${PAY[0]}-${PAY[1]} · ${t.posted} ${d}</div>
+    <div class="row"><a class="btn" href="#" tabindex="0">${t.btn}<span class="arrow">→</span></a></div></div>`;
+}
+function cardB(c) {
+  const t = TEXT[c.lang], loc = LOCALE[c.lang];
+  const date = new Intl.DateTimeFormat(loc, { year: 'numeric', month: 'short', day: 'numeric' }).format(DATE);
+  const pay = new Intl.NumberFormat(loc, { style: 'currency', currency: 'CNY', maximumFractionDigits: 0 }).formatRange(PAY[0], PAY[1]);
+  return `<div class="cardB" lang="${loc}"${c.dir ? ` dir="${c.dir}"` : ''}><div class="head"><span class="t" title="${t.title}">${t.title}</span><span class="tag">${t.tag}</span></div>
+    <div class="meta">${t.co} · ${t.city} · ${pay}／月 · ${t.posted} ${date}</div>
+    <div class="row"><a class="btn" href="#">${t.btn}<span class="arrow" aria-hidden="true">→</span></a></div></div>`;
+}
+const LUM = s => { const m = s.match(/\d+(\.\d+)?/g).map(Number); const f = c => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(m[0]) + 0.7152 * f(m[1]) + 0.0722 * f(m[2]); };
+const contrast = (a, b) => { const [x, y] = [LUM(a), LUM(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+function bgOf(e) { while (e) { const b = getComputedStyle(e).backgroundColor; if (b && b !== 'rgba(0, 0, 0, 0)') return b; e = e.parentElement; } return 'rgb(255, 255, 255)'; }
+function check(card, c, kind) {
+  const issues = [], ok = [];
+  const box = card.getBoundingClientRect();
+  // 1 文字被截断：容器的内容宽度大于可见宽度（且没有省略号或完整标题提示）
+  for (const e of card.querySelectorAll('.t, .meta, .btn')) {
+    const clipped = e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 2;
+    const hint = e.getAttribute('title') || getComputedStyle(e).textOverflow === 'ellipsis';
+    if (clipped && !hint) issues.push(`${{ t: '岗位名称', meta: '公司与日期', btn: '按钮文字' }[e.className.split(' ')[0]]}被截断`);
+  }
+  // 2 超出卡片或画框
+  const frame = card.parentElement.getBoundingClientRect();
+  if (box.right > frame.right + 1 || box.left < frame.left - 1) issues.push('卡片超出可用宽度');
+  for (const e of card.querySelectorAll('.tag, .btn')) { const r = e.getBoundingClientRect(); if (r.right > box.right + 1 || r.left < box.left - 1) issues.push('标签或按钮跑出卡片'); }
+  // 3 方向：从右到左时，箭头应当指向左边
+  if (c.dir === 'rtl') { const a = card.querySelector('.arrow'), tr = getComputedStyle(a).transform; if (!tr.startsWith('matrix(-1')) issues.push('箭头方向没有镜像'); else ok.push('箭头已镜像'); }
+  // 4 日期：只有“月/日”的数字写法在不同地区含义不同
+  const meta = card.querySelector('.meta').textContent;
+  if (/\b\d{1,2}\/\d{1,2}\b/.test(meta) && c.lang !== 'zh') issues.push('日期 3/4 有歧义（3 月 4 日还是 4 月 3 日）');
+  if (/\d{5}-\d{5}/.test(meta)) issues.push('薪资没有货币与千位分隔');
+  // 字号放大时，所有文字都应跟着放大
+  if (c.scale) { const base = 13 * c.scale, small = [...card.querySelectorAll('.meta, .btn, .tag')].filter(e => parseFloat(getComputedStyle(e).fontSize) < base * 0.8); if (small.length) issues.push(`${small.length} 处文字没有随字号放大`); else ok.push('文字都随字号放大'); }
+  // 5 深色主题下的文字对比度
+  if (c.dark) { for (const e of card.querySelectorAll('.t, .meta')) { const r = contrast(getComputedStyle(e).color, bgOf(e)); if (r < 4.5) issues.push(`文字对比度 ${r.toFixed(2)}`); else ok.push(`对比度 ${r.toFixed(1)}`); } }
+  // 6 键盘焦点可见
+  if (c.kbd) { const b = card.querySelector('.btn'); const cs = getComputedStyle(b); if (!(cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0) && cs.boxShadow === 'none') issues.push('按钮获得焦点时看不出来'); else ok.push('焦点框可见'); }
+  return { issues: [...new Set(issues)], ok, h: box.height };
+}
+const results = {};
+for (const c of CONDS) {
+  const g = $('grid');
+  g.insertAdjacentHTML('beforeend', `<div class="cond"><b>${c.name}</b>${c.desc}</div>` + ['A', 'B'].map(k => `<div><div class="frame${c.dark ? ' dark' : ''}" style="width:${c.width || 360}px;font-size:${13 * (c.scale || 1)}px" id="f-${c.key}-${k}">${k === 'A' ? cardA(c) : cardB(c)}</div><div class="issues" id="i-${c.key}-${k}"></div></div>`).join(''));
+}
+function runChecks() {
+  for (const c of CONDS) for (const k of ['A', 'B']) {
+    const card = $(`f-${c.key}-${k}`).firstElementChild;
+    if (c.kbd) { const b = card.querySelector('.btn'); b.focus({ focusVisible: true }); }
+    const r = check(card, c, k); (results[c.key] ??= {})[k] = r;
+    $(`i-${c.key}-${k}`).innerHTML = r.issues.map(x => `<span class="poor">${x}</span>`).join('　') + (r.issues.length ? '' : `<span class="good">没有发现问题${r.ok.length ? '（' + r.ok.join('、') + '）' : ''}</span>`);
+    if (c.kbd) card.querySelector('.btn').blur();
+  }
+  const what = { zh: '截断、溢出、数字格式', en: '截断、溢出、日期', de: '截断、溢出、日期', ar: '截断、方向、日期', big: '截断、文字能否放大', narrow: '截断、溢出', dark: '对比度', kbd: '焦点可见' };
+  let tA = 0, tB = 0;
+  for (const c of CONDS) { const a = results[c.key].A.issues.length, b = results[c.key].B.issues.length; tA += a; tB += b; $('sum').insertAdjacentHTML('beforeend', `<tr><td>${c.name}</td><td class="num ${a ? 'poor' : 'good'}">${a}</td><td class="num ${b ? 'poor' : 'good'}">${b}</td><td>${what[c.key]}</td></tr>`); }
+  $('sum').insertAdjacentHTML('beforeend', `<tr><td><b>合计</b></td><td class="num poor"><b>${tA}</b></td><td class="num ${tB ? 'poor' : 'good'}"><b>${tB}</b></td><td class="sub">自动检测只能发现可以测量的问题；用词是否合适、图标在某种文化中的含义、使用环境中的真实困难，要请有代表性的使用者参与。</td></tr>`);
+  return results;
+}
+document.fonts.ready.then(() => { const r = runChecks(); window.__ctx = Object.fromEntries(Object.entries(r).map(([k, v]) => [k, { A: v.A.issues, B: v.B.issues, Bok: v.B.ok }])); });
+</script>
+</body>
+</html>

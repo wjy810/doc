@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>理解与心智模型：系统怎样工作，用户以为它怎样工作</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .dlg { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; }
+  .opts { display: grid; gap: 4px; } .opts label { display: flex; gap: 6px; align-items: flex-start; font-size: 12.5px; }
+  .status { background: #f6f7f9; border-radius: 6px; padding: 6px 8px; font-size: 12px; }
+  .status.none { color: var(--muted); }
+  button { font: inherit; font-size: 12px; padding: 2px 10px; border-radius: 6px; border: 1px solid #b9c0cc; background: #fff; cursor: pointer; }
+  .toast { font-size: 12px; color: var(--ok); min-height: 1.4em; }
+  .preview { font-size: 12px; color: var(--warn); }
+  pre { margin: 0; background: #1d2330; color: #e6ecf5; border-radius: 6px; padding: 6px 8px; font-size: 11px; line-height: 1.45; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 同一个“简历分享”功能，两种说法</h2>
+  <p class="sub">系统内部的规则完全相同：简历有四种可见范围；“公开到人才库”同时会被搜索到；已经发出的分享链接，在“收回所有链接”之前一直有效。区别只在名称、状态说明、预览和撤销。</p>
+  <div class="two">
+    <div class="dlg" id="dlgA"></div>
+    <div class="dlg" id="dlgB"></div>
+  </div>
+  <div class="two"><div><h3>系统内部状态（用户看不到）</h3><pre id="stateA"></pre></div><div><h3>系统内部状态（用户看不到）</h3><pre id="stateB"></pre></div></div>
+</section>
+
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>2 自动检查：用户能否从界面推断发生了什么</h2>
+      <p class="sub">对每个操作，比较“系统内部状态变了什么”和“界面上可见的文字变了什么”。内部变了而界面没说，就是评价鸿沟；名称不包含结果的关键词，就是执行鸿沟的风险；一次操作改了不止一件事却没有预览，就是隐藏的副作用。</p>
+      <table id="audit"><tr><th>操作</th><th>A</th><th>B</th></tr></table>
+      <table id="auditSum"><tr><th>问题</th><th>A</th><th>B</th></tr></table></div>
+    <div style="display:grid;gap:6px"><h2>3 预期与系统不一致的地方</h2>
+      <table id="gap"><tr><th>用户可能这样想</th><th>系统实际上</th><th>A 怎样表达</th><th>B 怎样表达</th></tr></table>
+      <h3>测试时可以问的“回讲”问题（不提示答案）</h3>
+      <table id="teach"><tr><th>问题</th><th>与系统一致的回答</th></tr></table></div>
+  </div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+// ---------- 同一套系统规则 ----------
+const RULES = {
+  private: { vis: 'private', searchable: false },
+  link: { vis: 'link', searchable: false },
+  selected: { vis: 'selected', searchable: false },
+  public: { vis: 'public', searchable: true }
+};
+function initial() { return { vis: 'selected', searchable: false, activeLinks: 2, recruiters: 3 }; }
+function apply(s, action) {   // 返回新状态
+  const n = { ...s };
+  if (action in RULES) Object.assign(n, RULES[action]);
+  if (action === 'revoke') n.activeLinks = 0;
+  return n;
+}
+// ---------- 两种表达 ----------
+const UI = {
+  A: {
+    title: '简历设置',
+    labels: { private: '关闭', link: '开放', selected: '定向', public: '同步' },
+    status: s => '',                                       // 不说明当前谁能看到
+    actions: { revoke: '重置' },
+    confirm: false, undo: false, preview: false
+  },
+  B: {
+    title: '谁可以看到我的简历',
+    labels: { private: '只有我自己', link: '拥有链接的人可以查看', selected: '只有我选择的招聘方', public: '公开到人才库（招聘方可以搜索到我）' },
+    status: s => {
+      const who = { private: '只有你自己', link: '拥有链接的人', selected: `你选择的 ${s.recruiters} 位招聘方`, public: '所有招聘方（可以搜索到你）' }[s.vis];
+      const links = s.activeLinks ? `；另外，你发出的 ${s.activeLinks} 个分享链接仍然有效，打开链接的人也能看到` : '';
+      return `现在：${who}可以看到你的简历${links}。`;
+    },
+    actions: { revoke: '收回所有分享链接（发出的链接将无法打开）' },
+    confirm: true, undo: true, preview: true
+  }
+};
+const stA = { s: initial(), hist: [] }, stB = { s: initial(), hist: [] };
+function render(k) {
+  const ui = UI[k], st = k === 'A' ? stA : stB, root = $('dlg' + k);
+  const status = ui.status(st.s);
+  root.innerHTML = `<h3>${k}：${ui.title}</h3><div class="opts">${Object.keys(RULES).map(v => `<label><input type="radio" name="v${k}" value="${v}"${st.s.vis === v ? ' checked' : ''}> ${ui.labels[v]}</label>`).join('')}</div>
+    <div class="status${status ? '' : ' none'}" data-status>${status || '（没有状态说明）'}</div>
+    <div class="preview" data-preview></div>
+    <div style="display:flex;gap:6px"><button data-revoke>${ui.actions.revoke}</button>${ui.undo ? '<button data-undo>撤销</button>' : ''}</div><div class="toast" data-toast></div>`;
+  $('state' + k).textContent = JSON.stringify(st.s, null, 1);
+  root.querySelectorAll(`input[name=v${k}]`).forEach(i => i.addEventListener('change', () => act(k, i.value)));
+  if (ui.preview) root.querySelectorAll('.opts label, [data-revoke]').forEach(l => { const a = l.querySelector ? (l.querySelector('input') || {}).value || 'revoke' : 'revoke'; const show = () => { root.querySelector('[data-preview]').textContent = previewText(k, a); }; l.addEventListener('mouseenter', show); l.addEventListener('focusin', show); });
+  root.querySelector('[data-revoke]').addEventListener('click', () => act(k, 'revoke'));
+  const u = root.querySelector('[data-undo]'); if (u) u.addEventListener('click', () => { const p = st.hist.pop(); if (p) { st.s = p; render(k); root.querySelector('[data-toast]').textContent = '已撤销上一步。'; } });
+}
+function describeChange(a, b) { const out = []; if (a.vis !== b.vis) out.push('可见范围'); if (a.searchable !== b.searchable) out.push('能否被搜索'); if (a.activeLinks !== b.activeLinks) out.push('分享链接'); return out; }
+function previewText(k, action) { const st = k === 'A' ? stA : stB, n = apply(st.s, action), ch = describeChange(st.s, n); return ch.length ? `将会改变：${ch.join('、')}。${UI.B.status(n).replace('现在：', '之后：')}` : '不会有任何改变。'; }
+function act(k, action) {
+  const st = k === 'A' ? stA : stB, before = st.s;
+  if (k === 'B' && action === 'revoke' && st.s.activeLinks) { /* B：先预览后果，确认后执行（测试脚本视为确认） */ }
+  st.hist.push(before); st.s = apply(before, action); render(k);
+  if (k === 'B') $('dlgB').querySelector('[data-toast]').textContent = `已更改：${describeChange(before, st.s).join('、') || '无变化'}。可以撤销。`;
+}
+render('A'); render('B');
+
+// ---------- 自动检查 ----------
+function visibleText(k, s) { const ui = UI[k]; return ui.labels[s.vis] + '|' + ui.status(s); }
+const KEYWORDS = { private: ['只有我', '自己'], link: ['链接'], selected: ['选择', '招聘方'], public: ['公开', '搜索'], revoke: ['链接', '无法打开', '收回'] };
+function audit() {
+  const actions = ['private', 'link', 'selected', 'public', 'revoke'], rows = [], sum = { A: { eval: 0, exec: 0, side: 0, undo: 0 }, B: { eval: 0, exec: 0, side: 0, undo: 0 } };
+  for (const a of actions) {
+    const cells = {};
+    for (const k of ['A', 'B']) {
+      const ui = UI[k], s0 = initial(), s1 = apply(s0, a), changed = describeChange(s0, s1);
+      const v0 = visibleText(k, s0), v1 = visibleText(k, s1);
+      // 评价鸿沟：内部变化中，有哪些没有出现在可见文字里
+      const statusCovers = c => c === '可见范围' ? true : c === '能否被搜索' ? /搜索/.test(ui.labels[s1.vis] + ui.status(s1)) : c === '分享链接' ? ui.status(s1) !== ui.status(s0) : true;
+      const hidden = changed.filter(c => !statusCovers(c));
+      const label = a === 'revoke' ? ui.actions.revoke : ui.labels[a];
+      const execRisk = !KEYWORDS[a].some(w => label.includes(w));
+      const side = changed.length > 1 && !ui.preview;
+      const irreversible = a === 'revoke' && !ui.undo && !ui.confirm;
+      const issues = [];
+      if (hidden.length) { issues.push(`界面没说明：${hidden.join('、')}`); sum[k].eval++; }
+      if (execRisk) { issues.push(`名称“${label}”看不出结果`); sum[k].exec++; }
+      if (side) { issues.push(`同时改变 ${changed.join('、')}，没有预览`); sum[k].side++; }
+      if (irreversible) { issues.push('不可撤销，也没有确认'); sum[k].undo++; }
+      cells[k] = issues.length ? `<span class="poor">${issues.join('；')}</span>` : '<span class="good">可以推断</span>';
+    }
+    rows.push(`<tr><td>${{ private: '设为“只有自己”', link: '设为“链接可看”', selected: '设为“指定招聘方”', public: '设为“公开”', revoke: '收回链接' }[a]}</td><td>${cells.A}</td><td>${cells.B}</td></tr>`);
+  }
+  $('audit').insertAdjacentHTML('beforeend', rows.join(''));
+  const names = { eval: '评价鸿沟：内部变了，界面没说', exec: '执行鸿沟风险：名称看不出结果', side: '隐藏的副作用：一次改了几件事，没有预览', undo: '不可撤销且没有确认' };
+  for (const key of Object.keys(names)) $('auditSum').insertAdjacentHTML('beforeend', `<tr><td>${names[key]}</td><td class="num ${sum.A[key] ? 'poor' : 'good'}">${sum.A[key]} 处</td><td class="num ${sum.B[key] ? 'poor' : 'good'}">${sum.B[key]} 处</td></tr>`);
+  return sum;
+}
+const sum = audit();
+const GAPS = [
+  ['“关闭”以后，谁都看不到我的简历了', '已经发出的 2 个分享链接仍然有效', '“关闭”，没有说明', '状态行写明“你发出的 2 个分享链接仍然有效”，并提供“收回所有分享链接”'],
+  ['“同步”就是把简历保存到云端', '公开到人才库，所有招聘方都能搜索到', '“同步”', '“公开到人才库（招聘方可以搜索到我）”'],
+  ['“重置”只是恢复默认设置', '收回所有分享链接，发出的链接无法打开', '“重置”，不可撤销', '“收回所有分享链接（发出的链接将无法打开）”，可以撤销']
+];
+for (const g of GAPS) $('gap').insertAdjacentHTML('beforeend', `<tr>${g.map((x, i) => `<td${i === 2 ? ' class="poor"' : i === 3 ? ' class="good"' : ''}>${x}</td>`).join('')}</tr>`);
+const TEACH = [['如果你选“关闭”，昨天发给 A 公司的链接还能打开吗？', '能，除非收回链接'], ['选了哪一项，没有投递过的公司也能找到你？', '公开到人才库'], ['点了“重置”（收回链接）之后，还能恢复吗？', 'A 不能；B 可以撤销']];
+for (const [q, a] of TEACH) $('teach').insertAdjacentHTML('beforeend', `<tr><td>${q}</td><td>${a}</td></tr>`);
+window.__mm = { sum, stA, stB, act };
+</script>
+</body>
+</html>
