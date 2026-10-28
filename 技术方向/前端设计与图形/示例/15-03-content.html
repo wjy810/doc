@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>内容设计：术语、按钮、错误提示与内容单元</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .tag { display: inline-block; padding: 0 5px; border-radius: 3px; font-size: 11px; margin-right: 3px; white-space: nowrap; }
+  .tag.bad { background: #fbe4dd; color: #b3261e; } .tag.ok { background: #eef7f1; color: #1f7a4d; }
+  s { color: #9aa0a8; }
+  .orig { background: #f6f7f9; border-radius: 6px; padding: 6px 8px; font-size: 12px; }
+  .unit { border-left: 3px solid #2f6fdb; padding: 2px 8px; font-size: 12px; } .unit b { color: #2f6fdb; font-weight: 700; margin-right: 4px; }
+  .calc { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 12px; } .calc input { width: 64px; font: inherit; }
+  .result { font-weight: 700; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>一套界面文案的审计（5 个页面、26 条文案，文案为演示而构造）</h2>
+  <p class="sub">程序按规则检查四件事：同一个概念是否用了不同的说法；按钮是否说出结果；错误提示是否同时给出原因与解决办法；文字在留给它的空间里放不放得下。规则只给出初稿，最后由人确认。</p>
+  <div class="two">
+    <div style="display:grid;gap:6px"><h3>发现的问题（修改前 → 修改后，按文案条数）</h3><table id="sum"></table></div>
+    <div style="display:grid;gap:6px"><h3>术语：同一个概念的不同说法</h3><table id="terms"></table></div>
+  </div>
+  <h3>逐条修改（只列出改动的文案）</h3><table id="rows"></table>
+</section>
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px">
+      <h2>有限的空间里，保留必要的条件</h2>
+      <p class="sub">课程卡片上的徽章只有 150 像素宽、一行。原文“开课 7 天内未开始学习可全额退款”放不下。几种改法分别保留了哪些条件：</p>
+      <table id="badge"></table>
+      <h2>把复杂规则拆成内容单元</h2>
+      <div class="orig" id="orig"></div>
+      <div style="display:grid;gap:4px" id="units"></div>
+    </div>
+    <div style="display:grid;gap:6px">
+      <h3>结果会怎样：按规则计算</h3>
+      <div class="calc">开课第 <input id="day" type="number" min="1" value="5"> 天，已学 <input id="done" type="number" min="0" value="2"> 节 ／ 共 20 节 <span class="result" id="out"></span></div>
+      <h3>边界情况核对</h3><table id="cases"></table>
+      <h3>维护术语：术语表</h3><table id="gloss"></table>
+    </div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+// 页面、角色、原文、改写、留给它的宽度（像素，单行）
+const STR = [
+  ['注册', '标题', '创建账号', '创建账号', 300],
+  ['注册', '说明', '用手机号注册，我们会发送 6 位验证码。', '用手机号注册，我们会发送 6 位验证码。', 300],
+  ['注册', '按钮', '确定', '注册并登录', 120],
+  ['注册', '错误', '验证码错误', '验证码不对。请核对短信里的 6 位数字，或 60 秒后重新获取。', 420],
+  ['简历', '标题', '我的履历', '我的简历', 300],
+  ['简历', '帮助', '上传简历后，招聘方可以在你投递时查看。', '上传简历后，招聘方可以在你投递时查看。', 300],
+  ['简历', '按钮', '上传 CV', '上传简历', 120],
+  ['简历', '错误', '文件格式不支持。请上传 PDF 或 Word 文件，大小不超过 10 MB。', '文件格式不支持。请上传 PDF 或 Word 文件，大小不超过 10 MB。', 420],
+  ['简历', '错误', '上传失败', '网络中断，简历没有上传。请检查网络后重试，已填的内容不会丢失。', 420],
+  ['岗位', '标题', '推荐职位', '推荐岗位', 300],
+  ['岗位', '按钮', '立即申请', '投递简历', 120],
+  ['岗位', '说明', '投递后可在“我的投递”中查看进度。', '投递后可在“我的投递”中查看进度。', 300],
+  ['岗位', '按钮', '收藏这个岗位以便稍后查看', '收藏岗位', 120],
+  ['岗位', '错误', '操作失败', '收藏没有成功，可能是登录已过期。请重新登录后再试。', 420],
+  ['岗位', '帮助', '匹配度根据你的技能与岗位要求计算，仅供参考。', '匹配度根据你的技能与岗位要求计算，仅供参考。', 320],
+  ['设置', '标题', '账户与隐私', '账号与隐私', 300],
+  ['设置', '按钮', '移除简历', '删除简历', 120],
+  ['设置', '说明', '删除后 30 天内可以恢复。', '删除后 30 天内可以恢复。', 300],
+  ['设置', '按钮', '好的', '确认删除', 120],
+  ['设置', '错误', '密码无效', '密码至少 8 位，需要同时包含字母和数字。', 420],
+  ['课程', '标题', '选择课程', '选择课程', 300],
+  ['课程', '按钮', '加入学习计划', '加入学习计划', 120],
+  ['课程', '引导', '先选一门课开始吧，以后随时可以调整。', '先选一门课开始吧，以后随时可以调整。', 300],
+  ['课程', '错误', '该课程已满。可以加入候补名单，有空位时通知你。', '该课程已满。可以加入候补名单，有空位时通知你。', 420],
+  ['课程', '按钮', '提交', '加入候补名单', 120],
+  ['课程', '帮助', '“学习计划”按每周可用时间排出，可以手动调整。', '“学习计划”按每周可用时间排出，可以手动调整。', 320]
+];
+const TERMS = [
+  ['账号', ['账号', '帐号', '账户'], 'account', '登录用的身份，用手机号注册'],
+  ['简历', ['简历', '履历', 'CV'], 'résumé', '上传的求职文件，投递时招聘方可见'],
+  ['岗位', ['岗位', '职位'], 'job', '招聘方发布的一个招聘需求'],
+  ['投递', ['投递', '申请'], 'apply', '把简历发给某个岗位的招聘方'],
+  ['删除', ['删除', '移除'], 'delete', '删除后 30 天内可以恢复']
+];
+const GENERIC = ['确定', '好的', '提交', '是', '否', '完成'];
+const FIX = /(请|可以|可在|重试|重新|核对|检查|需要|至少|不超过)/, CAUSE = /(不对|不支持|中断|过期|已满|至少|格式|没有)/;
+const mctx = document.createElement('canvas').getContext('2d');
+const width = (t, px = 13) => { mctx.font = `${px}px "Noto Sans SC"`; return mctx.measureText(t).width; };
+function audit(col) {
+  const issues = [], use = TERMS.map(() => ({}));
+  STR.forEach((r, i) => {
+    const t = r[col], my = [];
+    TERMS.forEach(([, vs], k) => vs.forEach(v => { if (t.includes(v)) { use[k][v] = (use[k][v] || 0) + 1; if (v !== vs[0]) my.push(['术语', `“${v}”应为“${vs[0]}”`]); } }));
+    if (r[1] === '按钮' && GENERIC.includes(t)) my.push(['按钮', '没有说出结果']);
+    if (r[1] === '错误') { if (!CAUSE.test(t)) my.push(['错误', '没有原因']); if (!FIX.test(t)) my.push(['错误', '没有解决办法']); }
+    const w = width(t); if (w > r[4]) my.push(['空间', `宽 ${Math.round(w)} 像素，超出 ${r[4]}`]);
+    issues.push(my);
+  });
+  return { issues, use };
+}
+// ---------- 退款规则 ----------
+const ORIG = '如您在开课后七日内且未开始任何课时的学习，可申请全额退款；若已开始学习但学习进度未超过百分之二十，可退还剩余部分的百分之五十；超过上述期限或进度的，恕不退款，特殊情况请联系客服处理。';
+const RULES = [
+  { when: '开课 7 天内，还没开始学', then: '全额退款' },
+  { when: '学了不超过 20%', then: '退还剩余部分的 50%（是否也限 7 天内？待确认）' },
+  { when: '其他情况', then: '不退款' }
+];
+function refund(d, done, total = 20) {   // 按原文逐句翻译成规则；原文没说清的情况返回 −1
+  const p = done / total, R = i => ({ rule: i, text: RULES[i].then.replace(/（.*）/, '') });
+  if (p === 0) return R(d <= 7 ? 0 : 2);
+  if (p <= 0.2) return d <= 7 ? R(1) : { rule: -1, text: '规则没有定义：原文的“上述期限”是否也约束第二种情况？需要问规则的负责人' };
+  return R(2);
+}
+document.fonts.ready.then(() => {
+  const before = audit(2), after = audit(3);
+  const cnt = (a, k) => a.issues.filter(list => list.some(x => x[0] === k)).length;   // 有这类问题的文案条数
+  $('sum').innerHTML = '<tr><th>检查</th><th>修改前</th><th>修改后</th></tr>' + [['术语不一致', '术语'], ['按钮没有说出结果', '按钮'], ['错误提示缺原因或解决办法', '错误'], ['放不下', '空间']].map(([n, k]) => `<tr><td>${n}</td><td class="num ${cnt(before, k) ? 'poor' : 'good'}">${cnt(before, k)} 处</td><td class="num ${cnt(after, k) ? 'poor' : 'good'}">${cnt(after, k)} 处</td></tr>`).join('');
+  $('terms').innerHTML = '<tr><th>概念</th><th>修改前出现的说法</th><th>修改后</th></tr>' + TERMS.map(([c, vs], k) => `<tr><td>${c}</td><td>${Object.entries(before.use[k]).map(([v, n]) => `<span class="tag ${v === vs[0] ? 'ok' : 'bad'}">${v} ×${n}</span>`).join('')}</td><td>${Object.entries(after.use[k]).map(([v, n]) => `<span class="tag ${v === vs[0] ? 'ok' : 'bad'}">${v} ×${n}</span>`).join('')}</td></tr>`).join('');
+  $('rows').innerHTML = '<tr><th style="width:44px">页面</th><th style="width:44px">角色</th><th>修改前</th><th>发现的问题</th><th>修改后</th></tr>' + STR.map((r, i) => before.issues[i].length || r[2] !== r[3] ? `<tr><td>${r[0]}</td><td>${r[1]}</td><td><s>${r[2]}</s></td><td>${before.issues[i].map(x => `<span class="tag bad">${x[1]}</span>`).join('')}${after.issues[i].map(x => `<span class="tag bad">仍有：${x[1]}</span>`).join('')}</td><td>${r[3]}</td></tr>` : '').join('');
+  // 徽章
+  const NEED = ['开课', '7 天内', '未开始学习', '全额'];
+  const CANDS = [['原文', '开课 7 天内未开始学习可全额退款', 1], ['截断', '开课 7 天内未开始学…', 1], ['缩短', '7 天内可退款', 1], ['只留结果，条件放进详情', '可全额退款 ⓘ', 1], ['两行：条件在前，结果在后', '未开始学习的课程｜开课 7 天内全额退款', 2]];
+  const badge = CANDS.map(([n, t, lines]) => { const parts = t.split('｜'), w = Math.max(...parts.map(p => width(p, 12))), fits = w <= 150 && parts.length <= lines; const kept = NEED.filter(k => t.replace(/学…$/, '').includes(k)); return { n, t, w: Math.round(w), fits, kept, lines }; });
+  $('badge').innerHTML = '<tr><th>改法</th><th>文字</th><th>宽度</th><th>保留的条件（共 4 项）</th></tr>' + badge.map(b => `<tr><td>${b.n}</td><td>${b.t.replace('｜', '<br>')}</td><td class="num ${b.fits ? 'good' : 'poor'}">${b.w} 像素${b.lines > 1 ? `×${b.lines} 行` : ''}${b.fits ? '' : '，放不下'}</td><td class="${b.kept.length === 4 ? 'good' : 'poor'}">${b.kept.length}／4${b.kept.length < 4 ? `：缺 ${NEED.filter(k => !b.kept.includes(k)).join('、')}` : ''}</td></tr>`).join('') + '<tr><td colspan="4" class="sub">截断与缩短都丢掉了条件，读者会以为“随时都能全额退”；放进详情虽然放得下，但承诺与条件分开了。决定：卡片上留两行，把条件放在结果前面。</td></tr>';
+  // 内容单元
+  $('orig').innerHTML = `<b>原文（${ORIG.length} 字，一句话）</b><br>${ORIG}`;
+  const units = [['一句话结论', '能不能退、退多少，取决于两件事：开课多久、学了多少。'], ['条件', RULES.map(r => `${r.when} → ${r.then}`).join('；')], ['例子', '8 月 1 日开课，8 月 5 日（第 5 天）学了 2 节，共 20 节（10%）：退还剩余部分的 50%。'], ['特殊情况', '生病、调课等，联系客服处理。'], ['改写时发现的问题', '原文“超过上述期限或进度的，恕不退款”：第二种情况（学了不超过 20%）是否也要在 7 天内？原文没有说清。'], ['统一的写法', '“您”改为“你”（与其他文案一致）；“七日”“百分之二十”改为“7 天”“20%”']];
+  $('units').innerHTML = units.map(([k, v]) => `<div class="unit"><b>${k}</b>${v}</div>`).join('');
+  // 计算器与边界
+  const show = () => { const r = refund(+$('day').value, +$('done').value); $('out').textContent = '→ ' + r.text; $('out').className = 'result ' + (r.rule < 0 ? 'mid' : ''); };
+  $('day').oninput = $('done').oninput = show; show();
+  const CASES = [[7, 0], [8, 0], [1, 4], [1, 5], [7, 4], [10, 2], [3, 20]];
+  const caseRows = CASES.map(([d, n]) => ({ d, n, r: refund(d, n) }));
+  $('cases').innerHTML = '<tr><th>开课第几天</th><th>已学</th><th>结果</th></tr>' + caseRows.map(c => `<tr><td class="num">${c.d}</td><td class="num">${c.n}／20（${(c.n * 5)}%）</td><td class="${c.r.rule < 0 ? 'mid' : ''}">${c.r.rule < 0 ? '未定义' : c.r.text}${c.r.rule >= 0 ? `<span class="sub">（第 ${c.r.rule + 1} 条）</span>` : ''}</td></tr>`).join('');
+  // 术语表
+  const after2 = audit(3);
+  $('gloss').innerHTML = '<tr><th>术语</th><th>定义</th><th>不用的说法</th><th>英文</th><th>出现次数</th></tr>' + TERMS.map(([c, vs, en, def], k) => `<tr><td>${c}</td><td>${def}</td><td>${vs.slice(1).join('、')}</td><td>${en}</td><td class="num">${after2.use[k][c] || 0}</td></tr>`).join('');
+  window.__ct = { before: { term: cnt(before, '术语'), button: cnt(before, '按钮'), error: cnt(before, '错误'), space: cnt(before, '空间') }, after: { term: cnt(after, '术语'), button: cnt(after, '按钮'), error: cnt(after, '错误'), space: cnt(after, '空间') },
+    use: before.use.map(u => u), badge: badge.map(b => [b.n, b.w, b.fits, b.kept.length]), cases: caseRows.map(c => [c.d, c.n, c.r.rule]), origLen: ORIG.length, issuesBefore: STR.map((r, i) => [r[2], before.issues[i].map(x => x[1])]).filter(x => x[1].length) };
+});
+</script>
+</body>
+</html>

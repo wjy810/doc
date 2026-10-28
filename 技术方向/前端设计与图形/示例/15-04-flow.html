@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>内容设计项目：重写注册、资料上传与课程选择流程</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .three { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; align-items: start; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  form { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: grid; gap: 6px; background: #fbfbfa; }
+  form h4 { margin: 0; font-size: 12px; color: var(--muted); font-weight: 400; }
+  .f { display: grid; gap: 1px; } .f label { font-size: 12px; font-weight: 700; } .f .hint { font-size: 11px; color: var(--muted); }
+  .f input { font: inherit; font-size: 12px; padding: 2px 6px; border: 1px solid #c3c9d3; border-radius: 4px; }
+  .f .file { display: flex; gap: 6px; align-items: center; font-size: 11px; } .f .file span { color: var(--muted); }
+  .f .err { font-size: 11px; color: var(--bad); } .f.bad input { border-color: var(--bad); }
+  .course { font-size: 11px; display: flex; gap: 4px; align-items: baseline; }
+  button { font: inherit; font-size: 12px; justify-self: start; padding: 2px 10px; border-radius: 4px; border: 0; background: #2f6fdb; color: #fff; }
+  button.alt { background: #e8ecf3; color: #1d2330; }
+  .done { font-size: 12px; background: #eef7f1; color: #1f7a4d; padding: 4px 8px; border-radius: 4px; }
+  .ver { font-size: 13px; font-weight: 700; margin: 0 0 4px; }
+  .q { display: inline-block; font-size: 10.5px; padding: 0 4px; border-radius: 3px; background: #eef3ff; color: #2456b0; white-space: nowrap; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>同一个流程，两版文案：注册 → 资料上传 → 课程选择</h2>
+  <p class="sub">测试脚本在两个版本上做同样的事：第 1、2 步故意填错（手机号 10 位、验证码 5 位、密码 6 位、简历 12.4 MB、姓名空着），看出现什么提示；第 3 步正确填写并提交，看完成后告诉了用户什么。</p>
+  <div class="three"><div id="A"></div><div id="B"></div>
+    <div style="display:grid;gap:6px"><h3>验收：用户是否知道要输入什么、为什么需要、结果会怎样</h3><table id="chk"></table><p class="sub">这些是程序能检查的必要条件；是否真的“知道”，还要请人走一遍流程，在每一步问三个问题（问法见下方）。</p><h3>信息出现的时机（B）</h3><table id="timing"></table><p class="sub">规则：限制条件在输入前就写出来，而不是等出错才告诉；为什么需要放在敏感字段旁边；结果在按钮上预告，完成后再确认一次。</p></div></div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>文案清单（B 版）：每条文案的使用场景</h2><table id="inv"></table></div>
+    <div style="display:grid;gap:6px">
+      <h2>观察时问的三个问题</h2><table><tr><th>问题</th><th>什么时候问</th><th>算“知道”的标准</th></tr><tr><td>这里要输入什么？</td><td>看到字段、还没输入时</td><td>能说出格式或限制，例如“11 位数字”</td></tr><tr><td>为什么需要它？</td><td>看到手机号、简历、学历、姓名时</td><td>能说出用途，以及谁能看到</td></tr><tr><td>点了之后会怎样？</td><td>手指放到按钮上、还没点时</td><td>能说出下一步或结果，例如“会生成学习计划”</td></tr></table>
+      <h3>观察记录（模板，每人每步一行）</h3><table><tr><th>参与者</th><th>步骤</th><th>输入什么</th><th>为什么需要</th><th>结果会怎样</th><th>原话</th></tr><tr><td>P01</td><td>2 资料上传</td><td>知道／不知道</td><td>知道／不知道</td><td>知道／不知道</td><td>“……”</td></tr></table>
+      <p class="sub">5—8 人即可发现主要问题。记录原话，例如“学历证明是必须的吗？”，比只记“不知道”更能指导修改。</p></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const MB = 1024 * 1024;
+const F = [
+  { id: 'phone', step: 0, need: ['what', 'why'], A: { label: '', ph: '请输入手机号' }, B: { label: '手机号', ph: '例如 13800000000', hint: '11 位数字。用于登录和接收课程提醒，不会公开。' }, ok: v => /^1\d{10}$/.test(v), bad: '1380000000', good: '13800000000',
+    err: { A: () => '手机号格式错误', B: v => `手机号应为 11 位数字，现在是 ${v.length} 位，请检查是否漏输。` } },
+  { id: 'code', step: 0, need: ['what'], A: { label: '验证码' }, B: { label: '验证码', hint: '6 位数字，5 分钟内有效。' }, ok: v => /^\d{6}$/.test(v), bad: '12345', good: '123456',
+    err: { A: () => '验证码错误', B: () => '验证码是 6 位数字。请核对短信，或 60 秒后重新发送。' } },
+  { id: 'pwd', step: 0, need: ['what'], A: { label: '密码' }, B: { label: '密码', hint: '至少 8 位，同时包含字母和数字。' }, ok: v => v.length >= 8 && /[a-z]/i.test(v) && /\d/.test(v), bad: 'abc123', good: 'abc12345',
+    err: { A: () => '密码格式错误', B: v => `密码至少 8 位，需要同时包含字母和数字；现在是 ${v.length} 位，请再补 ${Math.max(0, 8 - v.length)} 位。` } },
+  { id: 'resume', step: 1, file: true, need: ['what', 'why'], A: { label: '上传文件' }, B: { label: '简历', hint: 'PDF 或 Word，不超过 10 MB。用于为你推荐课程；只有在你投递岗位时，招聘方才能看到。' },
+    ok: f => f && f.size <= 10 * MB && /\.(pdf|docx?)$/i.test(f.name), bad: { name: '简历.pdf', size: 12.4 * MB }, good: { name: '简历.pdf', size: 1.8 * MB },
+    err: { A: () => '文件不合法', B: f => `这个文件有 ${(f.size / MB).toFixed(1)} MB，超过了 10 MB。可以重新导出为 PDF，或压缩其中的图片后再上传。` } },
+  { id: 'degree', step: 1, file: true, optional: true, need: ['why', 'optional'], A: { label: '学历证明' }, B: { label: '学历证明（可选）', hint: '用于结业证书上的学历信息。不上传也可以学习，证书上只显示姓名。' }, ok: () => true, bad: null, good: null },
+  { id: 'name', step: 1, need: ['why'], A: { label: '姓名' }, B: { label: '姓名', hint: '将印在结业证书上，请与证件一致。' }, ok: v => v.trim().length > 0, bad: '', good: '林晓',
+    err: { A: () => '不能为空', B: () => '姓名还没有填。它会印在结业证书上，请填写与证件一致的姓名。' } },
+  { id: 'hours', step: 2, need: ['what', 'why'], A: { label: '每周时间' }, B: { label: '每周可用时间（小时）', hint: '用来排学习计划，之后可以随时修改。' }, ok: v => +v >= 1 && +v <= 40, bad: '0', good: '8',
+    err: { A: () => '输入有误', B: () => '请填 1—40 之间的小时数。' } }
+];
+const STEPS = { A: ['下一步', '下一步', '提交'], B: ['注册并继续', '保存资料', '生成学习计划'] };
+const STEP_NAMES = ['1 注册', '2 资料上传', '3 课程选择'];
+const COURSES = { A: ['数据可视化入门', 'JavaScript 基础'], B: ['数据可视化入门 · 每周约 3 小时 · 11 月 3 日开课', 'JavaScript 基础 · 每周约 5 小时 · 随时开始'] };
+const DONE = { A: '提交成功', B: '已为你生成 12 周的学习计划，第一周从 11 月 3 日开始。可以在“我的计划”中随时调整。' };
+const state = { A: {}, B: {} }, log = { A: [], B: [] };
+function render(v) {
+  $(v).innerHTML = `<p class="ver">${v === 'A' ? 'A：原来的文案' : 'B：重写后的文案'}</p>` + STEP_NAMES.map((s, k) => `<form data-step="${k}" onsubmit="return false"><h4>${s}</h4>` +
+    F.filter(f => f.step === k).map(f => { const c = f[v]; return `<div class="f" id="${v}-${f.id}">${c.label ? `<label for="${v}-${f.id}-i">${c.label}</label>` : ''}` +
+      (f.file ? `<div class="file"><button class="alt" type="button">选择文件</button><span id="${v}-${f.id}-n">未选择</span></div>` : `<input id="${v}-${f.id}-i" ${c.ph ? `placeholder="${c.ph}"` : ''}>`) +
+      (c.hint ? `<div class="hint">${c.hint}</div>` : '') + `<div class="err" id="${v}-${f.id}-e"></div></div>`; }).join('') +
+    (k === 2 ? COURSES[v].map((c, i) => `<label class="course"><input type="checkbox" ${i ? '' : 'checked'}> ${c}</label>`).join('') : '') +
+    `<button id="${v}-s${k}">${STEPS[v][k]}</button><div id="${v}-d${k}"></div></form>`).join('');
+}
+function submit(v, k) {
+  let okAll = true;
+  for (const f of F.filter(f => f.step === k)) {
+    const val = f.file ? state[v][f.id] : $(`${v}-${f.id}-i`).value, ok = f.ok(val), el = $(`${v}-${f.id}`);
+    el.classList.toggle('bad', !ok); $(`${v}-${f.id}-e`).textContent = ok ? '' : f.err[v](val);
+    if (!ok) { okAll = false; log[v].push({ field: f.id, msg: f.err[v](val) }); }
+  }
+  if (okAll && k === 2) { $(`${v}-d${k}`).innerHTML = `<div class="done">${DONE[v]}</div>`; log[v].push({ field: 'done', msg: DONE[v] }); }
+  return okAll;
+}
+function fill(v, f, val) { if (f.file) { state[v][f.id] = val; $(`${v}-${f.id}-n`).textContent = val ? `${val.name}（${(val.size / MB).toFixed(1)} MB）` : '未选择'; } else $(`${v}-${f.id}-i`).value = val; }
+// ---------- 检查 ----------
+const GENERIC = ['确定', '好的', '提交', '下一步', '完成'];
+const CONSTRAINT = /(位|MB|PDF|Word|至少|例如|数字|小时)/, PURPOSE = /(用于|用来|将印在|会印在)/, FIX = /(请|可以|重新|核对)/, CAUSE = /(位|超过|MB|需要|至少|之间|没有)/;
+function visibleText(v, f) { const c = f[v]; return [c.label, c.hint].filter(Boolean).join(' '); }
+function check(v) {
+  const r = {};
+  r.label = F.filter(f => f[v].label).length;
+  const needWhat = F.filter(f => f.need.includes('what')); r.what = [needWhat.filter(f => CONSTRAINT.test(visibleText(v, f))).length, needWhat.length];
+  const needWhy = F.filter(f => f.need.includes('why')); r.why = [needWhy.filter(f => PURPOSE.test(visibleText(v, f))).length, needWhy.length];
+  r.optional = F.filter(f => f.optional && /可选/.test(f[v].label)).length;
+  r.buttons = [STEPS[v].filter(b => !GENERIC.includes(b)).length, 3];
+  const errs = log[v].filter(l => l.field !== 'done'); r.errs = [errs.filter(e => CAUSE.test(e.msg) && FIX.test(e.msg)).length, errs.length];
+  const done = log[v].find(l => l.field === 'done'); r.done = done ? /(开始|可以|调整|第一周)/.test(done.msg) : false;
+  return r;
+}
+render('A'); render('B');
+document.fonts.ready.then(() => {
+  for (const v of ['A', 'B']) {
+    for (const f of F) fill(v, f, f.bad);
+    submit(v, 0); submit(v, 1);
+    for (const f of F.filter(f => f.step === 2)) fill(v, f, f.good);
+    submit(v, 2);
+    for (const f of F.filter(f => f.step < 2)) fill(v, f, f.bad);   // 截图保留第 1、2 步的出错状态
+  }
+  const A = check('A'), B = check('B'), frac = ([a, b], ok) => `<span class="${a === b ? 'good' : a === 0 ? 'poor' : 'mid'}">${a}／${b}</span>`;
+  const rows = [
+    ['<span class="q">输入什么</span> 每个字段都有输入时不会消失的标签', [A.label, F.length], [B.label, F.length]],
+    ['<span class="q">输入什么</span> 有格式或限制的字段，输入前就能看到', A.what, B.what],
+    ['<span class="q">为什么需要</span> 敏感或可选的字段说明用途', A.why, B.why],
+    ['<span class="q">为什么需要</span> 可选的字段标明“可选”', [A.optional, 1], [B.optional, 1]],
+    ['<span class="q">结果会怎样</span> 按钮说出这一步的结果', A.buttons, B.buttons],
+    ['<span class="q">结果会怎样</span> 出错时说出原因与办法', A.errs, B.errs],
+    ['<span class="q">结果会怎样</span> 完成后说明结果与下一步', [+A.done, 1], [+B.done, 1]]
+  ];
+  $('chk').innerHTML = '<tr><th>检查</th><th>A</th><th>B</th></tr>' + rows.map(r => `<tr><td>${r[0]}</td><td class="num">${frac(r[1])}</td><td class="num">${frac(r[2])}</td></tr>`).join('');
+  $('timing').innerHTML = '<tr><th>时机</th><th>文案</th></tr>' + [['看到字段时', '格式与限制（11 位数字、PDF 或 Word 不超过 10 MB）'], ['看到敏感字段时', '为什么需要、谁能看到（招聘方只有在你投递时才能看到）'], ['按钮上', '这一步的结果（保存资料、生成学习计划）'], ['出错时', '原因与办法（现在是 10 位；压缩图片后再上传）'], ['完成后', '结果与下一步（12 周、11 月 3 日开始、可以调整）']].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('');
+  const INV = [['手机号的说明', F[0].B.hint, '第一次注册、还没输入时；担心号码被公开的人最需要'], ['密码的说明', F[2].B.hint, '设置密码前；避免提交后才知道规则'], ['密码的错误', F[2].err.B('abc123'), '提交后密码不符合规则；说出现在差在哪里'], ['简历的说明', F[3].B.hint, '选择文件前；担心简历被招聘方看到的人最需要'], ['简历的错误', F[3].err.B(F[3].bad), '选了过大的文件；给出能马上做的办法'], ['学历证明的说明', F[4].B.hint, '不确定要不要上传时；说明不上传的后果'], ['姓名的说明', F[5].B.hint, '填写姓名前；说明它会出现在哪里'], ['第 3 步按钮', STEPS.B[2], '选完课程、准备提交时；预告结果'], ['完成提示', DONE.B, '生成计划后；确认结果、时间与可以修改']];
+  $('inv').innerHTML = '<tr><th>位置</th><th>文案</th><th>使用场景</th></tr>' + INV.map(r => `<tr><td style="white-space:nowrap">${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('');
+  window.__fl = { A, B, errA: log.A.map(l => l.msg), errB: log.B.map(l => l.msg) };
+});
+</script>
+</body>
+</html>
