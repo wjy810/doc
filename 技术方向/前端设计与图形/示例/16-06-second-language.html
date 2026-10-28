@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>国际化项目：为学习工作台增加第二种语言</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: start; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  /* 工作台 */
+  .wb { border: 1px solid #c3c9d3; border-radius: 8px; overflow: hidden; font-size: 12px; display: grid; grid-template-columns: auto minmax(0, 1fr); min-height: 300px; }
+  .wb aside { background: #f3f5f8; padding: 8px; display: grid; gap: 2px; align-content: start; }
+  .wb aside a { color: #1d2330; text-decoration: none; padding: 2px 4px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  .wb aside a.on { background: #dfe7f6; }
+  .wb.v0 aside { width: 92px; } .wb.v1 aside { width: auto; min-width: 92px; max-width: 150px; } .wb.v1 aside a { white-space: normal; }
+  .wb main { padding: 8px; display: grid; gap: 6px; align-content: start; min-width: 0; }
+  .wb h4 { margin: 0; font-size: 14px; } .bar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .wb input, .wb select, .wb button { font: inherit; font-size: 11.5px; } .wb input { width: 110px; } .wb button { border: 1px solid #c3c9d3; background: #fff; border-radius: 4px; padding: 0 8px; }
+  .wb ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; } .wb li { display: flex; gap: 6px; align-items: baseline; border-bottom: 1px solid #eef0f3; padding-bottom: 2px; }
+  .wb li { flex-wrap: wrap; } .wb li .n { flex: 1 1 120px; min-width: 0; } .wb li .d { color: #5b6475; white-space: nowrap; }
+  .badge { display: inline-block; font-size: 10.5px; border-radius: 3px; padding: 0 4px; background: #eef3ff; color: #2456b0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wb.v0 .badge { width: 52px; }
+  .empty { color: #5b6475; background: #f6f7f9; border-radius: 6px; padding: 6px 8px; } .toast { background: #fbe4dd; color: #8a1c14; border-radius: 6px; padding: 4px 8px; }
+  .lab { font-size: 12px; font-weight: 700; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>学习任务工作台：中文、英文与伪本地化（修正后）</h2>
+  <p class="sub">每个面板由同一份代码、不同的语言资源渲染，并设置各自的 lang。测试脚本在每种语言中依次做：按名称排序、搜索一个不存在的词（看空状态）、触发一次保存失败（看错误提示）。界面文字与课程名称的译文为演示而写。</p>
+  <div class="three" id="panes"></div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>自动检查：修正前 → 修正后</h2><table id="chk"></table></div>
+    <div style="display:grid;gap:6px"><h2>修正前发现的具体问题</h2><table id="issues"></table><h3>还需要人来审查的</h3><table id="human"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const TODAY = new Date(2026, 9, 28);
+const TASKS = [['viz', 9, 'todo'], ['js', 3, 'review'], ['git', -2, 'late'], ['css', 14, 'todo'], ['a11y', 6, 'done'], ['data', 1, 'review']];
+const DICT = {
+  'zh-CN': { title: '我的学习任务', nav: ['全部任务', '本周到期', '最近完成'], search: '搜索任务', sortName: '按名称', sortDue: '按截止日期', count: { other: '共 {n} 项任务' }, empty: '没有找到与“{q}”匹配的任务。可以换个关键词，或者清除搜索。', clear: '清除搜索', err: '保存失败：{reason}。你的修改还在，可以重试。', reasons: { net: '网络连接中断' }, retry: '重试', export: '导出', status: { todo: '待开始', review: '等待批改', late: '已逾期', done: '已完成' }, saved: '最近保存：{date}',
+    names: { viz: '数据可视化入门', js: 'JavaScript 基础', git: 'Git 与协作', css: 'CSS 布局', a11y: '无障碍设计', data: '数据清洗' } },
+  en: { title: 'My learning tasks', nav: ['All tasks', 'Due this week', 'Recently completed'], search: 'Search tasks', sortName: 'By name', sortDue: 'By due date', count: { one: '{n} task', other: '{n} tasks' }, empty: 'No tasks match “{q}”. Try another keyword, or clear the search.', emptyV0: 'No assignments match “{q}”.', clear: 'Clear search', err: 'Could not save: {reason}. Your changes are still here—try again.', reasons: { net: 'the network connection was lost' }, retry: 'Retry', export: 'Export', status: { todo: 'Not started', review: 'Waiting for review', late: 'Overdue', done: 'Completed' }, saved: 'Last saved: {date}',
+    names: { viz: 'Intro to data visualization', js: 'JavaScript basics', git: 'Git and collaboration', css: 'CSS layout', a11y: 'Accessible design', data: 'Data cleaning' } }
+};
+const pseudo = s => typeof s === 'string' ? '[' + s.replace(/\{\w+\}|[a-z]/g, c => c.length > 1 ? c : ({ a: 'à', e: 'é', i: 'ï', o: 'ö', u: 'ü', c: 'ç', n: 'ñ', s: 'š', t: 'ŧ' })[c] || c) + ' ~~]' /* 占位符 {reason} 必须原样保留 */ : Array.isArray(s) ? s.map(pseudo) : Object.fromEntries(Object.entries(s).map(([k, v]) => [k, pseudo(v)]));
+DICT.pseudo = { ...pseudo(DICT.en), count: { one: '[{n} ŧàšķ ~~]', other: '[{n} ŧàšķš ~~]' } };
+const LOC = { 'zh-CN': 'zh-CN', en: 'en', pseudo: 'en' };
+const fill = (t, o) => t.replace(/\{(\w+)\}/g, (_, k) => o[k]);
+// v0：修正前的代码；v1：修正后
+function render(box, lang, v, state) {
+  const D = DICT[lang], L = LOC[lang], fixed = v === 1;
+  const plural = n => { const m = D.count, c = new Intl.PluralRules(L).select(n); return fill(m[c] || m.other, { n: new Intl.NumberFormat(L).format(n) }); };
+  const due = d => { const t = new Date(TODAY); t.setDate(t.getDate() + d); return t; };
+  const fmtDue = d => fixed ? `${new Intl.DateTimeFormat(L, { month: 'short', day: 'numeric' }).format(due(d))} · ${new Intl.RelativeTimeFormat(L, { numeric: 'auto' }).format(d, 'day')}` : `${due(d).getMonth() + 1}月${due(d).getDate()}日`;   // 修正前：写死中文日期
+  let rows = TASKS.map(([k, d, s]) => ({ k, d, s, name: D.names[k] }));
+  const q = state.q || '', norm = x => x.normalize('NFKC').toLowerCase();
+  rows = rows.filter(r => norm(r.name).includes(norm(q)));
+  rows.sort(state.sort === 'due' ? (a, b) => a.d - b.d : fixed ? (a, b) => new Intl.Collator(L).compare(a.name, b.name) : (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const savedDate = fixed ? new Intl.DateTimeFormat(L, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(2026, 9, 27, 21, 5)) : '10月27日 21:05';
+  box.innerHTML = `<div class="wb v${v}" lang="${lang === 'pseudo' ? 'en' : lang}"><aside>${D.nav.map((t, i) => `<a href="#" class="${i ? '' : 'on'}" title="${t}">${t}</a>`).join('')}</aside><main>
+    <h4>${D.title}</h4><div class="bar"><input placeholder="${D.search}" value="${q}" aria-label="${D.search}"><select aria-label="${D.sortName}"><option ${state.sort !== 'due' ? 'selected' : ''}>${D.sortName}</option><option ${state.sort === 'due' ? 'selected' : ''}>${D.sortDue}</option></select><button>${fixed ? D.export : '导出'}</button></div>
+    <div class="sub">${plural(rows.length)} · ${fill(D.saved, { date: savedDate })}</div>
+    ${rows.length ? `<ul>${rows.map(r => `<li><span class="n">${r.name}</span><span class="badge" title="${D.status[r.s]}">${D.status[r.s]}</span><span class="d" data-fmt>${fmtDue(r.d)}</span></li>`).join('')}</ul>` : `<div class="empty">${fill(fixed || !D.emptyV0 ? D.empty : D.emptyV0, { q })}${fixed ? ` <button>${D.clear}</button>` : ''}</div>`}
+    ${state.err ? `<div class="toast" role="alert">${fill(D.err, { reason: D.reasons.net })} <button>${D.retry}</button></div>` : ''}
+  </main></div>`;
+  return rows;
+}
+// ---------- 检查 ----------
+function check(v) {
+  const out = { overflow: [], hard: [], date: [], sort: [], empty: [], error: [], glossary: [], lang: [] };
+  for (const lang of ['zh-CN', 'en', 'pseudo']) {
+    const box = document.createElement('div'); box.style.width = '360px'; document.body.appendChild(box);
+    const L = LOC[lang], D = DICT[lang];
+    // 1 默认状态：溢出、写死的文字、日期、lang
+    render(box, lang, v, { sort: 'name' });
+    box.querySelectorAll('aside a, .badge, button').forEach(el => { if (el.scrollWidth > el.clientWidth + 1) out.overflow.push(`${lang}：“${el.textContent}”被截断`); });
+    const edge = box.firstElementChild.getBoundingClientRect().right;   // 超出工作台右边缘、被裁掉的元素
+    box.querySelectorAll('main *').forEach(el => { if (el.children.length === 0 && el.getBoundingClientRect().right > edge + 1) out.overflow.push(`${lang}：“${el.textContent.trim().slice(0, 24)}”超出右边缘`); });
+    if (lang !== 'zh-CN') { const w = document.createTreeWalker(box, NodeFilter.SHOW_TEXT); for (let n; (n = w.nextNode());) if (/[一-鿿]/.test(n.textContent)) out[/月|日/.test(n.textContent) ? 'date' : 'hard'].push(`${lang}：“${n.textContent.trim()}”`); }
+    if (lang === 'pseudo') { const w = document.createTreeWalker(box, NodeFilter.SHOW_TEXT); for (let n; (n = w.nextNode());) { const t = n.textContent.trim(); if (n.parentElement.closest('[data-fmt]')) continue;   /* Intl 格式化的日期不经过语言资源 */ if (t && /[A-Za-z]{3,}/.test(t) && !/\[.*~~\]/.test(t) && !/^[\d\s·:,]+$/.test(t)) out.hard.push(`pseudo：“${t}”没有经过语言资源`); } }
+    if (box.firstElementChild.getAttribute('lang') !== (lang === 'pseudo' ? 'en' : lang)) out.lang.push(lang);
+    // 2 排序：按名称时应与 Intl.Collator 一致
+    const names = [...box.querySelectorAll('li .n')].map(e => e.textContent), want = names.slice().sort(new Intl.Collator(L).compare);
+    if (names.join() !== want.join()) out.sort.push(`${lang}：${names.join('、')}（应为 ${want.join('、')}）`);
+    // 3 空状态
+    render(box, lang, v, { sort: 'name', q: 'zzz' });
+    const empty = box.querySelector('.empty');
+    if (!empty || !empty.textContent.includes('zzz') || !empty.querySelector('button')) out.empty.push(`${lang}：${empty ? `“${empty.textContent.trim()}”没有给出下一步` : '没有空状态'}`);
+    // 4 错误提示
+    render(box, lang, v, { sort: 'name', err: true });
+    const t = box.querySelector('.toast').textContent; if (/\{|\}/.test(t) || (lang !== 'zh-CN' && /[一-鿿]/.test(t))) out.error.push(`${lang}：“${t}”`);
+    // 5 术语：英文资源里“任务”统一译为 task
+    if (lang === 'en') { render(box, lang, v, { sort: 'name', q: 'zzz' }); if (/assignment/i.test(box.textContent)) out.glossary.push('en：空状态把“任务”译成了 assignment，其他地方是 task'); }
+    box.remove();
+  }
+  return out;
+}
+const before = check(0), after = check(1);
+// ---------- 显示（修正后） ----------
+const shown = {};
+for (const lang of ['zh-CN', 'en', 'pseudo']) { const d = document.createElement('div'); d.innerHTML = `<span class="lab">${{ 'zh-CN': '中文（zh-CN）', en: '英文（en）', pseudo: '伪本地化（基于英文）' }[lang]}</span>`; const b = document.createElement('div'); d.appendChild(b); $('panes').appendChild(d); shown[lang] = render(b, lang, 1, { sort: 'name', err: lang === 'en' }); }
+const ROWS = [['长文本被截断或被裁掉', 'overflow', '侧栏、状态标签与列表行改为可伸缩、可换行；内容列用 minmax(0, 1fr)'], ['写死在代码里的文字', 'hard', '“导出”等按钮文字移入语言资源'], ['写死的日期格式', 'date', '日期用 Intl.DateTimeFormat 与 RelativeTimeFormat'], ['排序不符合语言规则', 'sort', '按名称排序用 Intl.Collator(语言)'], ['空状态没有下一步', 'empty', '空状态说明原因，并提供“清除搜索”'], ['错误提示没有翻译或占位符未替换', 'error', '错误文字与原因都来自语言资源'], ['术语不一致', 'glossary', '按术语表统一为 task'], ['lang 属性不对', 'lang', '每个面板设置自己的 lang']];
+$('chk').innerHTML = '<tr><th>检查</th><th>修正前</th><th>修正后</th><th>怎样修正</th></tr>' + ROWS.map(([n, k, fix]) => `<tr><td>${n}</td><td class="num ${before[k].length ? 'poor' : 'good'}">${before[k].length} 处</td><td class="num ${after[k].length ? 'poor' : 'good'}">${after[k].length} 处</td><td>${fix}</td></tr>`).join('');
+$('issues').innerHTML = '<tr><th>检查</th><th>修正前的具体问题</th></tr>' + ROWS.filter(([, k]) => before[k].length).map(([n, k]) => `<tr><td>${n}</td><td>${before[k].slice(0, 4).join('<br>')}${before[k].length > 4 ? `<br>……共 ${before[k].length} 处` : ''}</td></tr>`).join('');
+$('human').innerHTML = '<tr><th>审查项</th><th>为什么程序查不出</th></tr>' + [['译文是否准确、自然', '“等待批改”译成 Waiting for review 还是 Awaiting grading，要看产品用词与读者'], ['语气是否一致', '中文用“你”，英文是否同样直接、友好'], ['页面结构是否适合', '英文更长时，列表的信息层级是否还清楚；阿拉伯文等从右到左的语言要整体镜像'], ['文化适配', '依据目标用户的研究与当地审校，不凭印象给一个群体贴标签']].map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
+window.__l2 = { before, after, shown: Object.fromEntries(Object.entries(shown).map(([k, v]) => [k, v.map(r => r.name)])) };
+</script>
+</body>
+</html>
