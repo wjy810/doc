@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>声音项目：带可选声音反馈的学习计时器</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .main { display: grid; grid-template-columns: 300px minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .timer { border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 8px; justify-items: center; }
+  .timer[data-state="warn"] { border-color: #e0a100; background: #fffbea; } .timer[data-state="done"] { border-color: #1f7a4d; background: #f1faf4; }
+  .status { font-size: 15px; font-weight: 700; display: flex; gap: 6px; align-items: center; }
+  .bar { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+  button { font: inherit; font-size: 12px; border: 1px solid #c3c9d3; background: #fff; border-radius: 16px; padding: 2px 12px; min-height: 30px; cursor: pointer; }
+  button.primary { background: #2456b0; color: #fff; border-color: #2456b0; }
+  .set { display: grid; gap: 2px; font-size: 12px; justify-self: stretch; } .set label { display: flex; gap: 6px; align-items: center; }
+  canvas { width: 100%; height: auto; display: block; border-radius: 6px; background: #fbfbfa; }
+  #live { font-size: 12px; background: #f6f7f9; border-radius: 6px; padding: 4px 8px; justify-self: stretch; min-height: 26px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>学习计时器：专注 25 分钟，休息 5 分钟</h2>
+  <p class="sub">计时按时钟时间计算（开始时刻 ＋ 已暂停的时长），不按定时器回调累加，所以标签页在后台被浏览器降频时也不会走慢。演示用“虚拟时钟”，测试脚本可以直接跳到任意时刻。</p>
+  <div class="main">
+    <div class="timer" id="timer" data-state="idle">
+      <svg viewBox="0 0 200 200" width="190" height="190" aria-hidden="true"><circle cx="100" cy="100" r="86" fill="none" stroke="#e3e7ec" stroke-width="14"/><circle id="ring" cx="100" cy="100" r="86" fill="none" stroke="#2456b0" stroke-width="14" stroke-linecap="round" transform="rotate(-90 100 100)" stroke-dasharray="540.35" stroke-dashoffset="0"/><text id="clock" x="100" y="108" text-anchor="middle" font-size="34" font-weight="700" fill="#1d2330">25:00</text><text id="phase" x="100" y="134" text-anchor="middle" font-size="13" fill="#5b6475">专注</text></svg>
+      <div class="status" id="status"><span id="icon">◯</span><span id="stext">准备开始</span></div>
+      <div class="bar"><button class="primary" id="go">开始</button><button id="pause">暂停</button><button id="reset">重置</button></div>
+      <div class="set"><label><input type="checkbox" id="snd" checked> 声音</label><label><input type="checkbox" id="tick"> 每分钟轻响一下</label><label><input type="checkbox" id="vib"> 振动（触屏设备默认打开）</label></div>
+      <div id="live" role="status" aria-live="polite"></div>
+    </div>
+    <div style="display:grid;gap:6px"><h3>每种声音的触发与作用</h3><table id="sounds"></table><h3>同时触发：没有规则 → 有规则</h3><canvas id="tl" width="760" height="300"></canvas><table id="conf"></table></div>
+    <div style="display:grid;gap:6px"><h3>关掉声音之后：每个事件还能怎样被知道</h3><table id="alt"></table><p class="m" id="mver"></p><table id="catch"></table><h3>混音的峰值（离线渲染第 25:00 前后 2 秒）</h3><table id="peak"></table><p class="m" id="mpeak"></p></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const MIN = 60000, FOCUS = 25 * MIN, BREAK = 5 * MIN;
+// 每种声音：触发、作用、时长、优先级（越大越重要）
+const SND = {
+  start: { name: '开始', when: '按下“开始”或休息开始', role: '确认操作已生效', dur: 0.25, pri: 2, f: [523, 784] },
+  tick: { name: '轻响', when: '每满一分钟（可选，默认关）', role: '不看屏幕也知道时间在走', dur: 0.08, pri: 1, f: [1500] },
+  warn: { name: '还剩一分钟', when: '专注或休息剩 1 分钟', role: '准备收尾', dur: 0.6, pri: 3, f: [880, 880] },
+  done: { name: '专注结束', when: '专注满 25 分钟', role: '提醒休息', dur: 1.2, pri: 4, f: [784, 659, 523] },
+  bend: { name: '休息结束', when: '休息满 5 分钟', role: '提醒回来', dur: 0.9, pri: 4, f: [523, 659, 784] },
+  pause: { name: '暂停／继续', when: '按下“暂停”或“继续”', role: '确认操作', dur: 0.1, pri: 2, f: [440] }
+};
+// ---------- 计时引擎：状态由时钟算出 ----------
+const E = { t0: null, paused: 0, pauseAt: null, now: 0, fired: new Set(), log: [], catchup: [] };
+const elapsed = () => E.t0 === null ? 0 : (E.pauseAt ?? E.now) - E.t0 - E.paused;
+function stateAt(ms) { if (E.t0 === null) return { phase: 'idle', left: FOCUS }; if (ms < FOCUS) return { phase: 'focus', left: FOCUS - ms }; if (ms < FOCUS + BREAK) return { phase: 'break', left: FOCUS + BREAK - ms }; return { phase: 'over', left: 0 }; }
+function eventsUpTo(ms, tickOn) {   // 到某个时刻为止应当发生的事件（按时间排序）
+  const ev = [['start', 0]];
+  if (tickOn) for (let m = 1; m < 30; m++) ev.push(['tick', m * MIN]);
+  ev.push(['warn', FOCUS - MIN], ['done', FOCUS], ['start', FOCUS], ['warn', FOCUS + BREAK - MIN], ['bend', FOCUS + BREAK]);
+  if (tickOn) ev.push(['tick', 30 * MIN]);
+  return ev.filter(e => e[1] <= ms).sort((a, b) => a[1] - b[1]);
+}
+// 同时触发的规则：高优先级的声音出现时，前后 1.5 秒内的低优先级声音不再播放；同一时刻只保留最重要的一个
+function policy(ev) {
+  return ev.filter(([k, t]) => !ev.some(([k2, t2]) => k2 !== k && SND[k2].pri > SND[k].pri && Math.abs(t2 - t) <= 1500));
+}
+// ---------- 静音时的替代：文字、颜色与图标、aria-live、页面标题、振动 ----------
+const ALT = {
+  start: { text: '专注中', icon: '▶', live: '开始专注，25 分钟', vib: [30] },
+  tick: { text: null, icon: null, live: null, vib: null, note: '进度环每分钟前进一格' },
+  warn: { text: '还剩 1 分钟', icon: '⏳', live: '还剩 1 分钟', vib: [60, 80, 60], state: 'warn' },
+  done: { text: '专注结束，休息一下', icon: '✓', live: '专注结束。休息 5 分钟', vib: [200, 100, 200], state: 'done' },
+  bend: { text: '休息结束', icon: '↺', live: '休息结束，可以开始下一轮', vib: [200, 100, 200], state: 'done' },
+  pause: { text: '已暂停', icon: '⏸', live: '已暂停', vib: [30] }
+};
+const fmt = ms => { const s = Math.ceil(ms / 1000); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
+let actx = null;
+function play(k) { if (!$('snd').checked) return; try { actx = actx || new AudioContext(); const t = actx.currentTime; SND[k].f.forEach((f, i) => { const o = actx.createOscillator(), g = actx.createGain(), d = SND[k].dur / SND[k].f.length; o.frequency.value = f; g.gain.setValueAtTime(0.2, t + i * d); g.gain.exponentialRampToValueAtTime(0.001, t + (i + 1) * d); o.connect(g); g.connect(actx.destination); o.start(t + i * d); o.stop(t + (i + 1) * d); }); } catch (_) {} }
+function announce(k, late = false) {
+  const a = ALT[k]; E.log.push({ k, at: fmt(elapsed()), sound: $('snd').checked && !late, late, live: a.live });
+  if (a.live) $('live').textContent = a.live;
+  if (a.text) { $('stext').textContent = a.text; $('icon').textContent = a.icon; }
+  if (a.state) $('timer').dataset.state = a.state; else if (k === 'start') $('timer').dataset.state = 'run';
+  if ($('vib').checked && a.vib && navigator.vibrate) navigator.vibrate(a.vib);
+}
+function update() {
+  const ms = elapsed(), s = stateAt(ms);
+  const due = E.t0 === null || E.pauseAt !== null ? [] : policy(eventsUpTo(ms, $('tick').checked)).filter(([k, t]) => !E.fired.has(k + t));   // 未开始或暂停时不触发
+  // 过期的事件（例如标签页在后台、刚回来）不补放声音，只把界面更新到最新状态
+  const fresh = due.filter(([, t]) => ms - t <= 2000), stale = due.filter(([, t]) => ms - t > 2000);
+  for (const [k, t] of stale) E.fired.add(k + t);
+  const lastStale = stale.filter(([k]) => k !== 'tick').at(-1);
+  if (stale.length) E.catchup.push({ at: fmt(ms), stale: stale.length, staleTicks: stale.filter(([k]) => k === 'tick').length, shown: lastStale ? SND[lastStale[0]].name : null });
+  if (lastStale) announce(lastStale[0], true);
+  for (const [k, t] of fresh) { E.fired.add(k + t); play(k); announce(k); }
+  $('clock').textContent = fmt(s.left); $('phase').textContent = { idle: '专注', focus: '专注', break: '休息', over: '结束' }[s.phase];
+  const total = s.phase === 'break' ? BREAK : FOCUS; $('ring').setAttribute('stroke-dashoffset', (540.35 * (1 - s.left / total)).toFixed(1)); $('ring').setAttribute('stroke', s.phase === 'break' ? '#1f7a4d' : '#2456b0');
+  document.title = s.phase === 'idle' ? '学习计时器' : `${fmt(s.left)} ${s.phase === 'break' ? '休息' : '专注'} · 学习计时器`;
+}
+$('go').onclick = () => { if (E.t0 === null) { E.t0 = E.now; update(); } else if (E.pauseAt !== null) { E.paused += E.now - E.pauseAt; E.pauseAt = null; play('pause'); $('pause').textContent = '暂停'; update(); } };
+$('pause').onclick = () => { if (E.t0 !== null && E.pauseAt === null) { E.pauseAt = E.now; play('pause'); announce('pause'); } };
+$('reset').onclick = () => { Object.assign(E, { t0: null, paused: 0, pauseAt: null, fired: new Set() }); $('stext').textContent = '准备开始'; $('icon').textContent = '◯'; $('timer').dataset.state = 'idle'; update(); };
+$('vib').checked = matchMedia('(pointer: coarse)').matches && 'vibrate' in navigator;
+const realStart = performance.now(); let virtual = null;
+setInterval(() => { E.now = virtual ?? performance.now() - realStart; update(); }, 250);
+// ---------- 表与检查 ----------
+$('sounds').innerHTML = '<tr><th>声音</th><th>什么时候响</th><th>作用</th><th>时长</th><th>优先级</th></tr>' + Object.values(SND).map(s => `<tr><td>${s.name}</td><td>${s.when}</td><td>${s.role}</td><td class="num">${s.dur} 秒</td><td class="num">${s.pri}</td></tr>`).join('');
+const all = eventsUpTo(31 * MIN, true), kept = policy(all);
+function overlaps(ev) { let pairs = 0, maxV = 0; const moments = new Set(); for (const [k, t] of ev) { const on = ev.filter(([k2, t2]) => t2 <= t && t2 + SND[k2].dur * 1000 > t); maxV = Math.max(maxV, on.length); if (on.length > 1) { pairs += on.length - 1; moments.add(fmt(t)); } } return { pairs, maxV, moments: [...moments] }; }
+const o0 = overlaps(all), o1 = overlaps(kept);
+$('conf').innerHTML = '<tr><th>测量（每分钟轻响打开，整轮 30 分钟）</th><th>没有规则</th><th>有规则</th></tr>' +
+  `<tr><td>声音总数</td><td class="num">${all.length}</td><td class="num">${kept.length}</td></tr>` +
+  `<tr><td>重叠的声音（对）</td><td class="num poor">${o0.pairs}</td><td class="num ${o1.pairs ? 'poor' : 'good'}">${o1.pairs}</td></tr>` +
+  `<tr><td>同时响起的最多个数</td><td class="num poor">${o0.maxV}</td><td class="num good">${o1.maxV}</td></tr>` +
+  `<tr><td>发生重叠的时刻</td><td>${o0.moments.join('、')}</td><td>${o1.moments.join('、') || '无'}</td></tr>` +
+  '<tr><td colspan="3" class="sub">规则：重要的声音出现时，前后 1.5 秒内不那么重要的声音不再播放。第 25:00 本来有“轻响”“专注结束”“开始（休息）”三个声音同时响，现在只保留“专注结束”。</td></tr>';
+// 时间轴：25:00 前后
+{ const cv = $('tl'), g = cv.getContext('2d'), W = cv.width, H = cv.height, x = t => 70 + (t - (FOCUS - 2 * MIN - 5000)) / (2 * MIN + 10000 + BREAK - 3 * MIN) * (W - 90);
+  g.font = '18px "Noto Sans SC"'; const rows = [['没有规则', all, 30], ['有规则', kept, 170]];
+  for (const [lab, ev, y0] of rows) { g.fillStyle = '#1d2330'; g.fillText(lab, 4, y0 + 18); let lane = 0;
+    ev.filter(([, t]) => t >= FOCUS - 2 * MIN - 5000 && t <= FOCUS + 2 * MIN).forEach(([k, t], i, arr) => { const same = arr.filter(([, t2]) => t2 === t).findIndex(e => e[0] === k); const yy = y0 + same * 34; g.fillStyle = { tick: '#8a93a3', warn: '#e0a100', done: '#1f7a4d', start: '#2f6fdb', bend: '#7b4fd6', pause: '#5b6475' }[k]; g.fillRect(x(t), yy, Math.max(6, SND[k].dur * 40 * (x(MIN) - x(0)) / 60), 26); g.fillStyle = '#1d2330'; g.fillText(SND[k].name, x(t) + 4, yy + 46 > y0 + 120 ? yy + 20 : yy + 20); }); }
+  g.fillStyle = '#5b6475'; g.fillText('条的长度 = 声音时长 × 40（否则太短看不见）', W - 400, 18); for (const m of [23, 24, 25, 26, 27]) { g.fillText(`${m}:00`, x(m * MIN) - 18, H - 4); g.strokeStyle = '#e3e7ec'; g.beginPath(); g.moveTo(x(m * MIN), 10); g.lineTo(x(m * MIN), H - 24); g.stroke(); } }
+// 静音时的替代
+$('alt').innerHTML = '<tr><th>事件</th><th>文字与图标</th><th>aria-live 读出</th><th>振动（毫秒）</th><th>页面标题</th></tr>' + Object.entries(ALT).filter(([k]) => k !== 'pause' || true).map(([k, a]) => `<tr><td>${SND[k].name}</td><td>${a.text ? `${a.icon} ${a.text}` : `<span class="sub">${a.note}</span>`}</td><td>${a.live || '—'}</td><td class="num">${a.vib ? a.vib.join('／') : '—'}</td><td>${k === 'tick' ? '每秒更新剩余时间' : '同时更新'}</td></tr>`).join('');
+// 离线渲染峰值
+async function peakAt(ev) {
+  const SR = 22050, ctx = new OfflineAudioContext(1, SR * 3, SR), T0 = FOCUS - 500;
+  for (const [k, t] of ev.filter(([, t]) => t >= T0 && t < T0 + 3000)) { const s = SND[k], base = (t - T0) / 1000; s.f.forEach((f, i) => { const o = ctx.createOscillator(), g2 = ctx.createGain(), d = s.dur / s.f.length; o.frequency.value = f; g2.gain.setValueAtTime(0.45, base + i * d); g2.gain.exponentialRampToValueAtTime(0.001, base + (i + 1) * d); o.connect(g2); g2.connect(ctx.destination); o.start(base + i * d); o.stop(base + (i + 1) * d); }); }
+  const d = (await ctx.startRendering()).getChannelData(0); let p = 0, clip = 0; for (const v of d) { p = Math.max(p, Math.abs(v)); if (Math.abs(v) > 1) clip++; } return { p, clip };
+}
+Promise.all([peakAt(all), peakAt(kept)]).then(([a, b]) => {
+  $('peak').innerHTML = '<tr><th>测量</th><th>没有规则</th><th>有规则</th></tr>' + `<tr><td>峰值振幅（1.0 为满刻度）</td><td class="num ${a.p > 1 ? 'poor' : ''}">${a.p.toFixed(2)}</td><td class="num ${b.p > 1 ? 'poor' : 'good'}">${b.p.toFixed(2)}</td></tr><tr><td>超过满刻度的采样（会削波失真）</td><td class="num ${a.clip ? 'poor' : 'good'}">${a.clip}</td><td class="num ${b.clip ? 'poor' : 'good'}">${b.clip}</td></tr>`;
+  $('mpeak').innerHTML = '三个声音叠在一起时，振幅相加超过满刻度，扬声器里听到的是失真的“噼啪”声；规则让同一时刻只响一个。';
+  window.__tm = { all: all.length, kept: kept.length, o0, o1, peak: [+a.p.toFixed(2), a.clip, +b.p.toFixed(2), b.clip], log: () => E.log, verify() { const L = E.log.filter(l => !l.sound), ok = L.filter(l => l.k === 'tick' || l.live), C = E.catchup; $('mver').innerHTML = `关掉声音运行一整轮：触发 ${L.length} 个事件（${[...new Set(L.map(l => SND[l.k].name))].join('、')}），<b class="${ok.length === L.length ? 'good' : 'poor'}">${ok.length}／${L.length}</b> 个有文字与 aria-live 消息（轻响由进度环代替）。`; $('catch').innerHTML = '<tr><th>从“后台”回来，跳到</th><th>过期事件（其中轻响）</th><th>没有规则：同时补放</th><th>现在</th></tr>' + C.map(c => `<tr><td class="num">${c.at}</td><td class="num">${c.stale}（${c.staleTicks}）</td><td class="num poor">${c.stale} 个声音</td><td>不补放声音，界面直接显示“${c.shown}”</td></tr>`).join(''); return { n: L.length, ok: ok.length, kinds: [...new Set(L.map(l => l.k))], catchup: C }; }, jump: ms => { virtual = ms; E.now = ms; update(); } };
+});
+</script>
+</body>
+</html>
