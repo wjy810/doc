@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>可视分析：筛选、趋势、分布与明细联动的数据工作台</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --blue: #2f6fdb; --red: #c0392b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { max-width: 1140px; display: grid; gap: 12px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: grid; gap: 6px; align-content: start; }
+  .row { display: grid; gap: 12px; } .r2 { grid-template-columns: 2fr 1fr; } .r3 { grid-template-columns: 1fr 1fr 1fr; }
+  h2 { font-size: 13.5px; margin: 0; } h3 { font-size: 12.5px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .chip { background: #eef3ff; color: #2456b0; border-radius: 12px; padding: 0 8px; font-size: 12px; cursor: pointer; }
+  .chip.none { background: #f1f2f4; color: var(--muted); cursor: default; }
+  .tabs button { font: inherit; font-size: 12px; border: 1px solid var(--line); background: #fff; border-radius: 4px; padding: 0 8px; cursor: pointer; }
+  .tabs button[aria-pressed="true"] { background: var(--ink); color: #fff; border-color: var(--ink); }
+  svg { display: block; width: 100%; height: auto; font: 10.5px "Noto Sans SC", sans-serif; }
+  .axis text { fill: #5b6475; } .axis path, .axis line { stroke: #c3c9d3; }
+  .hb rect.b { cursor: pointer; } .hb rect.b:hover { opacity: 0.8; }
+  .ok-badge { font-size: 12px; padding: 0 8px; border-radius: 4px; } .ok-badge.y { background: #eef7f1; color: #1f7a4d; } .ok-badge.n { background: #fbe4dd; color: #b3261e; }
+  .note { background: #fff8e6; border-radius: 6px; padding: 2px 8px; font-size: 12px; color: #7a4a00; }
+  tr.ref td { color: var(--red); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h2>课程销售与退款工作台（2026 年 1—12 月，数据为演示而构造）</h2>
+    <div class="bar"><span class="sub">当前筛选：</span><span id="chips"></span><span style="flex:1"></span><span class="sub">图形与原始数据核对：</span><span id="verify" class="ok-badge"></span></div>
+    <p class="note">分析任务：8 月的退款率为什么突然升高？找出主要来源，并在明细中找到证据。在趋势图上拖动可以选择月份；点击右下的条形可以按地区、渠道或课程筛选；点击上方的标签可以取消筛选。</p>
+  </div>
+  <div class="row r2">
+    <div class="card"><h3>趋势：每月报名人数（柱）与退款率（线）</h3><svg id="trend" viewBox="0 0 740 210"></svg></div>
+    <div class="card"><h3>异常与解释（按全部数据自动计算）</h3><div id="anom"></div></div>
+  </div>
+  <div class="row r3">
+    <div class="card"><div class="bar"><h3>分组退款率</h3><span class="tabs" id="tabs"></span></div><svg id="break" class="hb" viewBox="0 0 360 170"></svg></div>
+    <div class="card"><h3>分布：学习时长（退款与未退款）</h3><svg id="hist" viewBox="0 0 360 170"></svg><p class="sub" id="histNote"></p></div>
+    <div class="card"><h3>分析记录（每一步自动记下）</h3><table id="log"><tr><th>#</th><th>操作</th><th>看到的证据</th></tr></table></div>
+  </div>
+  <div class="card"><div class="bar"><h3>明细</h3><span class="sub" id="detailNote"></span></div><table id="detail"></table></div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+// ---------- 构造数据 ----------
+const REG = ['华东', '华南', '华北', '西部'], CH = ['自然', '广告', '合作'], CO = ['数据可视化入门', 'JavaScript 基础', '交互设计', '三维图形', '设计系统'];
+const REASONS = ['时间不够', '课程太难', '重复购买', '内容与广告不符'];
+const r = rng(2026), pick = (a, w) => { let x = r() * w.reduce((s, v) => s + v, 0); for (let i = 0; i < a.length; i++) { x -= w[i]; if (x < 0) return a[i]; } return a.at(-1); };
+const ROWS = [];
+let id = 1;
+for (let m = 1; m <= 12; m++) {
+  const n = Math.round(170 + 40 * Math.sin(m / 2) + 30 * r());
+  for (let k = 0; k < n; k++) {
+    const refunded = r() < 0.04, row = { id: id++, m, day: 1 + Math.floor(r() * 28), region: pick(REG, [4, 3, 3, 2]), channel: pick(CH, [5, 3, 2]), course: pick(CO, [3, 3, 2, 1, 1]), refunded };
+    row.hours = +(refunded ? r() * 3 : Math.exp(Math.log(6) + 0.6 * (r() + r() + r() - 1.5))).toFixed(1);
+    row.reason = refunded ? pick(REASONS, [4, 3, 2, 0.3]) : '';
+    ROWS.push(row);
+  }
+}
+for (let k = 0; k < 70; k++) {   // 8 月：华南的一组广告把“数据可视化入门”说成“零基础两周转行”
+  const refunded = r() < 0.7;
+  ROWS.push({ id: id++, m: 8, day: 10 + Math.floor(r() * 15), region: '华南', channel: '广告', course: '数据可视化入门', refunded, hours: +(refunded ? r() * 1.5 : 2 + r() * 8).toFixed(1), reason: refunded ? pick(REASONS, [1, 2, 0.5, 12]) : '' });
+}
+// ---------- 状态与筛选 ----------
+const S = { months: null, region: null, channel: null, course: null }, DIMS = { region: ['地区', REG], channel: ['渠道', CH], course: ['课程', CO] };
+let dim = 'region';
+const pass = (row, skip) => (skip === 'months' || !S.months || (row.m >= S.months[0] && row.m <= S.months[1])) && Object.keys(DIMS).every(k => k === skip || !S[k] || row[k] === S[k]);
+const rows = skip => ROWS.filter(row => pass(row, skip));
+const LOG = [];
+function log(op, ev) { LOG.push([op, ev]); $('log').innerHTML = '<tr><th>#</th><th>操作</th><th>看到的证据</th></tr>' + LOG.map((l, i) => `<tr><td>${i + 1}</td><td>${l[0]}</td><td>${l[1]}</td></tr>`).join(''); }
+const pct = v => (100 * v).toFixed(1) + '%';
+// ---------- 趋势 + 刷选 ----------
+const T = { w: 740, h: 210, m: { t: 10, r: 44, b: 24, l: 40 } };
+const tx = d3.scaleBand(d3.range(1, 13), [T.m.l, T.w - T.m.r]).padding(0.15);
+const tsvg = d3.select('#trend');
+const tg = tsvg.append('g'), tline = tsvg.append('path').attr('fill', 'none').attr('stroke', 'var(--red)').attr('stroke-width', 2), tdots = tsvg.append('g');
+const tyA = tsvg.append('g').attr('class', 'axis').attr('transform', `translate(${T.m.l},0)`), tyB = tsvg.append('g').attr('class', 'axis').attr('transform', `translate(${T.w - T.m.r},0)`);
+tsvg.append('g').attr('class', 'axis').attr('transform', `translate(0,${T.h - T.m.b})`).call(d3.axisBottom(tx).tickFormat(m => m + ' 月'));
+const brush = d3.brushX().extent([[T.m.l, T.m.t], [T.w - T.m.r, T.h - T.m.b]]).on('end', ev => {
+  if (!ev.sourceEvent) return;
+  if (!ev.selection) { S.months = null; draw(); return; }
+  const [x0, x1] = ev.selection, ms = tx.domain().filter(m => tx(m) + tx.bandwidth() > x0 && tx(m) < x1);
+  S.months = ms.length ? [ms[0], ms.at(-1)] : null;
+  tsvg.select('.brush').call(brush.move, S.months ? [tx(S.months[0]), tx(S.months[1]) + tx.bandwidth()] : null);   // 吸附到整月
+  draw(); if (!S.months) return; const sel = rows(); log(`在趋势图上选择 ${S.months[0] === S.months[1] ? S.months[0] + ' 月' : S.months.join('—') + ' 月'}`, `${sel.length} 笔报名，退款率 ${pct(d3.mean(sel, d => d.refunded))}`);
+});
+tsvg.append('g').attr('class', 'brush').call(brush);
+function drawTrend() {
+  const data = d3.range(1, 13).map(m => { const rs = rows('months').filter(d => d.m === m); return { m, n: rs.length, rate: rs.length ? d3.mean(rs, d => d.refunded) : 0 }; });
+  const yA = d3.scaleLinear([0, d3.max(data, d => d.n) || 1], [T.h - T.m.b, T.m.t]).nice(), yB = d3.scaleLinear([0, Math.max(0.2, d3.max(data, d => d.rate))], [T.h - T.m.b, T.m.t]).nice();
+  tg.selectAll('rect').data(data, d => d.m).join('rect').attr('x', d => tx(d.m)).attr('width', tx.bandwidth()).attr('y', d => yA(d.n)).attr('height', d => yA(0) - yA(d.n))
+    .attr('fill', d => !S.months || (d.m >= S.months[0] && d.m <= S.months[1]) ? '#9db7e8' : '#e3e8f0');
+  tline.attr('d', d3.line().x(d => tx(d.m) + tx.bandwidth() / 2).y(d => yB(d.rate))(data));
+  tdots.selectAll('circle').data(data).join('circle').attr('cx', d => tx(d.m) + tx.bandwidth() / 2).attr('cy', d => yB(d.rate)).attr('r', 3).attr('fill', 'var(--red)');
+  tyA.call(d3.axisLeft(yA).ticks(4)); tyB.call(d3.axisRight(yB).ticks(4, '.0%'));
+  return { data, yA };
+}
+// ---------- 分组条形（点击筛选） ----------
+$('tabs').innerHTML = Object.entries(DIMS).map(([k, [n]]) => `<button data-k="${k}" aria-pressed="${k === dim}">${n}</button>`).join('');
+$('tabs').onclick = e => { const k = e.target.dataset.k; if (!k) return; dim = k; $('tabs').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.k === dim)); draw(); log(`按${DIMS[k][0]}分组`, topText()); };
+const B = { w: 360, h: 170, m: { t: 4, r: 96, b: 18, l: 96 } };
+const bsvg = d3.select('#break'), bg = bsvg.append('g'), bxAxis = bsvg.append('g').attr('class', 'axis').attr('transform', `translate(0,${B.h - B.m.b})`);
+function breakdown() { const rs = rows(dim); return DIMS[dim][1].map(v => { const g = rs.filter(d => d[dim] === v); return { v, n: g.length, k: d3.sum(g, d => d.refunded), rate: g.length ? d3.mean(g, d => d.refunded) : 0 }; }); }
+function topText() { const b = breakdown().slice().sort((a, c) => c.rate - a.rate); return `${b[0].v} 最高：${pct(b[0].rate)}（${b[0].k}／${b[0].n}），其次 ${b[1].v} ${pct(b[1].rate)}`; }
+function drawBreak() {
+  const data = breakdown(), y = d3.scaleBand(data.map(d => d.v), [B.m.t, B.h - B.m.b]).padding(0.25), x = d3.scaleLinear([0, Math.max(0.2, d3.max(data, d => d.rate))], [B.m.l, B.w - B.m.r]).nice();
+  const g = bg.selectAll('g.row').data(data, d => d.v).join(e => { const g = e.append('g').attr('class', 'row'); g.append('text').attr('class', 'lab'); g.append('rect').attr('class', 'b'); g.append('text').attr('class', 'val'); return g; });
+  g.select('.lab').attr('x', B.m.l - 6).attr('y', d => y(d.v) + y.bandwidth() / 2 + 4).attr('text-anchor', 'end').attr('fill', d => S[dim] && S[dim] !== d.v ? '#a7adb7' : '#1d2330').text(d => d.v);
+  g.select('.b').attr('x', B.m.l).attr('y', d => y(d.v)).attr('height', y.bandwidth()).attr('width', d => x(d.rate) - B.m.l).attr('fill', d => S[dim] === d.v ? 'var(--red)' : S[dim] ? '#e9c3be' : '#e08a7e')
+    .on('click', (ev, d) => { S[dim] = S[dim] === d.v ? null : d.v; draw(); if (S[dim]) log(`点击“${d.v}”，只看这一组`, `${rows().length} 笔，退款 ${d3.sum(rows(), x => x.refunded)} 笔`); });
+  g.select('.val').attr('x', d => x(d.rate) + 4).attr('y', d => y(d.v) + y.bandwidth() / 2 + 4).attr('fill', '#5b6475').text(d => `${pct(d.rate)}（${d.k}／${d.n}）`);
+  bxAxis.call(d3.axisBottom(x).ticks(4, '.0%'));
+  return data;
+}
+// ---------- 分布 ----------
+const Hh = { w: 360, h: 170, m: { t: 8, r: 16, b: 22, l: 32 } };
+const hsvg = d3.select('#hist'), hg = hsvg.append('g'), hxA = hsvg.append('g').attr('class', 'axis').attr('transform', `translate(0,${Hh.h - Hh.m.b})`), hyA = hsvg.append('g').attr('class', 'axis').attr('transform', `translate(${Hh.m.l},0)`);
+const hx = d3.scaleLinear([0, 16], [Hh.m.l, Hh.w - Hh.m.r]);
+hxA.call(d3.axisBottom(hx).ticks(8).tickFormat(d => d + ' 时'));
+function drawHist() {
+  const rs = rows(), bin = d3.bin().domain([0, 16]).thresholds(d3.range(0, 16, 1)).value(d => Math.min(d.hours, 15.99));
+  const a = bin(rs.filter(d => !d.refunded)), b = bin(rs.filter(d => d.refunded)), y = d3.scaleLinear([0, d3.max([...a, ...b], d => d.length) || 1], [Hh.h - Hh.m.b, Hh.m.t]).nice();
+  const w = (hx(1) - hx(0)) / 2 - 1;
+  hg.selectAll('rect.a').data(a).join('rect').attr('class', 'a').attr('x', d => hx(d.x0) + 1).attr('width', w).attr('y', d => y(d.length)).attr('height', d => y(0) - y(d.length)).attr('fill', '#9db7e8');
+  hg.selectAll('rect.r').data(b).join('rect').attr('class', 'r').attr('x', d => hx(d.x0) + 1 + w).attr('width', w).attr('y', d => y(d.length)).attr('height', d => y(0) - y(d.length)).attr('fill', 'var(--red)');
+  hyA.call(d3.axisLeft(y).ticks(4));
+  const ref = rs.filter(d => d.refunded), keep = rs.filter(d => !d.refunded);
+  $('histNote').innerHTML = `蓝：未退款 ${keep.length} 笔，学习时长中位数 ${keep.length ? d3.median(keep, d => d.hours).toFixed(1) : '—'} 小时；红：退款 ${ref.length} 笔，中位数 ${ref.length ? d3.median(ref, d => d.hours).toFixed(1) : '—'} 小时`;
+  return { a, b };
+}
+// ---------- 明细 ----------
+function drawDetail() {
+  const rs = rows().slice().sort((a, b) => (b.refunded - a.refunded) || (a.m - b.m) || (a.day - b.day));
+  $('detailNote').textContent = `共 ${rs.length} 笔（退款 ${d3.sum(rs, d => d.refunded)} 笔），按“退款在前、日期”排序，显示前 8 笔`;
+  $('detail').innerHTML = '<tr><th>编号</th><th>日期</th><th>地区</th><th>渠道</th><th>课程</th><th>学习时长</th><th>退款</th><th>退款原因（学员填写）</th></tr>' + rs.slice(0, 8).map(d => `<tr class="${d.refunded ? 'ref' : ''}"><td class="num">#${d.id}</td><td class="num">2026-${String(d.m).padStart(2, '0')}-${String(d.day).padStart(2, '0')}</td><td>${d.region}</td><td>${d.channel}</td><td>${d.course}</td><td class="num">${d.hours} 小时</td><td>${d.refunded ? '是' : '否'}</td><td>${d.reason}</td></tr>`).join('');
+  return rs;
+}
+// ---------- 异常与解释（不受筛选影响） ----------
+function anomaly() {
+  const by = d3.range(1, 13).map(m => { const rs = ROWS.filter(d => d.m === m); return { m, n: rs.length, k: d3.sum(rs, d => d.refunded), rate: d3.mean(rs, d => d.refunded) }; });
+  const med = d3.median(by, d => d.rate), mad = d3.median(by, d => Math.abs(d.rate - med)) * 1.4826;
+  by.forEach(d => d.z = (d.rate - med) / mad);
+  const top = by.slice().sort((a, b) => b.z - a.z)[0], others = by.filter(d => d !== top), base = d3.sum(others, d => d.k) / d3.sum(others, d => d.n);
+  const rs = ROWS.filter(d => d.m === top.m), excess = top.k - base * top.n;
+  const combos = d3.flatRollup(rs, g => ({ n: g.length, k: d3.sum(g, d => d.refunded) }), d => d.region, d => d.channel, d => d.course).map(([a, b, c, v]) => ({ key: `${a} × ${b} × ${c}`, ...v, ex: v.k - base * v.n })).sort((a, b) => b.ex - a.ex);
+  $('anom').innerHTML = `<table><tr><th>月份</th><th>退款率</th><th>稳健 z 值</th></tr>${by.filter(d => d.z > 2 || d === top).map(d => `<tr><td>${d.m} 月</td><td class="num">${pct(d.rate)}（${d.k}／${d.n}）</td><td class="num poor">${d.z.toFixed(1)}</td></tr>`).join('')}</table>
+    <p class="sub">其他月份合计退款率 ${pct(base)}。按这个比例，${top.m} 月应有约 ${(base * top.n).toFixed(0)} 笔退款，实际 ${top.k} 笔，多出 ${excess.toFixed(0)} 笔。多出的退款来自：</p>
+    <table><tr><th>地区 × 渠道 × 课程</th><th>报名</th><th>退款</th><th>占多出的</th></tr>${combos.slice(0, 3).map(c => `<tr><td>${c.key}</td><td class="num">${c.n}</td><td class="num">${c.k}</td><td class="num ${c.ex / excess > 0.5 ? 'poor' : ''}">${pct(c.ex / excess)}</td></tr>`).join('')}</table>
+    <p class="sub">超过 100% 是因为其他组合的退款比按比例预期的还少。${by.filter(d => d !== top && d.z > 3).map(d => `${d.m} 月的 z 值 ${d.z.toFixed(1)} 也超过了常用阈值 3，但只比预期多 ${(d.k - base * d.n).toFixed(0)} 笔，可能只是波动：阈值要结合数量判断。`).join('')}这只是“从哪里来”的线索，不是“为什么”的结论：原因要回到明细与业务记录中核实。</p>`;
+  return { top, base, excess, combos: combos.slice(0, 3), med, mad };
+}
+// ---------- 核对：图形上的数字与原始数据一致 ----------
+function verify(tr, br, hs, dt) {
+  const fails = []; let n = 0;
+  const check = (ok, what) => { n++; if (!ok) fails.push(what); };
+  // 1 趋势：每根柱子绑定的数、柱高与逐行重新数出的结果一致
+  tg.selectAll('rect').each(function (d) { let c = 0; for (const row of ROWS) if (row.m === d.m && pass(row, 'months')) c++; check(c === d.n, `${d.m} 月柱子的数`); check(Math.abs(+this.getAttribute('height') - (tr.yA(0) - tr.yA(c))) < 0.5, `${d.m} 月柱高`); });
+  // 2 选中月份的柱子之和 = 明细条数
+  const sumSel = d3.sum(tr.data.filter(d => !S.months || (d.m >= S.months[0] && d.m <= S.months[1])), d => d.n); check(sumSel === dt.length, '选中月份之和与明细条数');
+  // 3 分组条形：选中组（或全部组之和）= 明细条数；每组退款数逐行核对
+  const brSum = S[dim] ? br.find(d => d.v === S[dim]).n : d3.sum(br, d => d.n); check(brSum === dt.length, '分组条形与明细条数');
+  for (const d of br) { let k = 0; for (const row of ROWS) if (row[dim] === d.v && pass(row, dim) && row.refunded) k++; check(k === d.k, `${d.v} 的退款数`); }
+  // 4 直方图的总数 = 明细条数
+  check(d3.sum(hs.a, b => b.length) + d3.sum(hs.b, b => b.length) === dt.length, '直方图总数与明细条数');
+  $('verify').className = 'ok-badge ' + (fails.length ? 'n' : 'y'); $('verify').textContent = fails.length ? `${fails.length}／${n} 项不一致：${fails[0]}` : `${n} 项全部一致`;
+  return { n, fails };
+}
+function draw() {
+  const chips = [S.months && ['months', S.months[0] === S.months[1] ? `${S.months[0]} 月` : `${S.months[0]}—${S.months[1]} 月`], ...Object.keys(DIMS).map(k => S[k] && [k, S[k]])].filter(Boolean);
+  $('chips').innerHTML = chips.length ? chips.map(([k, t]) => `<span class="chip" data-k="${k}">${t} ×</span> `).join('') : '<span class="chip none">全部数据</span>';
+  const tr = drawTrend(), br = drawBreak(), hs = drawHist(), dt = drawDetail();
+  window.__wbLast = verify(tr, br, hs, dt);
+}
+$('chips').onclick = e => { const k = e.target.dataset.k; if (!k) return; S[k] = null; if (k === 'months') tsvg.select('.brush').call(brush.move, null); draw(); };
+document.fonts.ready.then(() => {
+  const an = anomaly(); draw();
+  log('打开工作台，看趋势图', `8 月退款率 ${pct(an.top.rate)}，其他月份合计 ${pct(an.base)}`);
+  window.__wb = { an: { m: an.top.m, rate: +(100 * an.top.rate).toFixed(1), k: an.top.k, n: an.top.n, z: +an.top.z.toFixed(1), base: +(100 * an.base).toFixed(1), excess: +an.excess.toFixed(1), combos: an.combos.map(c => [c.key, c.n, c.k, +(100 * c.ex / an.excess).toFixed(0)]) },
+    monthX: m => { const box = $('trend').getBoundingClientRect(), s = box.width / 740; return [box.left + s * tx(m), box.left + s * (tx(m) + tx.bandwidth()), box.top + s * 100]; },
+    barXY: v => { const n = [...document.querySelectorAll('#break rect.b')].find(e => d3.select(e).datum().v === v).getBoundingClientRect(); return [n.left + n.width / 2, n.top + n.height / 2]; },
+    state: () => ({ S: { ...S }, dim, verify: window.__wbLast, log: LOG, detail: rows().length, refunds: d3.sum(rows(), d => d.refunded), reasons: d3.rollups(rows().filter(d => d.refunded), g => g.length, d => d.reason), total: ROWS.length }) };
+});
+</script>
+</body>
+</html>
