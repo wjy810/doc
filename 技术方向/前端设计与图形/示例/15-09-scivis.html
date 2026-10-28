@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>科学可视化：函数、向量、流场、体数据、时间演变与不确定性</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 1140px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: grid; gap: 6px; align-content: start; }
+  h2 { font-size: 13.5px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  svg { display: block; width: 100%; height: auto; font: 10px "Noto Sans SC", sans-serif; }
+  .axis text { fill: #5b6475; } .axis path, .axis line { stroke: #c3c9d3; }
+  canvas { display: block; width: 100%; height: auto; border-radius: 4px; image-rendering: auto; }
+  .row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; } .row3 figure, .row2 figure { margin: 0; } figcaption { font-size: 11px; color: var(--muted); }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .tag { display: inline-block; font-size: 10.5px; padding: 0 5px; border-radius: 3px; margin-right: 3px; }
+  .tag.real { background: #eef7f1; color: #1f7a4d; } .tag.approx { background: #fff4e0; color: #8a5300; } .tag.ill { background: #f1f2f4; color: #5b6475; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="card"><h2>1 函数：采样决定你看到什么</h2><svg id="fn" viewBox="0 0 340 170"></svg><p class="m" id="mfn"></p></div>
+  <div class="card"><h2>2 向量与流场：箭头、流线与数值积分</h2><canvas id="flow" width="680" height="340"></canvas><p class="m" id="mflow"></p></div>
+  <div class="card"><h2>3 体数据：切片与最大强度投影</h2><div class="row3" id="vol"></div><p class="m" id="mvol"></p></div>
+  <div class="card"><h2>4 颜色映射：彩虹色与 viridis</h2><div class="row2" id="cmap"></div><svg id="lum" viewBox="0 0 340 116"></svg><p class="m" id="mcm"></p></div>
+  <div class="card"><h2>5 时间演变与不确定性：热扩散</h2><svg id="heat" viewBox="0 0 340 170"></svg><p class="m" id="mheat"></p></div>
+  <div class="card"><h2>6 坐标、单位、假设，以及哪些是真实计算</h2><table id="meta"></table><p class="sub"><span class="tag real">真实计算</span>由方程或数据算出　<span class="tag approx">近似模型</span>有已知误差的简化　<span class="tag ill">仅用于示意</span>帮助理解、不能读数</p></div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const R = {};
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const lin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+function oklab([r, g, b]) { [r, g, b] = [r, g, b].map(lin); const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b), m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b), s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b); return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s, 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s]; }
+const rgb = c => { const o = d3.rgb(c); return [o.r, o.g, o.b]; };
+
+// ---------- 1 函数采样 ----------
+{ const f = x => Math.exp(-x / 5) * Math.sin(x) + 0.6 * Math.exp(-(((x - 6.3) / 0.15) ** 2));
+  const W = 340, H = 170, M = { t: 8, r: 8, b: 20, l: 28 }, x = d3.scaleLinear([0, 10], [M.l, W - M.r]), y = d3.scaleLinear([-0.8, 1.2], [H - M.b, M.t]);
+  const uni = d3.range(41).map(i => [i * 0.25, f(i * 0.25)]);
+  const ada = []; const TOL = 0.5;   // 像素：中点偏离直线超过半个像素就继续细分
+  (function sub(a, b, fa, fb, d) { const m = (a + b) / 2, fm = f(m); if (d < 14 && (d < 4 || Math.abs(y(fm) - (y(fa) + y(fb)) / 2) > TOL)) { sub(a, m, fa, fm, d + 1); sub(m, b, fm, fb, d + 1); } else ada.push([a, fa]); })(0, 10, f(0), f(10), 0); ada.push([10, f(10)]);
+  const err = pts => d3.max(d3.range(5001), i => { const t = i * 0.002, k = d3.bisector(p => p[0]).right(pts, t) - 1, [x0, y0] = pts[Math.max(0, k)], [x1, y1] = pts[Math.min(pts.length - 1, k + 1)], v = x1 === x0 ? y0 : y0 + (y1 - y0) * (t - x0) / (x1 - x0); return Math.abs(v - f(t)); });
+  const svg = d3.select('#fn'), line = d3.line().x(d => x(d[0])).y(d => y(d[1]));
+  svg.append('path').attr('d', line(uni)).attr('fill', 'none').attr('stroke', '#c0392b').attr('stroke-width', 1.5);
+  svg.append('path').attr('d', line(ada)).attr('fill', 'none').attr('stroke', '#2f6fdb').attr('stroke-width', 1.2).attr('stroke-dasharray', '3 2');
+  svg.append('g').attr('class', 'axis').attr('transform', `translate(0,${H - M.b})`).call(d3.axisBottom(x).ticks(5)); svg.append('g').attr('class', 'axis').attr('transform', `translate(${M.l},0)`).call(d3.axisLeft(y).ticks(4));
+  svg.append('text').attr('x', x(6.5)).attr('y', y(0.95)).attr('fill', '#5b6475').text('窄峰（宽 0.15）');
+  svg.append('text').attr('x', x(6.6)).attr('y', y(-0.45)).attr('fill', '#c0392b').text('等距 41 点');
+  svg.append('text').attr('x', x(6.6)).attr('y', y(-0.62)).attr('fill', '#2f6fdb').text('自适应 52 点（虚线）');
+  const near = pts => d3.max(pts.filter(p => p[0] >= 6 && p[0] <= 6.6), p => p[1]);
+  R.fn = { uni: uni.length, ada: ada.length, eu: err(uni), ea: err(ada), peakU: near(uni), peakA: near(ada), peak: f(6.3) };
+  $('mfn').innerHTML = `红线：等距取 ${R.fn.uni} 个点，最大误差 <b class="poor">${R.fn.eu.toFixed(3)}</b>，窄峰只画到 ${R.fn.peakU.toFixed(2)}（真值 ${R.fn.peak.toFixed(2)}）。蓝色虚线：自适应细分（中点偏离超过 0.5 像素就继续分），${R.fn.ada} 个点，最大误差 ${R.fn.ea.toFixed(4)}，峰高 ${R.fn.peakA.toFixed(2)}。点数差不多，差别在于点放在哪里。`;
+}
+
+// ---------- 2 向量与流场（双涡旋场） ----------
+{ const A = 0.1, u = (px, py) => [-Math.PI * A * Math.sin(Math.PI * px) * Math.cos(Math.PI * py), Math.PI * A * Math.cos(Math.PI * px) * Math.sin(Math.PI * py)];
+  const cv = $('flow'), g = cv.getContext('2d'), W = cv.width, H = cv.height, sx = W / 2, sy = H / 1, P = (px, py) => [px * sx, H - py * sy];
+  const img = g.createImageData(W, H), vmax = Math.PI * A;
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) { const [a, b] = u(i / sx, (H - j) / sy), c = d3.rgb(d3.interpolateViridis(Math.hypot(a, b) / vmax)), k = 4 * (j * W + i); img.data[k] = c.r; img.data[k + 1] = c.g; img.data[k + 2] = c.b; img.data[k + 3] = 110; }
+  g.putImageData(img, 0, 0);
+  const rk4 = (p, h) => { const k1 = u(...p), k2 = u(p[0] + h / 2 * k1[0], p[1] + h / 2 * k1[1]), k3 = u(p[0] + h / 2 * k2[0], p[1] + h / 2 * k2[1]), k4 = u(p[0] + h * k3[0], p[1] + h * k3[1]); return [p[0] + h / 6 * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0]), p[1] + h / 6 * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1])]; };
+  g.strokeStyle = '#1d2330'; g.lineWidth = 1.4; let segs = 0;
+  for (let i = 0; i < 8; i++) for (let j = 0; j < 4; j++) for (const dir of [1, -1]) {   // 流线：从 8 × 4 个种子点向前、向后积分
+    let p = [(i + 0.5) / 4, (j + 0.5) / 4]; g.beginPath(); g.moveTo(...P(...p));
+    for (let s = 0; s < 400; s++) { p = rk4(p, dir * 0.05); if (p[0] < 0 || p[0] > 2 || p[1] < 0 || p[1] > 1) break; g.lineTo(...P(...p)); segs++; }
+    g.stroke();
+  }
+  g.fillStyle = '#c0392b';
+  for (let i = 0; i < 16; i++) for (let j = 0; j < 8; j++) {   // 箭头：长度按速度缩放
+    const px = (i + 0.5) / 8, py = (j + 0.5) / 8, [a, b] = u(px, py), L = 26 * Math.hypot(a, b) / vmax, ang = Math.atan2(-b, a), [cx, cy] = P(px, py);
+    g.save(); g.translate(cx, cy); g.rotate(ang); g.fillRect(-L / 2, -1, L, 2); g.beginPath(); g.moveTo(L / 2 + 4, 0); g.lineTo(L / 2 - 2, -4); g.lineTo(L / 2 - 2, 4); g.fill(); g.restore();
+  }
+  // 数值核验：在纯旋转场 v = (−y, x) 中走一圈，半径应保持不变
+  const rot = p => [-p[1], p[0]], h = 0.1, N = Math.round(2 * Math.PI / h);
+  let pe = [1, 0], pr = [1, 0];
+  for (let s = 0; s < N; s++) { const v = rot(pe); pe = [pe[0] + h * v[0], pe[1] + h * v[1]]; const k1 = rot(pr), k2 = rot([pr[0] + h / 2 * k1[0], pr[1] + h / 2 * k1[1]]), k3 = rot([pr[0] + h / 2 * k2[0], pr[1] + h / 2 * k2[1]]), k4 = rot([pr[0] + h * k3[0], pr[1] + h * k3[1]]); pr = [pr[0] + h / 6 * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0]), pr[1] + h / 6 * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1])]; }
+  R.flow = { N, euler: Math.hypot(...pe) - 1, rk4: Math.hypot(...pr) - 1, segs };
+  $('mflow').innerHTML = `双涡旋场 u = −πA sin(πx) cos(πy)，v = πA cos(πx) sin(πy)，A = 0.1，区域 [0, 2] × [0, 1]（无量纲）。底色是速度大小（viridis），红色箭头长度按速度缩放，黑线是用 RK4 积分的流线。<b>核验</b>：在旋转场里以步长 0.1 走一圈（${N} 步），半径应保持 1：欧拉法变大了 <b class="poor">${(100 * R.flow.euler).toFixed(1)}%</b>，RK4 只差 ${R.flow.rk4.toExponential(1)}。`;
+}
+
+// ---------- 3 体数据 ----------
+{ const N = 48, blobs = [[0.35, 0.5, 0.25, 1], [0.37, 0.52, 0.75, 0.8], [0.7, 0.35, 0.5, 0.9]], vol = new Float32Array(N * N * N);
+  for (let z = 0; z < N; z++) for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { let v = 0; for (const [bx, by, bz, a] of blobs) v += a * Math.exp(-(((x / N - bx) ** 2 + (y / N - by) ** 2 + (z / N - bz) ** 2) / (2 * 0.07 ** 2))); vol[(z * N + y) * N + x] = v; }
+  const S = 4, img = (fnv, title) => { const fig = d3.select('#vol').append('figure'), c = fig.append('canvas').attr('width', N * S).attr('height', N * S).node(), g = c.getContext('2d'), grid = new Float32Array(N * N);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) grid[y * N + x] = fnv(x, y);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { g.fillStyle = d3.interpolateViridis(Math.min(1, grid[y * N + x])); g.fillRect(x * S, y * S, S, S); }
+    const contours = d3.contours().size([N, N]).thresholds([0.5])(Array.from(grid)); g.strokeStyle = '#fff'; g.lineWidth = 1.5; g.save(); g.scale(S, S); g.lineWidth = 1.5 / S; g.stroke(new Path2D(d3.geoPath()(contours[0]))); g.restore();
+    fig.append('figcaption').text(title); return contours[0].coordinates.length; };
+  const at = (x, y, z) => vol[(z * N + y) * N + x];
+  const c12 = img((x, y) => at(x, y, 12), '切片 z = 12'), c36 = img((x, y) => at(x, y, 36), '切片 z = 36'), cm = img((x, y) => { let m = 0; for (let z = 0; z < N; z++) m = Math.max(m, at(x, y, z)); return m; }, '沿 z 的最大强度投影');
+  R.vol = { c12, c36, cm };
+  $('mvol').innerHTML = `48³ 的标量场，三个高斯团：两个在几乎同一个 (x, y)、深度 z 不同（0.25 与 0.75），一个在中间深度。白线是 0.5 的等值线。两张切片各只看到所在深度的 ${c12}、${c36} 个团，中间深度的第三个团两张都看不到；最大强度投影看到了全部，但前后两个团重合成一个，只剩 <b class="poor">${cm}</b> 个区域（实际 3 个团），也看不出深度。体数据通常要配合可拖动的切片、旋转或深度着色一起看。`;
+}
+
+// ---------- 4 颜色映射 ----------
+{ const jet = d3.interpolateRgbBasis(['#00007f', '#0000ff', '#007fff', '#00ffff', '#7fff7f', '#ffff00', '#ff7f00', '#ff0000', '#7f0000']), maps = [['彩虹色（jet）', jet], ['viridis', d3.interpolateViridis]];
+  const A = 0.1, sp = (px, py) => Math.hypot(Math.sin(Math.PI * px) * Math.cos(Math.PI * py), Math.cos(Math.PI * px) * Math.sin(Math.PI * py));
+  const stats = maps.map(([name, f]) => {
+    const fig = d3.select('#cmap').append('figure'), c = fig.append('canvas').attr('width', 200).attr('height', 100).node(), g = c.getContext('2d'), im = g.createImageData(200, 100);
+    for (let j = 0; j < 100; j++) for (let i = 0; i < 200; i++) { const col = d3.rgb(f(sp(i / 100, j / 100))), k = 4 * (j * 200 + i); im.data[k] = col.r; im.data[k + 1] = col.g; im.data[k + 2] = col.b; im.data[k + 3] = 255; }
+    g.putImageData(im, 0, 0); fig.append('figcaption').text(name);
+    const L = d3.range(65).map(i => oklab(rgb(f(i / 64)))), steps = d3.range(64).map(i => Math.hypot(L[i + 1][0] - L[i][0], L[i + 1][1] - L[i][1], L[i + 1][2] - L[i][2]));
+    let turns = 0; for (let i = 1; i < 64; i++) if (Math.sign(L[i + 1][0] - L[i][0]) !== Math.sign(L[i][0] - L[i - 1][0])) turns++;
+    return { name, L: L.map(v => v[0]), cv: d3.deviation(steps) / d3.mean(steps), turns, Lmin: d3.min(L, v => v[0]), Lmax: d3.max(L, v => v[0]) };
+  });
+  const svg = d3.select('#lum'), x = d3.scaleLinear([0, 1], [30, 332]), y = d3.scaleLinear([0, 1], [96, 6]);
+  svg.append('g').attr('class', 'axis').attr('transform', 'translate(0,96)').call(d3.axisBottom(x).ticks(5)); svg.append('g').attr('class', 'axis').attr('transform', 'translate(30,0)').call(d3.axisLeft(y).ticks(3));
+  stats.forEach((s, k) => { svg.append('path').attr('d', d3.line().x((d, i) => x(i / 64)).y(d => y(d))(s.L)).attr('fill', 'none').attr('stroke', k ? '#2f6fdb' : '#c0392b').attr('stroke-width', 1.6); svg.append('text').attr('x', 36).attr('y', 14 + 12 * k).attr('fill', k ? '#2f6fdb' : '#c0392b').text(`${s.name} 的明度`); });
+  R.cmap = stats.map(s => ({ name: s.name, cv: +s.cv.toFixed(2), turns: s.turns, L: [+s.Lmin.toFixed(2), +s.Lmax.toFixed(2)] }));
+  $('mcm').innerHTML = `同一个速度场。下图是颜色从 0 到 1 时的 OKLab 明度：彩虹色在中间（青、黄）最亮、两端暗，<b class="poor">明度改变方向 ${stats[0].turns} 次</b>，图上出现并不存在的“亮带”；相邻颜色差的变异系数 ${stats[0].cv.toFixed(2)}。viridis 明度单调上升（改变方向 ${stats[1].turns} 次），变异系数 ${stats[1].cv.toFixed(2)}，灰度打印也能读出高低。`;
+}
+
+// ---------- 5 热扩散：时间演变、稳定性与不确定性 ----------
+{ const NX = 51, dx = 1 / (NX - 1), init = () => d3.range(NX).map(i => (i * dx >= 0.4 && i * dx <= 0.6) ? 1 : 0);
+  function run(alpha, r, T) { const dt = r * dx * dx / alpha, steps = Math.round(T / dt); let u = init(); for (let s = 0; s < steps; s++) { const n = u.slice(); for (let i = 1; i < NX - 1; i++) n[i] = u[i] + r * (u[i + 1] - 2 * u[i] + u[i - 1]); n[0] = n[NX - 1] = 0; u = n; } return u; }
+  const W = 340, H = 170, M = { t: 8, r: 8, b: 20, l: 28 }, x = d3.scaleLinear([0, 1], [M.l, W - M.r]), y = d3.scaleLinear([0, 1.05], [H - M.b, M.t]), svg = d3.select('#heat'), line = d3.line().x((d, i) => x(i * dx)).y(d => y(d));
+  // 不确定性：扩散系数 α 只知道在 0.8—1.2 之间（均匀分布），30 次模拟
+  const r6 = rng(9), ens = d3.range(30).map(() => run(0.8 + 0.4 * r6(), 0.4, 0.01)), band = d3.range(NX).map(i => { const v = ens.map(e => e[i]).sort(d3.ascending); return [d3.quantile(v, 0.05), d3.quantile(v, 0.5), d3.quantile(v, 0.95)]; });
+  svg.append('path').attr('d', d3.area().x((d, i) => x(i * dx)).y0(d => y(d[0])).y1(d => y(d[2]))(band)).attr('fill', '#f2c4bd');
+  const T = [0, 0.002, 0.01, 0.04], colors = ['#8a93a3', '#7fa7e6', '#c0392b', '#1f7a4d'];
+  T.forEach((t, k) => { svg.append('path').attr('d', line(t ? run(1, 0.4, t) : init())).attr('fill', 'none').attr('stroke', colors[k]).attr('stroke-width', 1.5); svg.append('text').attr('x', W - 70).attr('y', 18 + 12 * k).attr('fill', colors[k]).text(`t = ${t}`); });
+  svg.append('g').attr('class', 'axis').attr('transform', `translate(0,${H - M.b})`).call(d3.axisBottom(x).ticks(5)); svg.append('g').attr('class', 'axis').attr('transform', `translate(${M.l},0)`).call(d3.axisLeft(y).ticks(4));
+  const stable = d3.max(run(1, 0.4, 0.04)), unstable = d3.max(run(1, 0.6, 0.04).map(Math.abs)), mid = band[25];
+  R.heat = { stable, unstable, mid: mid.map(v => +v.toFixed(3)) };
+  $('mheat').innerHTML = `一维热方程 ∂u/∂t = α ∂²u/∂x²，两端温度为 0，初始中间一段为 1；显式差分，r = αΔt／Δx²。四条线是 α = 1 时的四个时刻（小多图的替代：同一坐标叠放）。<b>核验</b>：r = 0.4 时 t = 0.04 的最高温度 ${stable.toFixed(3)}，正常衰减；r = 0.6 超过稳定界限 0.5，数值爆炸到 <b class="poor">${unstable.toExponential(1)}</b>。<b>不确定性</b>：α 只知道在 0.8—1.2 之间，30 次模拟在 t = 0.01 时中点温度的 5%—95% 范围是 ${mid[0].toFixed(3)}—${mid[2].toFixed(3)}（浅红色带），中位数 ${mid[1].toFixed(3)}。`;
+}
+
+// ---------- 6 元数据 ----------
+$('meta').innerHTML = '<tr><th>图</th><th>坐标与单位</th><th>假设</th><th>性质</th></tr>' + [
+  ['1 函数', 'x 无量纲，0—10', '已知解析式，可以任意取点', '<span class="tag real">真实计算</span>（折线连接是近似）'],
+  ['2 流场', '[0, 2] × [0, 1]，无量纲；速度 = 距离／时间', '定常、二维、不可压缩；箭头长度按最大速度缩放', '<span class="tag real">真实计算</span><span class="tag approx">RK4 积分</span>'],
+  ['3 体数据', '体素索引 0—47，三个方向等间距', '三个高斯团是构造的数据', '<span class="tag real">真实计算</span><span class="tag ill">等值线阈值 0.5 为示意</span>'],
+  ['4 颜色映射', '颜色 → 0—1 的速度比例', 'OKLab 近似人眼的明度与色差', '<span class="tag approx">感知模型</span>'],
+  ['5 热扩散', 'x 无量纲 0—1；温度相对值', '一维、两端温度固定为 0；α 在 0.8—1.2 内均匀分布', '<span class="tag approx">显式差分</span><span class="tag real">集合模拟</span>']
+].map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('');
+window.__sv = R;
+</script>
+</body>
+</html>
