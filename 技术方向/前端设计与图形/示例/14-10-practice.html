@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>原创语言与长期实践：从系列作品中找出自己的规则</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .series { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; }
+  .series figure { margin: 0; display: grid; gap: 0; font-size: 10.5px; line-height: 1.4; text-align: center; }
+  .series canvas { width: 100%; height: auto; border-radius: 4px; border: 1px solid var(--line); }
+  .series figure.fail canvas { border: 2px dashed #b3261e; }
+  .stars { color: #f0b429; letter-spacing: -1px; }
+  .note { background: #fff8e6; border-radius: 6px; padding: 4px 8px; font-size: 12px; color: #7a4a00; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>“城市节奏”系列：12 周，每周一件</h2>
+  <p class="note">记录是为了演示而构造的，代表一位创作者的草图本；请用你自己的记录替换。</p>
+  <p class="sub">每件作品都记下参数（构图、形状、配色、密度）、自评（1—5）和一句笔记。虚线框是自己判定的失败——失败的作品同样保留，因为它们说明了哪些选择不适合自己想表达的东西。</p>
+  <div class="series" id="series"></div>
+  <table id="log"><tr><th>周</th><th>构图</th><th>形状</th><th>配色</th><th>密度</th><th>自评</th><th>笔记</th></tr></table>
+</section>
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>高分作品里反复出现的选择</h2><table id="freq"><tr><th>参数</th><th>全部 12 件中最常见</th><th>4 分以上作品中最常见</th><th>占比</th></tr></table><h2>只差一项的对照</h2><table id="pairs"><tr><th>参数</th><th>比较</th><th>对照组（周）</th><th>自评平均差</th></tr></table><p class="sub">常见不等于有效：高分作品多用某个选择，也可能只是因为后期做得更熟练。只差一项（密度相差 ≤ 0.2）的两件作品放在一起比较，才更接近“这个选择带来了什么”。</p><h2>原创可以体现在哪里</h2><table><tr><th>层面</th><th>本系列的例子</th></tr><tr><td>问题选择</td><td>不画城市的样子，而是画城市的“节奏”：人流的疏密与起伏</td></tr><tr><td>内容组织</td><td>每周一件，用密度表示一天中的不同时段（深夜稀疏、早高峰拥挤），按时间排成系列</td></tr><tr><td>视觉规则</td><td>右侧提炼出的构图与形状规则，以及“红色只表示我”</td></tr><tr><td>交互机制</td><td>下一步：让观众拖动时间轴，看同一规则生成不同时刻的画面</td></tr></table></div>
+    <div style="display:grid;gap:6px"><h2>选择逐渐稳定：每四周的选择熵</h2><table id="ent"><tr><th>参数</th><th>第 1—4 周</th><th>第 5—8 周</th><th>第 9—12 周</th></tr></table>
+      <p class="sub">熵越低，表示这段时间的选择越集中。熵下降说明关注点在收拢；但完全为 0 也可能意味着停止探索——可以每隔一段时间有意打破一条规则。</p>
+      <h2>提炼出的规则（候选）</h2><table id="rules"><tr><th>规则</th><th>依据</th></tr></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const PAL = { 双色: ['#1d2330', '#e4572e', '#f4f1ea'], 三原色: ['#c8102e', '#0047ab', '#f2b705'], 霓虹: ['#ff2bd6', '#00f0ff', '#1b0b3a'], 灰阶: ['#1d2330', '#8a93a3', '#eef0f3'] };
+const LOG = [
+  [1, '网格', '圆', '三原色', 0.6, 2, '像包豪斯的练习，没有自己的东西'],
+  [2, '放射', '线', '霓虹', 0.8, 1, '失败：太乱，看不出节奏'],
+  [3, '对角线', '条', '双色', 0.5, 4, '对角线让画面有了方向感，像人流'],
+  [4, '网格', '条', '灰阶', 0.4, 3, '安静，但太冷'],
+  [5, '对角线', '条', '双色', 0.7, 4, '密度提高后像早高峰'],
+  [6, '放射', '圆', '三原色', 0.5, 2, '失败：中心太强，节奏变成了爆炸'],
+  [7, '对角线', '条', '双色', 0.3, 5, '稀疏的版本像深夜，留白很重要'],
+  [8, '对角线', '线', '双色', 0.6, 3, '线太细，远看就消失了'],
+  [9, '对角线', '条', '双色', 0.9, 4, '最拥挤的一天，仍然能读出方向'],
+  [10, '网格', '条', '双色', 0.6, 3, '回到网格对比：确实不如对角线'],
+  [11, '对角线', '条', '双色', 0.5, 5, '加入一根红色条表示“我”'],
+  [12, '对角线', '条', '灰阶', 0.6, 4, '灰阶也成立，红色可以只在需要时出现']
+];
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function draw([wk, comp, shape, pal, dens], c) {
+  const g = c.getContext('2d'), W = c.width, H = c.height, P = PAL[pal], r = rng(wk * 97);
+  g.fillStyle = P[2]; g.fillRect(0, 0, W, H);
+  const n = Math.round(6 + dens * 30);
+  for (let i = 0; i < n; i++) {
+    let x, y, a = 0;
+    if (comp === '网格') { const k = Math.ceil(Math.sqrt(n)); x = (i % k + 0.5) * W / k; y = (Math.floor(i / k) + 0.5) * H / k; }
+    else if (comp === '放射') { const t = i / n * Math.PI * 2, d = 10 + r() * 40; x = W / 2 + Math.cos(t) * d; y = H / 2 + Math.sin(t) * d; a = t; }
+    else { const t = r(); x = t * W + (r() - 0.5) * 18; y = H - t * H + (r() - 0.5) * 18; a = Math.atan2(-H, W); }
+    g.save(); g.translate(x, y); g.rotate(a); const accent = wk < 11 && i % 7 === 3; g.fillStyle = g.strokeStyle = P[accent ? 1 : 0];
+    if (shape === '圆') { g.beginPath(); g.arc(0, 0, 3 + r() * 5, 0, 7); g.fill(); }
+    else if (shape === '条') g.fillRect(-10, -2, 20 + r() * 10, 4);
+    else { g.lineWidth = 0.8; g.beginPath(); g.moveTo(-14, 0); g.lineTo(14, 0); g.stroke(); }
+    g.restore();
+  }
+  if (wk === 11) { g.save(); g.translate(W / 2, H / 2); g.rotate(Math.atan2(-H, W)); g.fillStyle = P[1]; g.fillRect(-16, -3, 32, 6); g.restore(); }   // 唯一的红色条：“我”
+}
+for (const row of LOG) {
+  const f = document.createElement('figure'); if (row[5] <= 2) f.className = 'fail';
+  const c = document.createElement('canvas'); c.width = 90; c.height = 120; draw(row, c); f.appendChild(c);
+  f.insertAdjacentHTML('beforeend', `<span>第 ${row[0]} 周</span><span class="stars">${'★'.repeat(row[5])}</span>`); $('series').appendChild(f);
+  $('log').insertAdjacentHTML('beforeend', `<tr><td class="num">${row[0]}</td><td>${row[1]}</td><td>${row[2]}</td><td>${row[3]}</td><td class="num">${row[4]}</td><td class="num">${row[5]}</td><td class="${row[5] <= 2 ? 'poor' : ''}">${row[6]}</td></tr>`);
+}
+const PARAMS = [['构图', 1], ['形状', 2], ['配色', 3]];
+const mode = rows => { const m = {}; for (const r of rows) m[r] = (m[r] || 0) + 1; const top = Object.entries(m).sort((a, b) => b[1] - a[1])[0]; return { v: top[0], n: top[1], of: rows.length }; };
+const good = LOG.filter(r => r[5] >= 4), rules = [];
+for (const [name, i] of PARAMS) {
+  const all = mode(LOG.map(r => r[i])), top = mode(good.map(r => r[i])), share = top.n / top.of;
+  $('freq').insertAdjacentHTML('beforeend', `<tr><td>${name}</td><td>${all.v}（${all.n}／12）</td><td>${top.v}（${top.n}／${top.of}）</td><td class="num ${share >= 0.7 ? 'good' : 'mid'}">${(100 * share).toFixed(0)}%</td></tr>`);
+  if (share >= 0.7) rules.push([`${name}：${top.v}`, `${top.of} 件 4 分以上的作品中有 ${top.n} 件`]);
+}
+const pairs = {};
+for (const [name, i] of PARAMS) {
+  const res = {};
+  for (const a of LOG) for (const b of LOG) {
+    if (a[0] >= b[0] || Math.abs(a[4] - b[4]) > 0.2 + 1e-9 || a[i] === b[i] || PARAMS.some(([, j]) => j !== i && a[j] !== b[j])) continue;
+    const [x, y] = [a, b].sort((p, q) => q[5] - p[5] || (p[i] < q[i] ? -1 : 1)), key = `${x[i]} 对 ${y[i]}`;
+    (res[key] = res[key] || []).push([x[0], y[0], x[5] - y[5]]);
+  }
+  pairs[name] = res;
+  for (const [key, list] of Object.entries(res)) {
+    const d = list.reduce((s, p) => s + p[2], 0) / list.length;
+    $('pairs').insertAdjacentHTML('beforeend', `<tr><td>${name}</td><td>${key}</td><td>${list.map(p => `${p[0]}／${p[1]}`).join('，')}</td><td class="num ${d >= 1 ? 'good' : d < 0.5 ? 'mid' : ''}">${d > 0 ? '+' : ''}${d.toFixed(2)}</td></tr>`);
+  }
+}
+const effect = (name, v) => { const l = Object.entries(pairs[name]).filter(([k]) => k.startsWith(v + ' ')).flatMap(([, l]) => l); return l.length ? l.reduce((s, p) => s + p[2], 0) / l.length : null; };
+for (const r of rules) { const [name, v] = r[0].split('：'), e = effect(name, v); if (e !== null) { r.push(e); r[1] += `；只差一项的对照平均 ${e > 0 ? '+' : ''}${e.toFixed(2)} 分`; if (e < 0.5) r[0] += '（影响小，可以替换，不作为硬规则）'; } }
+const dens = good.map(r => r[4]); rules.push([`密度：${Math.min(...dens)}—${Math.max(...dens)} 都可以，用密度表示时段`, '高分作品覆盖了从深夜（0.3）到最拥挤（0.9）的密度']);
+rules.push(['红色只表示“我”或需要被注意的一处', '第 11、12 周的笔记']);
+for (const [a, b] of rules) $('rules').insertAdjacentHTML('beforeend', `<tr><td>${a}</td><td>${b}</td></tr>`);
+const H = arr => { const m = {}; for (const v of arr) m[v] = (m[v] || 0) + 1; return -Object.values(m).reduce((s, c) => { const p = c / arr.length; return s + p * Math.log2(p); }, 0); };
+const ent = {};
+for (const [name, i] of PARAMS) { const e = [0, 4, 8].map(s => H(LOG.slice(s, s + 4).map(r => r[i]))); ent[name] = e.map(v => +v.toFixed(2)); $('ent').insertAdjacentHTML('beforeend', `<tr><td>${name}</td>${e.map(v => `<td class="num">${v.toFixed(2)} 比特</td>`).join('')}</tr>`); }
+window.__pr10 = { good: good.length, rules: rules.map(r => r[0]), pairs, ent };
+</script>
+</body>
+</html>
