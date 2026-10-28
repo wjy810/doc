@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>形式与构图：比例、节奏、平衡、重复、对比与变化</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  figure { margin: 0; display: grid; gap: 4px; } figcaption { font-size: 12px; } figcaption b { display: block; }
+  canvas { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; }
+  label { font-size: 12px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>同一组内容，四种构图</h2>
+  <p class="sub">一张“数据可视化作品展”的海报：标题、副标题、日期、主图、说明、按钮。四个版本的内容完全相同，只改变比例、对齐和间距的组织方式。叠加层显示：红点是视觉重心（按深浅加权），紫色虚线是最少需要的对齐线，蓝色刻度是垂直间距。</p>
+  <label><input type="checkbox" id="ov" checked> 显示分析叠加层</label>
+  <div class="four" id="figs"></div>
+</section>
+<section class="panel">
+  <h2>测量</h2>
+  <table id="m"><tr><th>指标</th><th>说明</th></tr></table>
+  <p class="sub">这些数字描述“组织得是否有系统”，不能直接判断好坏：居中对称安定、隆重；非对称网格更有动感、更适合大量文字；没有系统的版本可能有意制造混乱——关键是选择是否服务于内容与表达目标。</p>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const W = 300, H = 420;
+// 内容（四个版本完全相同）
+const C = { title: '看见数据', sub: '数据可视化作品展', date: '11 月 8—20 日 · 城市美术馆', body: ['二十位创作者', '用图形讲述', '城市、气候与人'], btn: '预约参观' };
+// 版式：每个元素的位置与字号（单位：像素）
+// 有系统的版式按“栏”排列：每栏从 y0 开始，元素依次向下，间距取自 8／16／24 的尺度；“没有系统”的版本直接写坐标
+const LAYOUTS = {
+  sym: { name: '居中对称', note: '所有元素沿中轴排列；间距取 8／16／24', cols: [
+    { x: 150, align: 'center', y0: 19, items: [[{ t: 'img', w: 220, h: 150 }, 24], [{ t: 'text', k: 'title', size: 40, weight: 700 }, 8], [{ t: 'text', k: 'sub', size: 16 }, 16], [{ t: 'text', k: 'date', size: 12 }, 16], [{ t: 'body', size: 12, lh: 18 }, 24], [{ t: 'btn', w: 100, h: 28 }, 0]] }] },
+  grid: { name: '12 栏网格 · 非对称', note: '栏宽 20、栏间距 4、边距 12；图占 7 栏，文字占 5 栏；间距取 8／24', cols: [
+    { x: 12, align: 'left', y0: 32, items: [[{ t: 'img', w: 164, h: 220 }, 24], [{ t: 'text', k: 'date', size: 12, weight: 700 }, 8], [{ t: 'body', size: 12, lh: 18 }, 0]] },
+    { x: 180, align: 'left', y0: 32, items: [[{ t: 'text', k: 'title', size: 32, weight: 700, wrap: 2 }, 8], [{ t: 'text', k: 'sub', size: 12 }, 24], [{ t: 'btn', w: 108, h: 28 }, 0]] }] },
+  golden: { name: '黄金比例分割', note: '宽度按 1 ∶ 1.618 分成两部分，图占较大的一份；间距取 8／24', cols: [
+    { x: 0, align: 'left', y0: 0, items: [[{ t: 'img', w: 185, h: 260 }, 24], [{ t: 'text', k: 'date', size: 13, weight: 700, dx: 16 }, 8], [{ t: 'body', size: 12, lh: 18, dx: 16 }, 0]] },
+    { x: 193, align: 'left', y0: 48, items: [[{ t: 'text', k: 'title', size: 26, weight: 700, wrap: 2 }, 8], [{ t: 'text', k: 'sub', size: 12 }, 24], [{ t: 'btn', w: 92, h: 28 }, 0]] }] },
+  none: { name: '没有系统', note: '位置、字号、间距都是随手放的', els: [
+    { t: 'img', x: 27, y: 41, w: 190, h: 150 },
+    { t: 'text', k: 'title', x: 33, y: 232, size: 37, align: 'left', weight: 700 },
+    { t: 'text', k: 'sub', x: 61, y: 259, size: 15, align: 'left' },
+    { t: 'text', k: 'date', x: 21, y: 301, size: 11, align: 'left' },
+    { t: 'body', x: 47, y: 329, size: 13, align: 'left', lh: 21 },
+    { t: 'btn', x: 160, y: 371, w: 117, h: 31 }] }
+};
+// 把“栏”展开成带坐标的元素：文字的 y 是基线，盒子的上边 ＝ 基线 − 0.88 × 字号
+function flatten(L) {
+  if (L.els) return L.els;
+  const out = [];
+  for (const col of L.cols) {
+    let y = col.y0;
+    for (const [it, gap] of col.items) {
+      const x = col.x + (it.dx || 0), e = { ...it, align: col.align };
+      if (it.t === 'img' || it.t === 'btn') { Object.assign(e, { x: col.align === 'center' ? x - it.w / 2 : x, y }); y += it.h; }
+      else if (it.t === 'text') { const lines = it.wrap || 1, h = it.size * (1.15 * (lines - 1) + 1); Object.assign(e, { x, y: y + it.size * 0.88 }); y += h; }
+      else if (it.t === 'body') { Object.assign(e, { x, y: y + it.size * 0.88 }); y += it.lh * 2 + it.size; }
+      out.push(e); y += gap;
+    }
+  }
+  return out;
+}
+function wrapLines(g, text, n) { if (n !== 2) return [text]; const m = Math.ceil(text.length / 2); return [text.slice(0, m), text.slice(m)]; }
+function draw(g, L) {
+  g.fillStyle = '#f7f3ea'; g.fillRect(0, 0, W, H);
+  const boxes = [];
+  for (const e of flatten(L)) {
+    if (e.t === 'img') { const gr = g.createLinearGradient(e.x, e.y, e.x + e.w, e.y + e.h); gr.addColorStop(0, '#24467a'); gr.addColorStop(1, '#e4572e'); g.fillStyle = gr; g.fillRect(e.x, e.y, e.w, e.h); g.fillStyle = '#ffffff33'; for (let i = 0; i < 5; i++) g.fillRect(e.x + 14 + i * (e.w - 28) / 5, e.y + e.h - 20 - (i * 37 % 5 + 1) * e.h / 9, (e.w - 28) / 5 - 6, (i * 37 % 5 + 1) * e.h / 9); boxes.push({ x: e.x, y: e.y, w: e.w, h: e.h, kind: '主图' }); }
+    if (e.t === 'text') { g.font = `${e.weight || 400} ${e.size}px "Noto Sans SC"`; g.fillStyle = e.k === 'title' ? '#1d2330' : e.k === 'date' ? '#9a3412' : '#3b4252'; g.textAlign = e.align; const lines = wrapLines(g, C[e.k], e.wrap); lines.forEach((s, i) => g.fillText(s, e.x, e.y + i * e.size * 1.15)); const w = Math.max(...lines.map(s => g.measureText(s).width)); const x0 = e.align === 'center' ? e.x - w / 2 : e.x; boxes.push({ x: x0, y: e.y - e.size * 0.88, w, h: e.size * (1.15 * (lines.length - 1) + 1), kind: e.k, size: e.size }); }
+    if (e.t === 'body') { g.font = `${e.size}px "Noto Sans SC"`; g.fillStyle = '#3b4252'; g.textAlign = e.align; C.body.forEach((s, i) => g.fillText(s, e.x, e.y + i * e.lh)); const w = Math.max(...C.body.map(s => g.measureText(s).width)); const x0 = e.align === 'center' ? e.x - w / 2 : e.x; boxes.push({ x: x0, y: e.y - e.size * 0.88, w, h: e.lh * 2 + e.size, kind: 'body', size: e.size }); }
+    if (e.t === 'btn') { g.fillStyle = '#1d2330'; g.fillRect(e.x, e.y, e.w, e.h); g.font = '700 13px "Noto Sans SC"'; g.fillStyle = '#fff'; g.textAlign = 'center'; g.fillText(C.btn, e.x + e.w / 2, e.y + e.h / 2 + 5); boxes.push({ x: e.x, y: e.y, w: e.w, h: e.h, kind: '按钮', size: 13 }); }
+  }
+  g.textAlign = 'left'; return boxes;
+}
+function measure(g, L, boxes) {
+  const d = g.getImageData(0, 0, W, H).data; let m = 0, mx = 0, my = 0, left = 0, right = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = (y * W + x) * 4, lum = (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255, w = Math.max(0, 0.93 - lum); m += w; mx += w * x; my += w * y; if (x < W / 2) left += w; else right += w; }
+  const cx = mx / m, cy = my / m;
+  // 最少对齐线：每个元素可以用左边、中线或右边对齐；穷举 3^n 种选择，找出需要的竖线最少的一种（相差 2 像素以内算同一条线）
+  let best = null;
+  const n = boxes.length, cand = boxes.map(b => [b.x, b.x + b.w / 2, b.x + b.w]);
+  for (let code = 0; code < 3 ** n; code++) {
+    let c = code; const vs = [];
+    for (let i = 0; i < n; i++) { vs.push(cand[i][c % 3]); c = Math.floor(c / 3); }
+    vs.sort((a, b) => a - b); const ls = []; for (const v of vs) if (!ls.length || v - ls[ls.length - 1] > 2) ls.push(v);
+    if (!best || ls.length < best.length) best = ls;
+  }
+  const shared = best.map(v => ({ v }));
+  // 垂直间距：每个元素与它正下方（水平方向有重叠）最近的元素之间的空白
+  const sorted = [...boxes].sort((a, b) => a.y - b.y), gaps = [], pairs = [];
+  for (const a of sorted) {
+    const below = sorted.filter(b => b !== a && b.y >= a.y + a.h - 1 && Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) > 0).sort((p, q) => p.y - q.y)[0];
+    if (below) { gaps.push(Math.round(below.y - (a.y + a.h))); pairs.push([a, below]); }
+  }
+  const sizes = [...new Set(boxes.filter(b => b.size).map(b => b.size))].sort((a, b) => a - b);
+  const ratios = sizes.slice(1).map((s, i) => s / sizes[i]);
+  return { cx, cy, dx: (cx - W / 2) / W, dy: (cy - H / 2) / H, lr: left / right, shared: shared.length, gaps, distinctGaps: new Set(gaps.map(v => Math.round(v / 2) * 2)).size, sizes, contrast: sizes[sizes.length - 1] / sizes[0], ratios, shLines: shared, sorted, pairs };
+}
+function overlay(g, r) {
+  g.save(); g.strokeStyle = '#7b4bd1'; g.setLineDash([3, 3]); g.lineWidth = 1;
+  for (const l of r.shLines) { g.beginPath(); g.moveTo(l.v + 0.5, 0); g.lineTo(l.v + 0.5, H); g.stroke(); }
+  g.setLineDash([]); g.strokeStyle = '#2f6fdb'; g.fillStyle = '#2f6fdb'; g.font = '10px sans-serif';
+  for (const [a, b] of r.pairs) { const gap = b.y - (a.y + a.h); const x = Math.max(a.x, b.x) + 4; g.beginPath(); g.moveTo(x, a.y + a.h); g.lineTo(x, b.y); g.stroke(); g.fillText(Math.round(gap), x + 3, (a.y + a.h + b.y) / 2 + 3); }
+  g.fillStyle = '#e11d48'; g.beginPath(); g.arc(r.cx, r.cy, 6, 0, 7); g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 2; g.stroke();
+  g.strokeStyle = '#e11d4888'; g.setLineDash([2, 3]); g.beginPath(); g.moveTo(W / 2, H / 2 - 10); g.lineTo(W / 2, H / 2 + 10); g.moveTo(W / 2 - 10, H / 2); g.lineTo(W / 2 + 10, H / 2); g.stroke(); g.restore();
+}
+const R = {};
+function render() {
+  for (const [k, L] of Object.entries(LAYOUTS)) {
+    const c = $('c-' + k), g = c.getContext('2d'), boxes = draw(g, L); R[k] = measure(g, L, boxes); R[k].name = L.name;
+    if ($('ov').checked) overlay(g, R[k]);
+  }
+}
+for (const [k, L] of Object.entries(LAYOUTS)) $('figs').insertAdjacentHTML('beforeend', `<figure><canvas id="c-${k}" width="${W}" height="${H}"></canvas><figcaption><b>${L.name}</b>${L.note}</figcaption></figure>`);
+document.fonts.ready.then(() => {
+  render(); $('ov').onchange = render;
+  const keys = Object.keys(LAYOUTS), rows = [
+    ['视觉重心偏离中心（水平，占宽度）', r => `${(100 * r.dx).toFixed(1)}%`, '0 表示左右对称；非对称构图有意偏离，再用别的元素平衡'],
+    ['视觉重心偏离中心（垂直，占高度）', r => `${(100 * r.dy).toFixed(1)}%`, '负数表示偏上'],
+    ['左右“分量”之比', r => r.lr.toFixed(2), '按深浅加权的像素总量，左 ／ 右'],
+    ['最少需要的对齐线', r => `${r.shared} 条`, '6 个元素各选左边、中线或右边对齐，最少需要几条竖线；越少越有秩序'],
+    ['垂直间距', r => r.gaps.join('、'), '相邻元素之间的空白（像素）'],
+    ['不同的间距值', r => `${r.distinctGaps} 种`, '种类少、成倍数，节奏更清楚'],
+    ['字号', r => r.sizes.join('、'), ''],
+    ['最大字号 ／ 最小字号', r => r.contrast.toFixed(2), '对比的强度']
+  ];
+  $('m').rows[0].insertAdjacentHTML('beforeend', keys.map(k => `<th>${LAYOUTS[k].name}</th>`).join(''));
+  for (const [name, f, note] of rows) $('m').insertAdjacentHTML('beforeend', `<tr><td>${name}</td><td class="sub">${note}</td>${keys.map(k => `<td class="num">${f(R[k])}</td>`).join('')}</tr>`);
+  window.__comp = Object.fromEntries(keys.map(k => [k, { dx: +(100 * R[k].dx).toFixed(1), dy: +(100 * R[k].dy).toFixed(1), lr: +R[k].lr.toFixed(2), shared: R[k].shared, gaps: R[k].gaps, distinct: R[k].distinctGaps, sizes: R[k].sizes, contrast: +R[k].contrast.toFixed(2) }]));
+});
+</script>
+</body>
+</html>

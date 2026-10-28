@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>风格史与视觉文化：迁移一种风格的组织逻辑</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-serif-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table.m { border-collapse: collapse; width: 100%; font-size: 12px; } table.m th, table.m td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } table.m th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }
+  .rules { font-size: 11.5px; margin: 0; padding-left: 16px; color: #3b4252; }
+  .page { position: relative; overflow: hidden; height: 470px; padding: 14px; }
+  .page .hero h1 { margin: 0; } .page p { margin: 0; }
+  .page table { border-collapse: collapse; width: 100%; font-size: 11.5px; } .page td { padding: 2px 0; }
+  .page input { display: block; width: 100%; font: inherit; font-size: 12px; padding: 3px 6px; margin-top: 2px; }
+  .page .btn { display: inline-block; padding: 4px 12px; font-size: 12px; margin-top: 6px; }
+  .orn { position: absolute; pointer-events: none; }
+  /* 瑞士国际主义：网格、无衬线、左对齐、黑白加一个强调色、零装饰 */
+  .swiss { background: #fff; color: #111; font-family: "Noto Sans SC", sans-serif; }
+  .swiss .hero { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; border-top: 6px solid #e30613; padding-top: 8px; }
+  .swiss h1 { font-size: 34px; line-height: 1.05; font-weight: 700; grid-column: 1 / 3; }
+  .swiss .meta { font-size: 11px; margin-top: 8px; } .swiss .abs { font-size: 12px; margin-top: 8px; grid-column: 2; }
+  .swiss table { margin-top: 12px; border-top: 1px solid #111; } .swiss td:first-child { width: 50%; font-weight: 700; }
+  .swiss input { border: 1px solid #111; border-radius: 0; } .swiss .btn { background: #111; color: #fff; }
+  /* 包豪斯：基本几何形、三原色、功能化的无衬线字 */
+  .bauhaus { background: #f2ede1; color: #1a1a1a; font-family: "Noto Sans SC", sans-serif; }
+  .bauhaus h1 { font-size: 30px; line-height: 1.1; font-weight: 700; text-transform: uppercase; margin-top: 110px !important; }
+  .bauhaus .meta { font-size: 11px; margin-top: 6px; } .bauhaus .abs { font-size: 12px; margin-top: 6px; }
+  .bauhaus table { margin-top: 10px; } .bauhaus td:first-child { width: 50%; color: #c8102e; font-weight: 700; }
+  .bauhaus input { border: 2px solid #1a1a1a; border-radius: 0; background: #fff; } .bauhaus .btn { background: #0047ab; color: #fff; }
+  /* 装饰艺术：对称、装饰纹样、金与黑、展示字体 */
+  .deco { background: #111; color: #e8d7a5; font-family: "Noto Serif SC", serif; text-align: center; }
+  .deco h1 { font-size: 30px; line-height: 1.15; letter-spacing: 4px; margin-top: 30px !important; }
+  .deco .meta { font-size: 11px; letter-spacing: 2px; margin-top: 6px; } .deco .abs { font-size: 12px; margin-top: 8px; color: #b9a46a; font-family: "Noto Sans SC", sans-serif; }
+  .deco table { margin-top: 10px; font-family: "Noto Sans SC", sans-serif; } .deco td { text-align: center; }
+  .deco input { border: 1px solid #c9a646; background: #1c1c1c; color: #e8d7a5; text-align: center; } .deco .btn { border: 1px solid #c9a646; color: #c9a646; }
+  /* 孟菲斯：刺眼的配色、狂野的图案、打破“好品味” */
+  .memphis { background: #ffe14d; color: #1d1d1d; font-family: "Noto Sans SC", sans-serif; }
+  .memphis h1 { font-size: 30px; line-height: 1.1; font-weight: 700; transform: rotate(-3deg); color: #ff3e8a; text-shadow: 3px 3px 0 #2ec4b6; margin-top: 20px !important; }
+  .memphis .meta, .memphis .abs { font-size: 12px; margin-top: 8px; position: relative; } .memphis .abs { color: #7a3fd1; }
+  .memphis table { margin-top: 8px; position: relative; } .memphis td:first-child { color: #ff3e8a; font-weight: 700; }
+  .memphis input { border: 3px dashed #2ec4b6; border-radius: 10px; background: transparent; } .memphis .btn { background: #2ec4b6; color: #fff; border-radius: 999px; transform: rotate(2deg); }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>同一张讲座页面，四种风格的组织逻辑</h2>
+  <p class="sub">内容相同：标题、时间地点、简介、日程表和报名表单。每种风格先写出它的核心组织逻辑（下方灰字，是本例对公开资料的简化归纳），再按逻辑生成页面。页面同时包含“像海报的部分”和“需要读、需要填的部分”，以检查风格是否适合当前内容。</p>
+  <div class="four" id="pages"></div>
+</section>
+<section class="panel">
+  <h2>迁移之后，是否还适合这份内容</h2>
+  <table class="m" id="m"><tr><th>检查</th><th>要求</th></tr></table>
+  <p class="sub">四种风格各有历史背景与表达目的：瑞士国际主义追求清楚、客观的信息传达；包豪斯把艺术与工业生产结合；装饰艺术面向奢华与现代都市的魅力；孟菲斯有意打破功能主义与“好品味”的禁忌。把一种风格用在讲座报名页上，海报部分可以保留它的气质，阅读与填写部分必须先满足可读性——可以只迁移组织逻辑，而不照搬每一个表面特征。</p>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const CONTENT = { title: '设计与数据', meta: '11 月 15 日 19:00 · 城市图书馆报告厅', abs: '三位设计师分享他们怎样用图形讲清复杂的数据：从选题、草图到上线，以及做错的地方。', sched: [['19:00', '开场'], ['19:10', '图形与叙事'], ['19:50', '从数据到草图'], ['20:30', '问答']] };
+const STYLES = {
+  swiss: { name: '瑞士国际主义（1950—1970 年代）', rules: ['两栏网格，所有元素对齐栏线', '无衬线字体，左对齐、右边不齐', '黑白加一个强调色，零装饰', '用排版本身制造视觉冲击'] },
+  bauhaus: { name: '包豪斯（1919—1933 年）', rules: ['用圆、方、三角等基本几何形组织画面', '红、黄、蓝三原色与黑', '功能化的无衬线字，强调构成', '形式服务于功能与生产'] },
+  deco: { name: '装饰艺术（1920—1930 年代）', rules: ['中轴对称，层层装饰的边框与扇形纹样', '金与黑，衬线展示字体，加大字距', '借用历史与机器时代的图案', '营造隆重与奢华'] },
+  memphis: { name: '孟菲斯（1980 年代）', rules: ['刺眼的撞色与狂野的图案', '倾斜、错位，打破网格', '像漫画一样大胆的形状', '有意违背“好品味”'] }
+};
+function ornaments(k) {
+  if (k === 'bauhaus') return `<div class="orn" style="left:14px;top:14px;width:90px;height:90px;border-radius:50%;background:#c8102e"></div><div class="orn" style="left:96px;top:34px;width:70px;height:70px;background:#0047ab"></div><div class="orn" style="left:150px;top:14px;width:0;height:0;border-left:44px solid transparent;border-right:44px solid transparent;border-bottom:80px solid #f2b705"></div>`;
+  if (k === 'deco') return `<div class="orn" style="left:8px;top:8px;right:8px;bottom:8px;border:1px solid #c9a646"></div><div class="orn" style="left:14px;top:14px;right:14px;bottom:14px;border:1px solid #c9a64677"></div><div class="orn" style="left:50%;top:14px;width:120px;height:60px;margin-left:-60px;border-radius:0 0 60px 60px;background:repeating-conic-gradient(from 90deg at 50% 0,#c9a646 0 6deg,transparent 6deg 12deg)"></div>`;
+  if (k === 'memphis') return `<div class="orn" style="inset:0;background-image:radial-gradient(#1d1d1d 2px,transparent 2.5px),repeating-linear-gradient(45deg,transparent 0 18px,#ff3e8a 18px 22px);background-size:14px 14px,60px 60px;opacity:.55"></div><div class="orn" style="right:-20px;top:60px;width:90px;height:90px;border-radius:50%;background:#2ec4b6"></div><svg class="orn" style="left:10px;top:330px" width="120" height="40"><path d="M0 20 Q15 0 30 20 T60 20 T90 20 T120 20" fill="none" stroke="#7a3fd1" stroke-width="5"/></svg>`;
+  return '';
+}
+for (const [k, s] of Object.entries(STYLES)) {
+  $('pages').insertAdjacentHTML('beforeend', `<div><b style="font-size:12.5px">${s.name}</b><div class="page ${k}" id="p-${k}">${ornaments(k)}
+    <div class="hero" style="position:relative"><h1>${CONTENT.title}</h1><p class="meta">${CONTENT.meta}</p><p class="abs">${CONTENT.abs}</p></div>
+    <table>${CONTENT.sched.map(([t, n]) => `<tr><td>${t}</td><td>${n}</td></tr>`).join('')}</table>
+    <div style="position:relative;margin-top:8px;font-size:12px">姓名<input value=""></div><span class="btn" style="position:relative">报名</span></div>
+    <ul class="rules">${s.rules.map(r => `<li>${r}</li>`).join('')}</ul></div>`);
+}
+// ---------- 检查 ----------
+const rgb = s => (s.match(/[\d.]+/g) || [255, 255, 255]).slice(0, 3).map(Number);
+const lum = c => { const f = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; const [r, g, b] = c; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+function bgColorsUnder(page, el) {   // 文字下方可能出现的所有背景颜色：页面背景，加上与它重叠的装饰元素的颜色
+  const r = el.getBoundingClientRect(), cols = [rgb(getComputedStyle(page).backgroundColor)];
+  for (const o of page.querySelectorAll('.orn')) {
+    const q = o.getBoundingClientRect(); if (q.right < r.left || q.left > r.right || q.bottom < r.top || q.top > r.bottom) continue;
+    const cs = getComputedStyle(o), bgi = cs.backgroundImage, bg = cs.backgroundColor;
+    if (bg && bg !== 'rgba(0, 0, 0, 0)') cols.push(rgb(bg));
+    for (const m of (bgi || '').matchAll(/(#[0-9a-f]{6}|rgba?\([^)]*\))/gi)) { const v = m[0]; if (/rgba\([^)]*,\s*0\)/.test(v)) continue; cols.push(v.startsWith('#') ? [1, 3, 5].map(i => parseInt(v.slice(i, i + 2), 16)) : rgb(v)); }
+    for (const p of o.querySelectorAll('path')) cols.push([1, 3, 5].map(i => parseInt(p.getAttribute('stroke').slice(i, i + 2), 16)));
+  }
+  return cols;
+}
+const results = {};
+document.fonts.ready.then(() => {
+  for (const k of Object.keys(STYLES)) {
+    const page = $('p-' + k), pr = page.getBoundingClientRect();
+    const texts = [page.querySelector('.abs'), ...page.querySelectorAll('td')];
+    let minC = 99; for (const t of texts) { const c = rgb(getComputedStyle(t).color); for (const b of bgColorsUnder(page, t)) minC = Math.min(minC, ratio(c, b)); }
+    const abs = page.querySelector('.abs'), perLine = abs.getBoundingClientRect().width / parseFloat(getComputedStyle(abs).fontSize);
+    const fonts = new Set([...page.querySelectorAll('h1, p, td, input, .btn')].map(e => getComputedStyle(e).fontFamily.split(',')[0].replace(/"/g, '').trim()));
+    // 阅读区（简介与日程）的文字下方，是否压着图案或色块（只有边框线的装饰不算）
+    const filled = o => { const cs = getComputedStyle(o); return o.tagName === 'svg' || cs.backgroundImage !== 'none' || cs.backgroundColor !== 'rgba(0, 0, 0, 0)' || parseFloat(cs.borderBottomWidth) > 20; };
+    let under = 0; for (const t of texts) { const r = t.getBoundingClientRect(); if ([...page.querySelectorAll('.orn')].some(o => { const q = o.getBoundingClientRect(); return filled(o) && q.left < r.right && q.right > r.left && q.top < r.bottom && q.bottom > r.top; })) under++; }
+    const lefts = new Set([...page.querySelectorAll('h1, .meta, .abs, table, input, .btn')].map(e => Math.round(e.getBoundingClientRect().left - pr.left)));
+    const align = getComputedStyle(page.querySelector('td')).textAlign;
+    results[k] = { contrast: minC, perLine, fonts: fonts.size, under, nText: texts.length, lefts: lefts.size, listAlign: align };
+  }
+  const keys = Object.keys(STYLES), rows = [
+    ['阅读与填写部分的最低文字对比度', '≥ 4.5', r => r.contrast.toFixed(2), r => r.contrast >= 4.5],
+    ['简介每行约多少字', '中文约 15—35 字较舒适', r => r.perLine.toFixed(0), r => r.perLine >= 15 && r.perLine <= 35],
+    ['使用的字体', '1—2 种', r => r.fonts, r => r.fonts <= 2],
+    ['阅读区文字下方压着图案或色块', '0 处', r => `${r.under}／${r.nText} 处`, r => r.under === 0],
+    ['主要内容的左边缘', '越少越整齐', r => `${r.lefts} 处`, () => null],
+    ['日程表的对齐', '列表左对齐更易扫读', r => r.listAlign === 'center' ? '居中' : '左对齐', r => r.listAlign !== 'center']
+  ];
+  $('m').rows[0].insertAdjacentHTML('beforeend', keys.map(k => `<th>${STYLES[k].name.split('（')[0]}</th>`).join(''));
+  for (const [name, req, f, ok] of rows) $('m').insertAdjacentHTML('beforeend', `<tr><td>${name}</td><td class="sub">${req}</td>${keys.map(k => { const v = ok(results[k]); return `<td class="num ${v === null ? '' : v ? 'good' : 'poor'}">${f(results[k])}</td>`; }).join('')}</tr>`);
+  window.__style = Object.fromEntries(keys.map(k => [k, { contrast: +results[k].contrast.toFixed(2), perLine: +results[k].perLine.toFixed(1), fonts: results[k].fonts, under: results[k].under, lefts: results[k].lefts, listAlign: results[k].listAlign }]));
+});
+</script>
+</body>
+</html>
