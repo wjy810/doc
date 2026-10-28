@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>多人协作：共同查看、角色权限、冲突、历史与决策</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .main { display: grid; grid-template-columns: 660px minmax(0, 1fr); gap: 14px; align-items: start; }
+  svg { display: block; width: 100%; height: auto; background: #fafbfc; border-radius: 8px; }
+  .people { display: flex; gap: 6px; flex-wrap: wrap; }
+  .who { display: inline-flex; gap: 4px; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px 1px 2px; font-size: 12px; }
+  .who i { width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center; color: #fff; font-style: normal; font-size: 11px; }
+  .chip { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 11px; background: #eef0f3; }
+  select, button { font: inherit; padding: 2px 8px; border-radius: 6px; border: 1px solid #b9c0cc; background: #fff; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 共同查看：谁在、在看哪里、在做什么</h2>
+  <div class="people" id="people"></div>
+  <div class="main">
+    <svg id="board" viewBox="0 0 660 360" aria-label="共享白板"></svg>
+    <div style="display:grid;gap:6px">
+      <h3>全局小地图：每个人的视野</h3>
+      <svg id="mini" viewBox="0 0 330 180"></svg>
+      <table id="aware"><tr><th>协作线索</th><th>状态</th></tr></table>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>2 角色与权限：先说清楚谁能做什么</h2><table id="roles"></table><table id="ptest"><tr><th>谁</th><th>尝试</th><th>结果</th></tr></table></div>
+    <div style="display:grid;gap:6px"><h2>3 操作冲突：软锁、版本号与合并</h2><table id="conf"><tr><th>步骤</th><th>发生了什么</th></tr></table>
+      <h3>在线状态的延迟与冲突（模拟）</h3>
+      <table id="sim"><tr><th>他人“正在编辑”的显示延迟</th><th>每小时冲突</th><th>说明</th></tr></table></div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>4 历史：按人、按类型筛选，可以恢复</h2>
+      <div style="display:flex;gap:6px;align-items:center"><span class="sub">筛选</span><select id="fWho"><option value="">所有人</option></select><select id="fType"><option value="">所有类型</option><option>编辑</option><option>评论</option><option>恢复</option><option>决定</option></select></div>
+      <table id="hist"><tr><th>时间</th><th>谁</th><th>类型</th><th>内容</th></tr></table></div>
+    <div style="display:grid;gap:6px"><h2>5 决策记录：讨论之后留下“为什么”</h2><table id="dec"></table></div>
+  </div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs, parent, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; parent && parent.appendChild(e); return e; };
+
+// ---------- 模型 ----------
+const ROLES = {
+  所有者: ['查看', '评论', '编辑', '删除', '邀请', '导出'],
+  编辑者: ['查看', '评论', '编辑', '导出'],
+  评论者: ['查看', '评论'],
+  查看者: ['查看']
+};
+const users = {
+  甲: { role: '所有者', color: '#2f6fdb', cursor: [330, 92], view: [0, 0, 660, 360] },
+  丁: { role: '编辑者', color: '#7b4bd1', cursor: [470, 230], view: [300, 140, 660, 360] },
+  乙: { role: '评论者', color: '#1f7a4d', cursor: [140, 270], view: [0, 120, 440, 240] },
+  丙: { role: '查看者', color: '#e4572e', cursor: [600, 318], view: [700, 300, 520, 300] }
+};
+const WORLD = [0, 0, 1320, 720];
+const notes = [
+  { id: 'n1', x: 40, y: 40, text: '目标：三个月内完成数据可视化项目' },
+  { id: 'n2', x: 230, y: 40, text: '每周投入：8 小时' },
+  { id: 'n3', x: 420, y: 40, text: '先学 D3 还是 ECharts？' },
+  { id: 'n4', x: 40, y: 190, text: '第一个月：图表基础与数据清洗' },
+  { id: 'n5', x: 230, y: 190, text: '第二个月：交互与动画' },
+  { id: 'n6', x: 420, y: 190, text: '第三个月：作品集与面试准备' }
+].map(n => ({ ...n, version: 1, versions: [n.text], editors: {}, comments: [] }));
+const editingOf = n => Object.keys(n.editors)[0];
+let clock = 9 * 60;   // 分钟，从 9:00 开始
+const hhmm = () => `${String(Math.floor(clock / 60)).padStart(2, '0')}:${String(clock % 60).padStart(2, '0')}`;
+const history = [];
+function rec(who, type, text) { history.push({ t: hhmm(), who, type, text }); clock += 1; renderHist(); }
+function can(who, act) { return ROLES[users[who].role].includes(act); }
+const ptests = [];
+function attempt(who, act, fn, label) {
+  if (!can(who, act)) {
+    const hint = act === '编辑' ? '可以“申请编辑权限”，所有者同意后生效' : act === '删除' ? '只有所有者可以删除；可以在评论中提出' : '请联系所有者';
+    ptests.push([who, label, `被阻止：${users[who].role}不能${act}。${hint}`, 'mid']); renderP(); return false;
+  }
+  const r = fn(); ptests.push([who, label, r || '完成', 'good']); renderP(); return true;
+}
+function renderP() { const t = $('ptest'); [...t.rows].slice(1).forEach(r => r.remove()); for (const [a, b, c, cls] of ptests) t.insertAdjacentHTML('beforeend', `<tr><td>${a}</td><td>${b}</td><td class="${cls}">${c}</td></tr>`); }
+
+// 编辑：开始编辑时设软锁（别人会看到“某某正在编辑”）；保存时比较版本号
+function startEdit(who, id) {
+  const n = notes.find(n => n.id === id), other = Object.keys(n.editors).find(w => w !== who);
+  if (other) conf(`${who} 打开 ${id}`, `提示：“${other} 正在编辑这张便签”。可以等待、去编辑别的，或者仍然编辑——${who} 选择仍然编辑。`);
+  else conf(`${who} 打开 ${id}`, `其他人看到“${who} 正在编辑”（软锁：只提示，不阻止）`);
+  n.editors[who] = n.version; render(); awareness(); return n;
+}
+function save(who, id, text) {
+  const n = notes.find(n => n.id === id), base = n.editors[who] ?? n.version;
+  if (base !== n.version) {   // 有人在我打开之后保存过：不覆盖，给出两个版本
+    conf(`${who} 保存 ${id}`, `版本冲突：打开时是第 ${base} 版，现在已是第 ${n.version} 版（${n.lastBy} 改过）。不覆盖，并排显示“${n.text}”与“${text}”，请选择或合并。`);
+    delete n.editors[who]; render(); return false;
+  }
+  n.text = text; n.version++; n.versions.push(text); n.lastBy = who; delete n.editors[who];
+  rec(who, '编辑', `${id}：“${text}”（第 ${n.version} 版）`); conf(`${who} 保存 ${id}`, `成功，成为第 ${n.version} 版`); render(); awareness(); return true;
+}
+function comment(who, id, text) { const n = notes.find(n => n.id === id); n.comments.push({ who, text }); rec(who, '评论', `${id}：${text}`); render(); return '完成，评论显示在便签右下角'; }
+const decisions = [];
+function decide(who, d) {
+  decisions.push({ who, t: hhmm(), ...d }); rec(who, '决定', d.title + '：' + d.choice);
+  const t = $('dec'); t.innerHTML = '';
+  for (const x of decisions) t.insertAdjacentHTML('beforeend', `<tr><th style="width:90px">问题</th><td>${x.title}</td></tr><tr><th>考虑过的选项</th><td>${x.options.join('；')}</td></tr><tr><th>讨论</th><td>${x.discussion}</td></tr><tr><th>决定</th><td><b>${x.choice}</b>（${x.who}，${x.t}）</td></tr><tr><th>理由</th><td>${x.why}</td></tr><tr><th>相关</th><td>${x.links}</td></tr><tr><th>何时复查</th><td>${x.review}</td></tr>`);
+}
+const confRows = [];
+function conf(a, b) { confRows.push([a, b]); const t = $('conf'); [...t.rows].slice(1).forEach(r => r.remove()); confRows.forEach(([x, y], i) => t.insertAdjacentHTML('beforeend', `<tr><td style="white-space:nowrap">${i + 1} ${x}</td><td>${y}</td></tr>`)); }
+
+// ---------- 画面 ----------
+let ping = null, follow = { 丙: null };
+function render() {
+  const svg = $('board'); svg.innerHTML = '';
+  for (const n of notes) {
+    const g = el('g', {}, svg);
+    const ew = editingOf(n);
+    el('rect', { x: n.x, y: n.y, width: 170, height: 120, rx: 8, fill: '#fff8d6', stroke: ew ? users[ew].color : '#e0d39a', 'stroke-width': ew ? 3 : 1 }, g);
+    const words = n.text.match(/.{1,11}/g) || [];
+    words.forEach((w, i) => el('text', { x: n.x + 10, y: n.y + 26 + i * 18, 'font-size': 13, fill: '#1d2330' }, g, w));
+    el('text', { x: n.x + 10, y: n.y + 112, 'font-size': 10, fill: '#8a93a3' }, g, `${n.id} · 第 ${n.version} 版`);
+    if (ew) { const names = Object.keys(n.editors).join('、'), c = users[ew].color; el('rect', { x: n.x + 60, y: n.y - 10, width: 106, height: 20, rx: 10, fill: c }, g); el('text', { x: n.x + 113, y: n.y + 4, 'font-size': 11, fill: '#fff', 'text-anchor': 'middle' }, g, `${names} 正在编辑`); }
+    if (n.comments.length) { const c = n.comments[n.comments.length - 1]; el('circle', { cx: n.x + 160, cy: n.y + 110, r: 11, fill: users[c.who].color }, g); el('text', { x: n.x + 160, y: n.y + 114, 'font-size': 11, fill: '#fff', 'text-anchor': 'middle' }, g, n.comments.length); }
+  }
+  if (ping) { for (const r of [14, 26, 38]) el('circle', { cx: ping.x, cy: ping.y, r, fill: 'none', stroke: users[ping.who].color, 'stroke-width': 2, 'stroke-opacity': 1 - r / 50 }, svg); el('rect', { x: ping.x - 46, y: ping.y + 42, width: 92, height: 20, rx: 4, fill: users[ping.who].color }, svg); el('text', { x: ping.x, y: ping.y + 56, 'font-size': 12, fill: '#fff', 'text-anchor': 'middle' }, svg, `${ping.who}：请看这里`); }
+  for (const [name, u] of Object.entries(users)) {
+    const [x, y] = u.cursor; if (x > 660 || y > 360) continue;
+    el('path', { d: `M${x} ${y}l0 16l4.5 -4l3 7l3 -1.4l-3 -6.8l6 -0.3z`, fill: u.color, stroke: '#fff', 'stroke-width': 1 }, svg);
+    el('rect', { x: x + 12, y: y + 14, width: 18 + name.length * 13, height: 18, rx: 4, fill: u.color }, svg);
+    el('text', { x: x + 21, y: y + 27, 'font-size': 11, fill: '#fff' }, svg, name);
+  }
+  // 小地图
+  const mini = $('mini'); mini.innerHTML = ''; const k = 330 / WORLD[2];
+  el('rect', { x: 0, y: 0, width: 330, height: 180, fill: '#f6f7f9' }, mini);
+  for (const n of notes) el('rect', { x: n.x * k, y: n.y * k, width: 170 * k, height: 120 * k, fill: '#fff1b8' }, mini);
+  el('rect', { x: 900 * k, y: 450 * k, width: 300 * k, height: 200 * k, fill: '#e6ecf5' }, mini); el('text', { x: 1050 * k, y: 560 * k, 'font-size': 9, 'text-anchor': 'middle', fill: '#5b6475' }, mini, '参考资料区');
+  for (const [name, u] of Object.entries(users)) { const [x, y, w, h] = u.view; el('rect', { x: x * k, y: y * k, width: w * k, height: h * k, fill: 'none', stroke: u.color, 'stroke-width': 2, 'stroke-dasharray': name === '丙' && follow.丙 ? '4 2' : '' }, mini); el('text', { x: x * k + 3, y: y * k + 11, 'font-size': 10, fill: u.color }, mini, name); }
+  $('people').innerHTML = Object.entries(users).map(([n, u]) => `<span class="who"><i style="background:${u.color}">${n}</i>${u.role}</span>`).join('') + (follow.丙 ? `<span class="chip">丙 正在跟随 ${follow.丙} 的视野</span>` : '');
+}
+function awareness() {
+  const t = $('aware'); [...t.rows].slice(1).forEach(r => r.remove());
+  const rows = [
+    ['在线的人与角色', Object.entries(users).map(([n, u]) => `${n}（${u.role}）`).join('、')],
+    ['指针与名字', '每人一种颜色；视野外的人在小地图上显示'],
+    ['谁在编辑什么', notes.filter(n => editingOf(n)).map(n => `${Object.keys(n.editors).join('、')} → ${n.id}`).join('；') || '无'],
+    ['召集注意', ping ? `${ping.who} 发出“请看这里”，${ping.notified.join('、')} 的视野已移到该处` : '无'],
+    ['跟随', follow.丙 ? `丙 跟随 ${follow.丙}：两人视野相同（${users.丙.view.join(', ') === users[follow.丙].view.join(', ') ? '已核对' : '不一致'}）` : '无']
+  ];
+  for (const [a, b] of rows) t.insertAdjacentHTML('beforeend', `<tr><td>${a}</td><td>${b}</td></tr>`);
+}
+(function roles() {
+  const acts = ['查看', '评论', '编辑', '删除', '邀请', '导出'];
+  $('roles').innerHTML = `<tr><th>角色</th>${acts.map(a => `<th>${a}</th>`).join('')}</tr>` + Object.entries(ROLES).map(([r, a]) => `<tr><td>${r}</td>${acts.map(x => `<td class="${a.includes(x) ? 'good' : 'sub'}">${a.includes(x) ? '✓' : '—'}</td>`).join('')}</tr>`).join('');
+})();
+function renderHist() {
+  const t = $('hist'); [...t.rows].slice(1).forEach(r => r.remove());
+  const w = $('fWho').value, ty = $('fType').value;
+  for (const h of history.filter(h => (!w || h.who === w) && (!ty || h.type === ty))) t.insertAdjacentHTML('beforeend', `<tr><td class="num">${h.t}</td><td style="color:${users[h.who].color}">${h.who}</td><td>${h.type}</td><td>${h.text}</td></tr>`);
+}
+for (const n of Object.keys(users)) $('fWho').insertAdjacentHTML('beforeend', `<option>${n}</option>`);
+$('fWho').onchange = $('fType').onchange = renderHist;
+function restore(who, id, ver) {
+  const n = notes.find(n => n.id === id), text = n.versions[ver - 1];
+  n.text = text; n.version++; n.versions.push(text); n.lastBy = who;   // 恢复也是一次新的修改，历史不会被抹掉
+  rec(who, '恢复', `${id} 恢复到第 ${ver} 版的内容（成为第 ${n.version} 版）`); render();
+}
+
+// ---------- 在线状态延迟与冲突（模拟） ----------
+// 4 位编辑者、12 张便签（讨论集中在少数几张：被选中的概率与排名成反比），每次编辑平均 20 秒，两次编辑之间平均思考 30 秒。
+// 冲突：两人同时编辑同一张便签。有在线状态时，人会避开“看起来正在被编辑”的便签——但他们看到的是延迟之前的状态。
+function simulate(delay, aware, seed = 5, hours = 20) {
+  const r = rng(seed), exp = m => -Math.log(1 - r()) * m, W = Array.from({ length: 12 }, (_, i) => 1 / (i + 1)), WS = W.reduce((a, b) => a + b);
+  const pick = avoid => { for (let tries = 0; tries < 50; tries++) { let x = r() * WS, i = 0; while (x > W[i]) x -= W[i++]; if (!avoid.has(i)) return i; } return -1; };
+  const ed = [];   // {who, note, t0, t1}
+  let conflicts = 0; const people = [0, 1, 2, 3].map(p => ({ next: exp(30) }));
+  const END = hours * 3600;
+  while (true) {
+    let p = 0; for (let i = 1; i < 4; i++) if (people[i].next < people[p].next) p = i;
+    const t = people[p].next; if (t > END) break;
+    const visible = new Set(aware ? ed.filter(e => e.t0 <= t - delay && e.t1 > t - delay).map(e => e.note) : []);
+    const note = pick(visible);
+    if (note < 0) { people[p].next = t + 5; continue; }
+    const d = exp(20);
+    if (ed.some(e => e.note === note && e.t0 < t + d && e.t1 > t)) conflicts++;
+    ed.push({ who: p, note, t0: t, t1: t + d }); people[p].next = t + d + exp(30);
+  }
+  return conflicts / hours;
+}
+const simRows = [['不显示', simulate(0, false), '谁在编辑完全看不到'], ['30 秒', simulate(30, true), '状态过时：显示的往往是已经结束的编辑'], ['5 秒', simulate(5, true), ''], ['1 秒', simulate(1, true), ''], ['0.2 秒', simulate(0.2, true), '接近实时']];
+for (const [a, v, c] of simRows) $('sim').insertAdjacentHTML('beforeend', `<tr><td>${a}</td><td class="num">${v.toFixed(1)}</td><td>${c}</td></tr>`);
+$('sim').insertAdjacentHTML('beforeend', '<tr><td colspan="3" class="sub">模型：4 位编辑者、12 张便签（讨论集中在少数几张），每次编辑平均 20 秒，两次编辑之间平均 30 秒；模拟 20 小时。在线状态不能消除“同时开始”的冲突，所以保存时仍要检查版本。</td></tr>');
+
+window.__tg = { users, notes, startEdit, save, attempt, comment, decide, restore, rec, render, awareness, history, ptests, confRows, setPing: (who, x, y) => { const notified = []; for (const [n, u] of Object.entries(users)) if (n !== who) { u.view = [Math.max(0, x - 330), Math.max(0, y - 180), 660, 360]; notified.push(n); } ping = { who, x, y, notified }; render(); awareness(); }, follow: (a, b) => { follow[a] = b; users[a].view = [...users[b].view]; render(); awareness(); }, simRows, renderHist };
+render(); awareness();
+</script>
+</body>
+</html>

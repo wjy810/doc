@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>实体与可触交互：物件追踪、针阵显示器与设备通信（模拟）</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  svg { display: block; width: 100%; height: auto; background: #fafbfc; border-radius: 8px; }
+  canvas { display: block; width: 100%; height: auto; border-radius: 8px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 物件桌面：把摄像头看到的标记变成可靠的数字状态（模拟 20 秒，每秒 30 帧）</h2>
+  <p class="sub">桌上的四个物件贴有带编号的标记。摄像头每帧都可能漏检（手挡住、反光、移动模糊），偶尔还会把纹理误认成标记。直接用“这一帧看到了什么”作为状态，物件会不停地“出现—消失”。可靠的做法：连续看到 3 帧才算放下，连续 10 帧（约 0.33 秒）看不到才算拿走；位置用 1€ 滤波器平滑。</p>
+  <div class="two">
+    <div style="display:grid;gap:4px"><svg id="board" viewBox="0 0 520 300"></svg><p class="sub" id="boardNote"></p></div>
+    <div style="display:grid;gap:6px"><svg id="timeline" viewBox="0 0 520 210"></svg><table id="ttab"><tr><th>指标</th><th>逐帧直接使用</th><th>滞回 ＋ 1€ 滤波</th></tr></table></div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>2 针阵形状显示器：数字形状受机械约束，按压也是输入（模拟）</h2>
+  <p class="sub">24 × 24 根针，每根可升降 0—100 毫米，最快每秒 120 毫米（假设参数）。界面想显示的形状（目标）不一定能立即做到：超出行程的部分被截断，变化太快的部分会滞后。用户按住针时，电机到不了目标位置——位置误差本身就可以用来检测按压。</p>
+  <div class="two">
+    <div style="display:grid;gap:4px"><canvas id="pins" width="540" height="300"></canvas><p class="sub" id="pinNote"></p></div>
+    <div style="display:grid;gap:6px"><svg id="pinChart" viewBox="0 0 520 170"></svg><table id="ptab"><tr><th>情况</th><th>结果</th></tr></table></div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>3 设备通信：数据帧、校验与心跳（模拟串口）</h2>
+  <p class="sub">传感器每秒发送 30 个读数，共 2000 个。传输中每个字节有 0.2% 的概率被改错一位、0.1% 的概率丢失。纯文本逐行解析会把改错的数字当成正常读数；带帧头、序号和 CRC-8 校验的数据帧能发现错误、丢弃坏帧、并从序号看出丢了多少。设备在第 1600 帧后断开，心跳超时让界面进入安全状态。</p>
+  <div class="two">
+    <table id="stab"><tr><th>指标</th><th>纯文本逐行</th><th>帧 ＋ 序号 ＋ CRC-8</th></tr></table>
+    <table id="htab"><tr><th>事件</th><th>时间</th><th>界面</th></tr></table>
+  </div>
+</section>
+
+<script type="module">
+import * as THREE from 'three';
+const $ = id => document.getElementById(id);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function gauss(r) { let u = 0; while (!u) u = r(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * r()); }
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs, parent, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; parent && parent.appendChild(e); return e; };
+
+// ---------- 1 物件追踪 ----------
+const FPS = 30, T = 20, N = FPS * T;
+// 真实情况：何时放下、移动、拿走（单位：毫米）
+const truth = {
+  A: [{ t0: 1, t1: 20, from: [100, 90] }],
+  B: [{ t0: 3, t1: 20, from: [300, 80], move: [8, 10, [300, 240]] }],
+  C: [{ t0: 5, t1: 12, from: [160, 230] }],
+  D: [{ t0: 6, t1: 15, from: [430, 210] }, { t0: 17, t1: 20, from: [430, 70] }]
+};
+function truePos(id, t) {
+  for (const s of truth[id]) if (t >= s.t0 && t < s.t1) {
+    if (s.move && t >= s.move[0]) { const k = Math.min(1, (t - s.move[0]) / (s.move[1] - s.move[0])); return { p: [s.from[0] + (s.move[2][0] - s.from[0]) * k, s.from[1] + (s.move[2][1] - s.from[1]) * k], moving: t < s.move[1] }; }
+    return { p: s.from, moving: false };
+  }
+  return null;
+}
+const r1 = rng(42), frames = [];
+for (let f = 0; f < N; f++) {
+  const t = f / FPS, det = [];
+  for (const id in truth) { const tp = truePos(id, t); if (!tp) continue; if (r1() < (tp.moving ? 0.6 : 0.92)) det.push({ id, p: [tp.p[0] + gauss(r1) * 3, tp.p[1] + gauss(r1) * 3] }); }
+  if (r1() < 0.01) det.push({ id: 'ABCDEF'[Math.floor(r1() * 6)], p: [20 + r1() * 480, 20 + r1() * 260], ghost: true });
+  frames.push(det);
+}
+class LowPass { y = null; filter(x, a) { this.y = this.y === null ? x : a * x + (1 - a) * this.y; return this.y; } }
+class OneEuro {   // 1€ 滤波器：慢时强平滑去抖，快时弱平滑减少滞后
+  constructor(minCutoff = 1, beta = 0.02, dCutoff = 1) { Object.assign(this, { minCutoff, beta, dCutoff, x: new LowPass(), dx: new LowPass(), prev: null }); }
+  alpha(c, dt) { const tau = 1 / (2 * Math.PI * c); return 1 / (1 + tau / dt); }
+  filter(v, dt) { const d = this.prev === null ? 0 : (v - this.prev) / dt; this.prev = v; const ed = this.dx.filter(d, this.alpha(this.dCutoff, dt)); return this.x.filter(v, this.alpha(this.minCutoff + this.beta * Math.abs(ed), dt)); }
+}
+function track(robust) {
+  const ids = 'ABCDEF', st = {}, events = [], pres = {}, pos = {};
+  for (const id of ids) { st[id] = { on: false, seen: 0, miss: 0, fx: new OneEuro(), fy: new OneEuro() }; pres[id] = []; pos[id] = []; }
+  frames.forEach((det, f) => {
+    for (const id of ids) {
+      const s = st[id], d = det.find(x => x.id === id);
+      if (d) { s.seen++; s.miss = 0; } else { s.miss++; s.seen = 0; }
+      const was = s.on;
+      if (!robust) s.on = !!d;
+      else { if (!s.on && s.seen >= 3) s.on = true; if (s.on && s.miss >= 10) s.on = false; }
+      if (s.on !== was) events.push({ f, id, type: s.on ? '放下' : '拿走' });
+      if (d) { const p = robust ? [s.fx.filter(d.p[0], 1 / FPS), s.fy.filter(d.p[1], 1 / FPS)] : d.p; s.last = p; }
+      if (!s.on && robust) { s.fx = new OneEuro(); s.fy = new OneEuro(); }
+      pres[id].push(s.on); pos[id].push(s.on ? s.last : null);
+    }
+  });
+  return { events, pres, pos };
+}
+const naive = track(false), rob = track(true);
+// 真实事件
+const truthEv = []; for (const id in truth) for (const s of truth[id]) { truthEv.push({ f: Math.round(s.t0 * FPS), id, type: '放下' }); if (s.t1 < T) truthEv.push({ f: Math.round(s.t1 * FPS), id, type: '拿走' }); }
+function latency(ev) {   // 每个真实事件之后，第一次出现同类事件的延迟
+  const ls = []; for (const te of truthEv) { const m = ev.events.find(e => e.id === te.id && e.type === te.type && e.f >= te.f); if (m) ls.push((m.f - te.f) / FPS * 1000); } return ls;
+}
+function jitter(res, id, f0, f1) { const xs = []; for (let f = f0; f < f1; f++) if (res.pos[id][f]) xs.push(res.pos[id][f]); const mx = xs.reduce((s, p) => s + p[0], 0) / xs.length, my = xs.reduce((s, p) => s + p[1], 0) / xs.length; return Math.sqrt(xs.reduce((s, p) => s + (p[0] - mx) ** 2 + (p[1] - my) ** 2, 0) / xs.length); }
+function moveErr(res) { let s = 0, n = 0; for (let f = 8 * FPS; f < 10 * FPS; f++) { const p = res.pos.B[f], tp = truePos('B', f / FPS); if (p && tp) { s += Math.hypot(p[0] - tp.p[0], p[1] - tp.p[1]); n++; } } return s / n; }
+const mean = a => a.reduce((s, x) => s + x, 0) / a.length;
+const tm = {
+  events: [naive.events.length, rob.events.length],
+  ghosts: [naive.events.filter(e => 'EF'.includes(e.id)).length, rob.events.filter(e => 'EF'.includes(e.id)).length],
+  lat: [mean(latency(naive)), mean(latency(rob))],
+  jit: [jitter(naive, 'A', 2 * FPS, 20 * FPS), jitter(rob, 'A', 2 * FPS, 20 * FPS)],
+  mv: [moveErr(naive), moveErr(rob)]
+};
+{
+  const t = $('ttab'), row = (a, b, c, cls = ['', '']) => t.insertAdjacentHTML('beforeend', `<tr><td>${a}</td><td class="num ${cls[0]}">${b}</td><td class="num ${cls[1]}">${c}</td></tr>`);
+  row('“放下／拿走”事件（真实为 ' + truthEv.length + ' 次）', tm.events[0] + ' 次', tm.events[1] + ' 次', ['poor', tm.events[1] === truthEv.length ? 'good' : 'mid']);
+  row('把误认的标记当成物件（E、F 并不存在）', tm.ghosts[0] + ' 次', tm.ghosts[1] + ' 次', [tm.ghosts[0] ? 'poor' : 'good', tm.ghosts[1] ? 'poor' : 'good']);
+  row('事件的平均延迟', tm.lat[0].toFixed(0) + ' 毫秒', tm.lat[1].toFixed(0) + ' 毫秒', ['good', 'mid']);
+  row('静止物件 A 的位置抖动（均方根）', tm.jit[0].toFixed(1) + ' 毫米', tm.jit[1].toFixed(1) + ' 毫米', ['mid', 'good']);
+  row('移动中的物件 B 的位置误差（平均）', tm.mv[0].toFixed(1) + ' 毫米', tm.mv[1].toFixed(1) + ' 毫米');
+  t.insertAdjacentHTML('beforeend', `<tr><td colspan="3" class="sub">可靠性的代价是延迟：拿走一个物件，系统要约 0.33 秒后才确认。界面可以先把物件画成半透明的“可能已拿走”，确认后再移除。</td></tr>`);
+}
+// 桌面俯视图：第 9 秒（物件 B 正在被移动）
+(function board() {
+  const svg = $('board'), f = 9 * FPS, S = 1;
+  el('rect', { x: 10, y: 10, width: 500, height: 280, rx: 10, fill: '#efe7da', stroke: '#c9b89a' }, svg);
+  for (let k = f - 15; k <= f; k++) for (const d of frames[k]) el('circle', { cx: d.p[0] * S + 10, cy: d.p[1] * S + 10, r: 2, fill: d.ghost ? '#b3261e' : '#8a93a3', 'fill-opacity': 0.6 }, svg);
+  for (const id of 'ABCD') {
+    const tp = truePos(id, f / FPS); if (tp) el('rect', { x: tp.p[0] - 18 + 10, y: tp.p[1] - 18 + 10, width: 36, height: 36, rx: 6, fill: 'none', stroke: '#5b6475', 'stroke-dasharray': '3 3' }, svg);
+    const p = rob.pos[id][f]; if (p) { el('rect', { x: p[0] - 16 + 10, y: p[1] - 16 + 10, width: 32, height: 32, rx: 6, fill: '#2f6fdb', 'fill-opacity': 0.85 }, svg); el('text', { x: p[0] + 10, y: p[1] + 15, 'text-anchor': 'middle', 'font-size': 14, fill: '#fff', 'font-weight': 700 }, svg, id); }
+  }
+  $('boardNote').textContent = '第 9 秒的桌面：虚线框是真实位置，灰点是最近 0.5 秒的原始检测，蓝色方块是滤波后的状态（物件 B 正在被拖动，显示略滞后）。';
+})();
+// 时间线
+(function timeline() {
+  const svg = $('timeline'), x0 = 92, w = 420, X = f => x0 + f / N * w;
+  let y = 6;
+  for (const id of 'ABCD') {
+    for (const [name, pres, color] of [['真实', null, '#5b6475'], ['逐帧', naive.pres[id], '#e4572e'], ['滤波', rob.pres[id], '#2f6fdb']]) {
+      el('text', { x: 4, y: y + 8, 'font-size': 10, fill: '#5b6475' }, svg, `${id} ${name}`);
+      let start = null;
+      for (let f = 0; f <= N; f++) {
+        const on = f < N && (pres ? pres[f] : !!truePos(id, f / FPS));
+        if (on && start === null) start = f; if (!on && start !== null) { el('rect', { x: X(start), y, width: Math.max(0.6, X(f) - X(start)), height: 9, fill: color }, svg); start = null; }
+      }
+      y += 11;
+    }
+    y += 5;
+  }
+  for (let s = 0; s <= 20; s += 5) el('text', { x: X(s * FPS), y: y + 6, 'font-size': 10, fill: '#5b6475', 'text-anchor': 'middle' }, svg, s + ' 秒');
+})();
+
+// ---------- 2 针阵显示器 ----------
+const G = 24, VMAX = 120, TRAVEL = 100, DT = 1 / 30;
+const target = (i, j, t) => {
+  if (t < 1) return 0;
+  if (t < 4) { const d = Math.hypot(i - 11.5, j - 11.5); return d < 7 ? 80 : 0; }                    // 第 1 秒：突然出现一个台子
+  const c = 4 + (t - 4) * (t < 7 ? 2 : 7);                                                          // 之后：一道波，先慢后快
+  return 60 + 50 * Math.sin((i + j) * 0.45 - c);                                                    // 峰值 110 毫米：超出行程
+};
+const H = new Float32Array(G * G);
+const press = { i: 6, j: 17, r: 2.5, t0: 9.0, t1: 10.5, depth: 40 };   // 第 9—10.5 秒：手按住这里
+function stepPins(t) {
+  let clamped = 0;
+  for (let i = 0; i < G; i++) for (let j = 0; j < G; j++) {
+    const k = i * G + j; let tg = target(i, j, t); if (tg > TRAVEL) { tg = TRAVEL; clamped++; } if (tg < 0) tg = 0;
+    let h = H[k] + Math.max(-VMAX * DT, Math.min(VMAX * DT, tg - H[k]));
+    const pressed = t >= press.t0 && t < press.t1 && Math.hypot(i - press.i, j - press.j) <= press.r;
+    if (pressed) h = Math.min(h, Math.max(press.depth, H[k] - 6));      // 手按在 40 毫米高处：高于手的针被压下，低于手的针升不上去
+    H[k] = h;
+  }
+  return clamped;
+}
+// 按压检测：针离目标还差 15 毫米以上，却没有以全速上升——说明有东西挡住了它
+let maxClamped = 0, stepSettle = null, pressDetected = null, falseDetect = 0;
+const pin = [11, 11], series = [];
+for (let f = 0; f <= 12 * 30; f++) {
+  const t = f / 30, prev = Float32Array.from(H);
+  maxClamped = Math.max(maxClamped, stepPins(t));
+  if (stepSettle === null && t >= 1 && Math.abs(H[pin[0] * G + pin[1]] - 80) < 0.5) stepSettle = t - 1;
+  for (let i = 0; i < G; i++) for (let j = 0; j < G; j++) {
+    const k = i * G + j, tg = Math.min(TRAVEL, Math.max(0, target(i, j, t)));
+    const stuck = tg - H[k] > 15 && H[k] - prev[k] < VMAX * DT * 0.5;
+    if (stuck) { const inPress = t >= press.t0 && t < press.t1 && Math.hypot(i - press.i, j - press.j) <= press.r; if (inPress) { if (!pressDetected) pressDetected = { t, i, j }; } else falseDetect++; }
+  }
+  series.push([t, Math.min(TRAVEL, target(...pin, t)), H[pin[0] * G + pin[1]], target(...pin, t)]);
+}
+// 波的跟踪误差：慢波（5—7 秒）与快波（8—9 秒、10.5—12 秒，避开按压的时段）；不计被按住的针
+const errSlow = [], errFast = [];
+let pressN = 0; for (let i = 0; i < G; i++) for (let j = 0; j < G; j++) if (Math.hypot(i - press.i, j - press.j) <= press.r) pressN++;
+{ H.fill(0); for (let f = 0; f <= 12 * 30; f++) { const t = f / 30; stepPins(t); if (t >= 5 && t < 7 || t >= 8 && t < 9 || t >= 10.5) { let s = 0; for (let i = 0; i < G; i++) for (let j = 0; j < G; j++) { if (Math.hypot(i - press.i, j - press.j) <= press.r) continue; s += Math.abs(Math.min(TRAVEL, Math.max(0, target(i, j, t))) - H[i * G + j]); } (t < 7 ? errSlow : errFast).push(s / (G * G - pressN)); } } }
+{
+  const t = $('ptab');
+  const rows = [
+    ['台子突然出现（0 → 80 毫米）', `中心针用 ${stepSettle.toFixed(2)} 秒到位（受最大速度限制）`],
+    ['波峰 110 毫米，超过行程 100 毫米', `最多 ${maxClamped} 根针被截断在 100 毫米`],
+    ['慢波（每秒相位变化 2 弧度）', `平均误差 ${mean(errSlow).toFixed(1)} 毫米`],
+    ['快波（每秒相位变化 7 弧度）', `平均误差 ${mean(errFast).toFixed(1)} 毫米：针跟不上，形状变“钝”`],
+    ['第 9 秒手按住 (6, 17) 附近', pressDetected ? `第 ${pressDetected.t.toFixed(2)} 秒检测到按压，位置 (${pressDetected.i}, ${pressDetected.j})` : '没有检测到'],
+    ['把“正在追赶目标”误判为按压', `${falseDetect} 次（追赶中的针以全速上升，不会被误判）`]
+  ];
+  for (const [a, b] of rows) t.insertAdjacentHTML('beforeend', `<tr><td>${a}</td><td>${b}</td></tr>`);
+  window.__pins = { stepSettle, maxClamped, slow: mean(errSlow), fast: mean(errFast), pressDetected, falseDetect };
+}
+(function chart() {
+  const svg = $('pinChart'), x0 = 40, w = 470, y0 = 140, hS = 1.15, X = t => x0 + t / 12 * w, Y = v => y0 - v * hS;
+  el('line', { x1: x0, y1: Y(TRAVEL), x2: x0 + w, y2: Y(TRAVEL), stroke: '#b3261e', 'stroke-dasharray': '4 3' }, svg); el('text', { x: x0 + w - 2, y: Y(TRAVEL) - 3, 'text-anchor': 'end', 'font-size': 10, fill: '#b3261e' }, svg, '行程上限 100 毫米');
+  el('path', { d: 'M' + series.map(s => `${X(s[0]).toFixed(1)} ${Y(s[3]).toFixed(1)}`).join('L'), fill: 'none', stroke: '#8a93a3', 'stroke-dasharray': '3 2' }, svg);
+  el('path', { d: 'M' + series.map(s => `${X(s[0]).toFixed(1)} ${Y(s[2]).toFixed(1)}`).join('L'), fill: 'none', stroke: '#2f6fdb', 'stroke-width': 2 }, svg);
+  for (let s = 0; s <= 12; s += 2) el('text', { x: X(s), y: y0 + 14, 'text-anchor': 'middle', 'font-size': 10, fill: '#5b6475' }, svg, s + ' 秒');
+  for (const v of [0, 50, 100]) el('text', { x: x0 - 4, y: Y(v) + 3, 'text-anchor': 'end', 'font-size': 10, fill: '#5b6475' }, svg, v);
+  el('text', { x: x0 + 4, y: 12, 'font-size': 11, fill: '#1d2330' }, svg, '中心针 (11, 11)：灰色虚线是目标，蓝线是实际高度');
+})();
+// 三维画面：左边第 6 秒（慢波，波峰被截断在行程上限，黄色），右边第 9.6 秒（快波，左侧被手按住，红色）
+(function render() {
+  const r = new THREE.WebGLRenderer({ canvas: $('pins'), antialias: true }); r.setPixelRatio(1); r.setScissorTest(true);
+  const pitch = 10, geo = new THREE.BoxGeometry(8.5, 1, 8.5); geo.translate(0, 0.5, 0);
+  const m = new THREE.Matrix4(), col = new THREE.Color(), shown = {};
+  [[6.0, 0], [9.6, 270]].forEach(([tSnap, x0]) => {
+    H.fill(0); for (let f = 0; f <= Math.round(tSnap * 30); f++) stepPins(f / 30);
+    const s = new THREE.Scene(); s.background = new THREE.Color(x0 ? 0xe9edf2 : 0xeef1f5);
+    const cam = new THREE.PerspectiveCamera(38, 270 / 300, 1, 2000); cam.position.set(-60, 430, 300); cam.lookAt(0, 0, 10);
+    s.add(new THREE.HemisphereLight(0xffffff, 0x667788, 1.6)); const d = new THREE.DirectionalLight(0xffffff, 1.6); d.position.set(-150, 400, 250); s.add(d);
+    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 }), G * G);
+    let clampedN = 0, pressedN = 0;
+    for (let i = 0; i < G; i++) for (let j = 0; j < G; j++) {
+      const k = i * G + j, h = Math.max(1, H[k]); m.makeScale(1, h, 1).setPosition((i - G / 2) * pitch, 0, (j - G / 2) * pitch); mesh.setMatrixAt(k, m);
+      const pressed = tSnap >= press.t0 && tSnap < press.t1 && Math.hypot(i - press.i, j - press.j) <= press.r;
+      if (pressed) { col.set(0xe4572e); pressedN++; } else if (H[k] >= TRAVEL - 0.01) { col.set(0xf0b429); clampedN++; } else col.set(0xe6ecf5).lerp(new THREE.Color(0x2f6fdb), H[k] / TRAVEL);
+      mesh.setColorAt(k, col);
+    }
+    s.add(mesh); const base = new THREE.Mesh(new THREE.BoxGeometry(G * pitch + 20, 10, G * pitch + 20), new THREE.MeshStandardMaterial({ color: 0x5b6475 })); base.position.y = -5; s.add(base);
+    r.setViewport(x0, 0, 270, 300); r.setScissor(x0, 0, 270, 300); r.render(s, cam);
+    shown[tSnap] = { clampedN, pressedN };
+  });
+  $('pinNote').textContent = `左：第 6 秒，慢波，${shown[6].clampedN} 根针被截断在 100 毫米（黄色）。右：第 9.6 秒，快波，${shown[9.6].pressedN} 根针被手按住（红色凹陷）。颜色越深针越高。`;
+  window.__pinShown = shown;
+})();
+
+// ---------- 3 设备通信 ----------
+const crc8 = bytes => { let c = 0; for (const b of bytes) { c ^= b; for (let i = 0; i < 8; i++) c = c & 0x80 ? ((c << 1) ^ 0x07) & 0xff : (c << 1) & 0xff; } return c; };
+const COUNT = 2000, DISCONNECT = 1600, values = Array.from({ length: COUNT }, (_, i) => Math.round(512 + 400 * Math.sin(i / 25)));
+function corrupt(bytes, seed) { const r = rng(seed), out = []; let flips = 0, drops = 0; for (const b of bytes) { if (r() < 0.001) { drops++; continue; } if (r() < 0.002) { out.push(b ^ (1 << Math.floor(r() * 8))); flips++; } else out.push(b); } return { out, flips, drops }; }
+// 纯文本：每行一个数字。解析时按原始换行的位置记录每一行本来对应哪个读数（只用于检验，接收端并不知道）
+const text = [], expect = []; values.slice(0, DISCONNECT).forEach(v => { expect.push(v); for (const ch of String(v) + '\n') text.push(ch.charCodeAt(0)); });
+const ct = corrupt(text, 9);
+function textEval() {   // 与 corrupt() 使用同一个种子和同样的取随机数顺序，得到同样的损坏
+  const r = rng(9); let line = '', src = 0, start = 0, acc = 0, wrong = 0, fail = 0;
+  for (const b0 of text) {
+    const isNL = b0 === 10, drop = r() < 0.001; let b = b0;
+    if (!drop && r() < 0.002) b = b0 ^ (1 << Math.floor(r() * 8));
+    if (isNL) src++;
+    if (drop) continue;
+    if (b === 10) { const n = Number(line); if (line !== '' && Number.isInteger(n)) { acc++; if (n !== expect[start]) wrong++; } else fail++; line = ''; start = src; }
+    else line += String.fromCharCode(b);       // 换行被改错或丢失时，两行会合成一行，例如 512 与 530 变成 512530
+  }
+  return { acc, wrong, fail };
+}
+const te = textEval();
+// 数据帧：0xAA，序号，值高字节，值低字节，CRC-8
+const fb = []; values.slice(0, DISCONNECT).forEach((v, i) => { const body = [i & 0xff, v >> 8, v & 0xff]; fb.push(0xAA, ...body, crc8(body)); });
+const cf = corrupt(fb, 9);
+let fAcc = 0, fWrong = 0, fBad = 0, lastSeq = -1, lost = 0, seqBase = 0;
+for (let i = 0; i + 4 < cf.out.length;) {
+  if (cf.out[i] !== 0xAA) { i++; continue; }                              // 重新同步：找下一个帧头
+  const body = cf.out.slice(i + 1, i + 4);
+  if (crc8(body) !== cf.out[i + 4]) { fBad++; i++; continue; }
+  const seq = body[0], v = body[1] << 8 | body[2];
+  if (lastSeq >= 0) { const gap = (seq - lastSeq + 256) % 256 - 1; lost += gap; if (seq < lastSeq) seqBase += 256; }
+  lastSeq = seq; const full = seqBase + seq;
+  fAcc++; if (values[full] !== v) fWrong++;
+  i += 5;
+}
+{
+  const t = $('stab'), row = (a, b, c, cls = ['', '']) => t.insertAdjacentHTML('beforeend', `<tr><td>${a}</td><td class="num ${cls[0]}">${b}</td><td class="num ${cls[1]}">${c}</td></tr>`);
+  row('发送的读数', DISCONNECT, DISCONNECT);
+  row('传输中改错／丢失的字节', `${ct.flips}／${ct.drops}`, `${cf.flips}／${cf.drops}`);
+  row('接受的读数', te.acc, fAcc);
+  row('其中数值错误却被接受', te.wrong, fWrong, [te.wrong ? 'poor' : 'good', fWrong ? 'poor' : 'good']);
+  row('发现并丢弃的坏数据', `${te.fail} 行无法解析`, `${fBad} 次校验失败`);
+  row('能否知道丢了多少', '不能', `能：序号显示丢了 ${lost} 帧`, ['poor', 'good']);
+  window.__serial = { text: te, flips: [ct.flips, ct.drops], frame: { fAcc, fWrong, fBad, lost }, frameFlips: [cf.flips, cf.drops] };
+}
+// 心跳：每 33 毫秒一帧；超过 300 毫秒没有收到任何有效帧就判定断开
+{
+  const lastAt = (DISCONNECT - 1) / 30 * 1000, detectAt = lastAt + 300;
+  const rows = [['最后一个有效帧', `${(lastAt / 1000).toFixed(2)} 秒`, '正常显示'], ['心跳超时（300 毫秒没有有效帧）', `${(detectAt / 1000).toFixed(2)} 秒`, '显示“设备已断开”，针阵缓慢降到 0，停止接受按压输入'], ['设备重新连接', '—', '重新握手、读取设备状态后，再恢复显示与输入']];
+  for (const [a, b, c] of rows) $('htab').insertAdjacentHTML('beforeend', `<tr><td>${a}</td><td class="num">${b}</td><td>${c}</td></tr>`);
+  $('htab').insertAdjacentHTML('beforeend', `<tr><td colspan="3" class="sub">本页环境${'serial' in navigator ? '提供' : '不提供'} Web Serial API（navigator.serial）。连接真实设备时，把这里的模拟数据流换成 port.readable 读到的字节即可，解析与心跳逻辑不变。</td></tr>`);
+}
+window.__tan = { tm, truthEv: truthEv.length, naiveEv: naive.events, robEv: rob.events };
+</script>
+</body>
+</html>
