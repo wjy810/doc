@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>生成式界面：流式输出、取消、版本、局部编辑与来源</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 4px 0 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .col { display: grid; gap: 6px; align-content: start; }
+  .tag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 9px; background: #fff3d6; color: #7a4a00; }
+  .chat { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: #fbfbfa; font-size: 12.5px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; font-size: 12px; color: var(--muted); }
+  .bar b { color: var(--ink); }
+  button { font: inherit; font-size: 12px; padding: 1px 9px; border: 1px solid #b9c3d3; background: #f3f6fb; border-radius: 6px; cursor: pointer; }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+  .stopped { border-left: 3px solid #c77700; padding-left: 8px; color: #5b4a33; }
+  .para { margin: 0 0 4px; padding: 2px 4px; border-radius: 4px; }
+  .para.changed { background: #fff3d6; } .para.kept { background: #eef7f1; } .para.mine { box-shadow: inset 3px 0 0 #2f6fdb; }
+  .seg-calc { background: #e3f1e8; border-bottom: 2px solid #1f7a4d; } .seg-quote { background: #e8eefb; } .seg-guess { background: #fdeee7; border-bottom: 2px dashed #b3261e; }
+  sup.cite { color: var(--accent); font-size: 10px; } sup.cite.badref { color: var(--bad); font-weight: 700; }
+  .key { display: inline-block; width: 22px; height: 10px; border-radius: 2px; margin: 0 3px 0 8px; vertical-align: -1px; }
+  .vers { display: flex; gap: 4px; flex-wrap: wrap; }
+  .vers span { border: 1px solid var(--line); border-radius: 10px; padding: 0 7px; font-size: 11px; }
+  .vers span.cur { border-color: var(--accent); color: var(--accent); }
+  #scrollbox { height: 90px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 11px; position: absolute; left: -9999px; width: 400px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <p class="sub"><span class="tag">模拟</span> 本页的“助手”是一个按脚本逐字输出的模拟器，回答与资料都是为演示而构造的，不调用任何模型。要测量的是界面怎样处理流式输出、等待、取消、版本、局部编辑、来源与不确定的内容。</p>
+  <div class="two">
+    <div class="col"><h2>1 流式输出：每来一个字，界面要做多少事</h2><table id="render"></table><p class="m" id="mrender"></p>
+      <h3>用户往上翻看时，新内容会不会把人拽回底部</h3><table id="scroll"></table>
+      <h3>读屏软件会被打断多少次</h3><table id="live"></table><p class="m" id="mlive"></p></div>
+    <div class="col"><h2>2 当前状态：用户随时知道“现在在做什么、我能做什么”</h2><table id="states"></table>
+      <h2>3 取消：停下来的是生成，不只是转圈的图标</h2>
+      <div class="chat" id="cancelDemo"></div><table id="cancel"></table><p class="m" id="mcancel"></p></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div class="col"><h2>4 重新生成与 5 局部编辑：不要丢掉用户已经认可的内容</h2>
+      <div class="vers" id="vers"></div><div class="chat" id="verDemo"></div><table id="regen"></table><p class="m" id="mregen"></p></div>
+    <div class="col"><h2>6 来源与 7 哪些内容已经确定</h2>
+      <p class="sub"><span class="key seg-calc"></span>由资料算出、可复核<span class="key seg-quote"></span>转述资料<span class="key seg-guess"></span>推测，需要核对　上标是来源编号</p>
+      <div class="chat" id="srcDemo"></div><table id="srcCheck"></table><p class="m" id="msrc"></p><table id="sources"></table></div>
+  </div>
+</section>
+<div id="scrollbox"></div>
+<script>
+const $ = id => document.getElementById(id);
+const fmt = (v, d = 1) => v == null || Number.isNaN(v) ? '—' : v.toFixed(d);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ok = (b, y = '是', n = '否') => b ? `<span class="good">${y}</span>` : `<span class="poor">${n}</span>`;
+const R = {};
+const mulberry32 = a => () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+const fnv = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(16).padStart(8, '0'); };
+
+// ---------- 构造的资料与回答 ----------
+const SOURCES = [
+  { id: 1, title: '第 3 周课程反馈汇总', text: '共收到 50 份反馈，其中 16 份（32%）提到作业说明不清楚，主要集中在第 2 次作业的提交格式。' },
+  { id: 2, title: '助教答疑记录', text: '本周答疑 41 次，其中 18 次与环境配置有关，Windows 用户占 12 次。' },
+  { id: 3, title: '学习平台访问统计', text: '视频平均观看完成率 64%，第 5 讲最低，为 41%。' }
+];
+// 每段由若干片段组成：kind = calc（由资料算出）、quote（转述资料）、guess（推测）、plain；cite 为来源编号
+const DRAFT = [
+  [{ k: 'plain', t: '本周反馈里有三个主要问题：作业说明、环境配置和视频长度。' }],
+  [{ k: 'calc', t: '有 37% 的反馈', cite: 1, check: '37%' }, { k: 'quote', t: '提到作业说明不清楚，集中在第 2 次作业的提交格式。', cite: 1, check: '第 2 次作业的提交格式' }],
+  [{ k: 'calc', t: '答疑中 18 次与环境配置有关，其中 Windows 用户 12 次。', cite: 2, check: ['18 次', '12 次'] }],
+  [{ k: 'calc', t: '第 5 讲的观看完成率最低，为 41%', cite: 3, check: '41%' }, { k: 'guess', t: '；学生普遍认为视频太长。', cite: 4 }]
+];
+
+// ---------- 1 流式输出 ----------
+const LONG = Array.from({ length: 24 }, (_, i) => `第 ${i + 1} 段：${DRAFT[i % 4].map(s => s.t).join('')}`).join('\n\n');
+function streamNaive(box, text) {
+  let buf = '';
+  for (const ch of text) { buf += ch; box.innerHTML = buf.split('\n\n').map(p => `<p>${esc(p)}</p>`).join(''); }
+}
+function streamIncremental(box, text) {
+  let p = document.createElement('p'), node = document.createTextNode(''), nl = 0;
+  p.appendChild(node); box.appendChild(p);
+  for (const ch of text) {
+    if (ch === '\n') { nl++; continue; }
+    if (nl >= 2) { p = document.createElement('p'); node = document.createTextNode(''); p.appendChild(node); box.appendChild(p); }
+    nl = 0; node.data += ch;
+  }
+}
+function measureRender(fn) {
+  const box = document.createElement('div'); box.style.cssText = 'position:absolute;left:-9999px;width:400px'; document.body.appendChild(box);
+  let added = 0; const mo = new MutationObserver(ms => { for (const m of ms) added += m.addedNodes.length; }); mo.observe(box, { childList: true, subtree: true });
+  const t0 = performance.now(); fn(box, LONG); void box.offsetHeight; const ms = performance.now() - t0;
+  const recs = mo.takeRecords(); for (const m of recs) added += m.addedNodes.length; mo.disconnect();
+  const out = { ms, added, paras: box.children.length, text: box.innerText.replace(/\s+/g, '') }; box.remove(); return out;
+}
+const tokens = [...LONG].length, naive = measureRender(streamNaive), inc = measureRender(streamIncremental);
+$('render').innerHTML = `<tr><th>渲染方式（${tokens} 个字，一次一个）</th><th>耗时</th><th>新建的节点</th><th>结果一致</th></tr>` +
+  `<tr><td>每来一个字就把全文重新生成 HTML</td><td class="num poor">${fmt(naive.ms, 0)} 毫秒</td><td class="num poor">${naive.added.toLocaleString('zh-CN')}</td><td rowspan="2">${ok(naive.text === inc.text)}</td></tr>` +
+  `<tr><td>只往最后一段追加，遇到空行才新建段落</td><td class="num good">${fmt(inc.ms, 0)} 毫秒</td><td class="num good">${inc.added}</td></tr>`;
+$('mrender').innerHTML = `本次浏览器实测。全文重绘的代价随长度平方增长：第 900 个字要重建前面的全部段落；回答越长越卡，手机上更明显。追加式渲染只碰最后一段。真实的 Markdown 也一样：已经结束的块不再重新解析。`;
+R.render = { tokens, naiveMs: naive.ms, naiveAdded: naive.added, incMs: inc.ms, incAdded: inc.added, paras: inc.paras, same: naive.text === inc.text };
+
+// 自动滚动：用户往上翻时不要强行拽回底部
+function scrollTest(stick) {
+  const box = $('scrollbox'); box.innerHTML = ''; let p = document.createElement('p'); box.appendChild(p);
+  const text = LONG.slice(0, 900); let jumps = 0, userTop = null, newParas = 0;
+  [...text].forEach((ch, i) => {
+    if (i === 300) { box.scrollTop = 0; userTop = 0; }
+    if (ch === '\n') { if (text[i - 1] === '\n') { p = document.createElement('p'); box.appendChild(p); if (userTop !== null) newParas++; } return; }
+    p.textContent += ch;
+    const nearBottom = box.scrollHeight - box.clientHeight - box.scrollTop < 40;
+    if (stick === 'always' || (stick === 'near' && (userTop === null || nearBottom))) { const before = box.scrollTop; box.scrollTop = box.scrollHeight; if (userTop !== null && box.scrollTop !== before) jumps++; }
+  });
+  return { jumps, finalTop: box.scrollTop, newParas };
+}
+const sAlways = scrollTest('always'), sNear = scrollTest('near');
+$('scroll').innerHTML = '<tr><th>做法（第 300 个字时用户翻到顶部）</th><th>之后视图被强行移动的次数</th><th>提示</th></tr>' +
+  `<tr><td>每来一个字都滚到底</td><td class="num poor">${sAlways.jumps}</td><td>—</td></tr>` +
+  `<tr><td>只有用户本来就在底部附近（40 像素内）才跟随</td><td class="num good">${sNear.jumps}</td><td>“↓ 有 ${sNear.newParas} 段新内容”按钮</td></tr>`;
+R.scroll = { always: sAlways, near: sNear };
+
+// 实时区域：读屏软件每次内容变化都可能朗读
+function liveTest(policy) {
+  const region = document.createElement('div'); region.setAttribute('aria-live', 'polite'); region.style.cssText = 'position:absolute;left:-9999px'; document.body.appendChild(region);
+  let n = 0; const mo = new MutationObserver(ms => { n += ms.length; }); mo.observe(region, { childList: true, characterData: true, subtree: true });
+  let buf = '';
+  for (const ch of LONG.slice(0, 600)) {
+    buf += ch;
+    if (policy === 'token') region.textContent = buf;
+    else if (policy === 'sentence' && /[。！？]/.test(ch)) region.textContent = buf.split(/(?<=[。！？])/).filter(Boolean).slice(-1)[0];
+  }
+  if (policy === 'end') region.textContent = '回答已生成，共 ' + LONG.slice(0, 600).length + ' 字。';
+  n += mo.takeRecords().length; mo.disconnect(); region.remove(); return n;
+}
+const lv = { token: liveTest('token'), sentence: liveTest('sentence'), end: liveTest('end') };
+$('live').innerHTML = '<tr><th>实时区域（aria-live）的更新方式（600 字）</th><th>内容变化次数</th></tr>' +
+  `<tr><td>每来一个字更新一次</td><td class="num poor">${lv.token}</td></tr><tr><td>每说完一句更新一次（只放这一句）</td><td class="num mid">${lv.sentence}</td></tr><tr><td>生成中只报状态，结束时报一次</td><td class="num good">${lv.end}</td></tr>`;
+$('mlive').textContent = '每次变化都可能触发朗读或打断上一句。生成过程中读屏用户更需要知道“还在生成、可以停止”，正文等结束后从头阅读；是否按句朗读，最好让用户自己选。';
+R.live = lv;
+
+// ---------- 2 当前状态 ----------
+const STATES = [
+  ['排队中', '前面还有 2 个任务', '取消', '预计 10 秒内开始'],
+  ['读取资料', '正在读第 2 份，共 3 份', '取消；改为后台运行', '已用 4 秒'],
+  ['生成中', '已生成 180 字；已确定的段落不再变化', '停止；往上翻看', '已用 9 秒'],
+  ['已完成', '3 份资料、4 段，2 处需要核对', '复制、导出、局部改写、重新生成', '共 14 秒'],
+  ['已停止', '保留已生成的部分，并标明“部分结果”', '继续生成、重新生成、删除', '—'],
+  ['出错', '说出原因（网络中断／资料无法读取）与已保存的内容', '重试；只重试失败的那一步', '—']
+];
+$('states').innerHTML = '<tr><th>状态</th><th>显示什么</th><th>用户能做什么</th><th>时间信息</th></tr>' + STATES.map(r => `<tr><th>${r[0]}</th><td>${r[1]}</td><td>${r[2]}</td><td class="sub">${r[3]}</td></tr>`).join('');
+
+// ---------- 3 取消 ----------
+function fakeStream(text, perToken, onToken, signal) {
+  return new Promise(resolve => {
+    let i = 0;
+    const tick = () => {
+      if (signal && signal.aborted) return resolve({ stoppedAt: i, aborted: true, t: performance.now() });
+      if (i >= text.length) return resolve({ stoppedAt: i, aborted: false, t: performance.now() });
+      onToken(text[i++]); setTimeout(tick, perToken);
+    };
+    tick();
+  });
+}
+async function cancelTest() {
+  const text = LONG.slice(0, 300), CUT = 100;
+  // 只隐藏转圈：请求仍在继续，字还在往页面里加
+  let shownA = 0, afterA = 0, cancelledA = false;
+  const pA = fakeStream(text, 3, () => { shownA++; if (cancelledA) afterA++; if (shownA === CUT) cancelledA = true; });
+  // AbortController：真正停止生成
+  const ac = new AbortController(); let shownB = 0, afterB = 0, tCancel = 0, partial = '';
+  const pB = fakeStream(text, 3, ch => { if (ac.signal.aborted) { afterB++; return; } shownB++; partial += ch; if (shownB === CUT) { tCancel = performance.now(); ac.abort(); } }, ac.signal);
+  const [a, b] = await Promise.all([pA, pB]);
+  $('cancelDemo').innerHTML = `<div class="bar"><b>已停止</b> · 已生成 ${shownB}／约 ${text.length} 字 · <button type="button">继续生成</button><button type="button">重新生成</button><button type="button">删除</button></div><p class="stopped m">${esc(partial.replace(/\n+/g, ' '))}……</p><p class="sub">以上为部分结果，生成已停止。</p>`;
+  $('cancel').innerHTML = '<tr><th>做法（第 100 个字时按“停止”）</th><th>按下之后又出现的字</th><th>从按下到停止</th><th>请求结束于</th></tr>' +
+    `<tr><td>只隐藏转圈图标</td><td class="num poor">${afterA}</td><td>没有停</td><td class="num">第 ${a.stoppedAt} 个字</td></tr>` +
+    `<tr><td>AbortController 中止请求，保留部分结果</td><td class="num good">${afterB}</td><td class="num">${fmt(b.t - tCancel, 1)} 毫秒</td><td class="num">第 ${b.stoppedAt} 个字</td></tr>`;
+  $('mcancel').textContent = '只隐藏图标时，生成仍在后台继续：字还在增加，费用与配额也在消耗，用户以为已经停了。中止后要保留已生成的部分，标明“部分结果”，并给出继续、重新生成或删除。这里的时间来自模拟器（每 3 毫秒一个字），只用来比较两种做法。';
+  R.cancel = { afterA, afterB, stopMs: b.t - tCancel, stoppedA: a.stoppedAt, stoppedB: b.stoppedAt };
+}
+
+// ---------- 4、5 重新生成与局部编辑 ----------
+const VARIANTS = [
+  ['本周反馈里有三个主要问题：作业说明、环境配置和视频长度。', '归纳起来，问题集中在作业说明、环境配置与视频长度三方面。', '三个问题最常被提到：作业说明、环境配置、视频长度。'],
+  ['约三分之一的反馈（32%）提到作业说明不清楚，集中在第 2 次作业的提交格式。', '作业说明不清楚是最常见的意见（32%），多与第 2 次作业的提交格式有关。', '32% 的反馈认为作业说明不清楚，尤其是第 2 次作业的提交格式。'],
+  ['答疑中 18 次与环境配置有关，其中 Windows 用户 12 次。', '环境配置占了 18 次答疑，Windows 用户占 12 次。', '41 次答疑里有 18 次是环境配置问题（Windows 12 次）。'],
+  ['第 5 讲的观看完成率最低，为 41%。', '第 5 讲完成率只有 41%，是所有视频中最低的。', '观看完成率最低的是第 5 讲（41%）。']
+];
+const SHORT = ['问题：作业说明、环境配置、视频长度。', '32% 反馈说作业说明不清（第 2 次作业格式）。', '环境配置答疑 18 次（Windows 12）。', '第 5 讲完成率最低（41%）。'];
+const gen = seed => { const r = mulberry32(seed); return VARIANTS.map(v => v[Math.floor(r() * v.length)]); };
+function versionsDemo() {
+  const v1 = gen(7), mine = '本周反馈集中在三件事：作业说明、环境配置、视频长度（我改过这一句）。';
+  const v1e = [mine, ...v1.slice(1)];
+  // 做法 A：重新生成整篇，覆盖原文
+  let seed = 8, A = gen(seed);
+  while (A.every((p, i) => p === v1[i] || i === 0)) A = gen(++seed);
+  const changedA = A.filter((p, i) => p !== v1e[i]).length, mineLostA = !A.includes(mine);
+  // 做法 B：局部改写第 3 段，其他段落原样保留
+  const B = v1e.map((p, i) => i === 2 ? SHORT[2] : p);
+  const changedB = B.filter((p, i) => p !== v1e[i]).length, mineLostB = !B.includes(mine);
+  const hashKept = [0, 1, 3].every(i => fnv(B[i]) === fnv(v1e[i]));
+  // 版本：每次生成、编辑、改写都是新版本；恢复 = 复制旧版本为最新版本
+  const versions = [{ n: 1, how: '生成', p: v1 }, { n: 2, how: '人工修改第 1 段', p: v1e }, { n: 3, how: '局部改写第 3 段', p: B }];
+  versions.push({ n: 4, how: '恢复到版本 1', p: [...versions[0].p] });
+  const restoreOk = fnv(versions[3].p.join('')) === fnv(versions[0].p.join(''));
+  $('vers').innerHTML = versions.map(v => `<span class="${v.n === 3 ? 'cur' : ''}">版本 ${v.n} · ${v.how}</span>`).join('');
+  $('verDemo').innerHTML = B.map((p, i) => `<p class="para ${i === 2 ? 'changed' : 'kept'} ${i === 0 ? 'mine' : ''}">${esc(p)}</p>`).join('') + '<p class="sub">黄色：本次改写的段落；绿色：原样保留；左侧蓝线：用户自己改过的段落。</p>';
+  $('regen').innerHTML = '<tr><th>做法</th><th>变化的段落</th><th>用户改过的句子</th><th>能回到之前的版本</th></tr>' +
+    `<tr><td>重新生成整篇并覆盖</td><td class="num poor">${changedA}／4</td><td>${ok(!mineLostA, '保留', '丢失')}</td><td>${ok(false, '', '不能')}</td></tr>` +
+    `<tr><td>只改写选中的第 3 段，并存为新版本</td><td class="num good">${changedB}／4</td><td>${ok(!mineLostB, '保留', '丢失')}</td><td>${ok(true, '能（4 个版本）')}</td></tr>`;
+  $('mregen').innerHTML = `局部改写后，其余 3 段与原文逐字相同 ${ok(hashKept, '✓', '✗')}。“恢复到版本 1”不删除后面的版本，而是把版本 1 复制成新的版本 4，内容与版本 1 完全一致 ${ok(restoreOk, '✓', '✗')}——恢复本身也可以撤销。生成器用种子在三种说法里挑一种，模拟每次生成的措辞都会变化。`;
+  R.regen = { changedA, mineLostA, changedB, mineLostB, hashKept, restoreOk };
+}
+
+// ---------- 6、7 来源与确定程度 ----------
+function checkSources(answer) {
+  const rows = [];
+  answer.forEach((para, pi) => para.forEach(seg => {
+    if (!seg.cite) return;
+    const src = SOURCES.find(s => s.id === seg.cite);
+    const checks = [].concat(seg.check || []);
+    let status = 'ok', why = '';
+    if (!src) { status = 'bad'; why = `来源 ${seg.cite} 不存在`; }
+    else if (seg.k === 'guess') { status = 'bad'; why = '推测的内容挂了来源，但来源里没有这个说法'; }
+    else { const miss = checks.filter(c => !src.text.includes(c)); if (miss.length) { status = 'bad'; why = `来源里找不到“${miss.join('、')}”`; } }
+    rows.push({ pi: pi + 1, seg, src, status, why });
+  }));
+  return rows;
+}
+function renderAnswer(answer, rows) {
+  return answer.map(para => `<p class="para">${para.map(seg => {
+    const r = rows.find(x => x.seg === seg), bad = r && r.status === 'bad';
+    return `<span class="seg-${seg.k === 'plain' ? 'none' : seg.k}">${esc(seg.t)}</span>${seg.cite ? `<sup class="cite ${bad ? 'badref' : ''}">[${seg.cite}]</sup>` : ''}`;
+  }).join('')}</p>`).join('');
+}
+function sourcesDemo() {
+  const draftRows = checkSources(DRAFT);
+  const fixed = JSON.parse(JSON.stringify(DRAFT));
+  fixed[1][0] = { k: 'calc', t: '有 32% 的反馈（50 份中的 16 份）', cite: 1, check: ['32%', '16 份'] };
+  fixed[3][1] = { k: 'guess', t: '；资料中没有直接说明原因，“视频太长”只是推测，建议在下次问卷中询问。' };
+  const fixedRows = checkSources(fixed);
+  $('srcDemo').innerHTML = '<div class="bar"><b>修正后</b></div>' + renderAnswer(fixed, fixedRows);
+  const bad = rows => rows.filter(r => r.status === 'bad');
+  $('srcCheck').innerHTML = '<tr><th>检查（逐个来源标注）</th><th>初稿</th><th>修正后</th></tr>' +
+    `<tr><td>标注的来源数</td><td class="num">${draftRows.length}</td><td class="num">${fixedRows.length}</td></tr>` +
+    `<tr><td>对不上的标注</td><td class="poor">${bad(draftRows).length} 处：${bad(draftRows).map(r => `第 ${r.pi} 段 ${r.why}`).join('；')}</td><td class="good">${bad(fixedRows).length} 处</td></tr>` +
+    `<tr><td>推测的内容</td><td>${DRAFT.flat().filter(s => s.k === 'guess').length} 处，挂着不存在的来源</td><td>${fixed.flat().filter(s => s.k === 'guess').length} 处，明说是推测，没有来源</td></tr>`;
+  const kinds = k => fixed.flat().filter(s => s.k === k).length;
+  $('msrc').innerHTML = `程序逐个检查标注：来源是否存在，标注的数字与关键句是否真的出现在来源里。初稿的“37%”是来源里“32%”被改错了，“视频太长”根本没有来源。修正后：可复核的数字 ${kinds('calc')} 处、转述 ${kinds('quote')} 处、推测 ${kinds('guess')} 处，三类用不同的样式标出。用户点“这里不对”时，系统先回到来源核对，再把纠正记在记录里——这是“如何纠正系统”的入口。`;
+  $('sources').innerHTML = '<tr><th>来源</th><th>原文</th></tr>' + SOURCES.map(s => `<tr><th>[${s.id}] ${s.title}</th><td class="sub">${s.text}</td></tr>`).join('');
+  R.src = { draftBad: bad(draftRows).map(r => r.why), fixedBad: bad(fixedRows).length, calc: kinds('calc'), quote: kinds('quote'), guess: kinds('guess') };
+}
+
+versionsDemo(); sourcesDemo();
+document.fonts.ready.then(() => cancelTest()).then(() => { window.__ai = R; });
+</script>
+</body>
+</html>
