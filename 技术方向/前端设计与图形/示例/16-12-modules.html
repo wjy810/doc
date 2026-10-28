@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>参数化实体模块：从参数到成品的记录</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 4px 0 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .col { display: grid; gap: 6px; align-content: start; }
+  .params { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px 10px; font-size: 11.5px; }
+  .params label { display: grid; grid-template-columns: minmax(0, 1fr) 4.6em; align-items: center; gap: 4px; color: var(--muted); }
+  .params input { font: inherit; padding: 1px 4px; border: 1px solid var(--line); border-radius: 4px; min-width: 0; text-align: right; }
+  input:focus-visible, button:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+  button, select { font: inherit; font-size: 12px; } button { padding: 2px 10px; border: 1px solid #b9c3d3; background: #f3f6fb; border-radius: 6px; cursor: pointer; }
+  .tag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 9px; background: #fff3d6; color: #7a4a00; }
+  canvas { display: block; width: 100%; height: auto; border-radius: 6px; }
+  #view { background: #eef1f5; aspect-ratio: 16 / 9; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 12px; }
+  td.todo { color: #a3392f; }
+  .rec input { font: inherit; font-size: 11.5px; width: 100%; padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; }
+  .rec input:placeholder-shown { background: #fdf3f2; border-color: #e7b7b2; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div class="col"><h2>1 参数：一套放进抽屉的指接收纳盒</h2>
+      <p class="sub"><span class="tag">示例输入</span> 切缝与槽宽来自 16-11 的校准件，厚度来自卡尺；换成你自己量到的数，下面所有结果会重新计算。</p>
+      <div class="params" id="params"></div>
+      <table id="mods"></table>
+      <div class="two"><canvas id="drawer" width="520" height="320"></canvas><p class="m" id="mdrawer"></p></div></div>
+    <div class="col"><h2>2 组装检查：把切出来的板在三维里拼回去</h2>
+      <canvas id="view" width="1080" height="608" aria-label="2 × 1 模块的爆炸视图"></canvas>
+      <table id="asm"></table><p class="m" id="masm"></p></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div class="col"><h2>3 排版：一张板材上的全部零件</h2><canvas id="sheet" width="1080" height="660"></canvas><p class="m" id="msheet"></p></div>
+    <div class="col"><h2>4 先小后大：每一步只多冒一点险</h2><table id="stages"></table><p class="m" id="mstages"></p></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div class="col"><h2>5 参数到成品的记录：生成时能填的自动填，切出来以后再量</h2><table class="rec" id="rec"></table>
+      <div class="bar"><label>阶段 <select id="stage"></select></label><button id="dlsvg" type="button">下载切割文件 SVG</button><button id="dljson" type="button">下载这条记录 JSON</button></div></div>
+    <div class="col"><h2>6 改一个参数会牵动什么</h2><table id="impact"></table><p class="m" id="mimpact"></p></div>
+  </div>
+</section>
+<script type="module">
+import * as THREE from 'three';
+const $ = id => document.getElementById(id);
+const fmt = (v, d = 2) => v == null || Number.isNaN(v) ? '—' : v.toFixed(d);
+const ok = (b, y = '✓', n = '✗') => b ? `<span class="good">${y}</span>` : `<span class="poor">${n}</span>`;
+const uniq = a => [...new Set(a.map(v => +v.toFixed(6)))].sort((x, y) => x - y);
+const R = {};
+
+// ---------- 参数 ----------
+const FIELDS = [
+  ['U', '网格单位（毫米）', 40], ['Z', '盒高（毫米）', 30], ['c', '模块间隙（毫米）', 1],
+  ['t', '板厚实测（毫米）', 2.90], ['k', '切缝 k（毫米）', 0.160], ['s', '校准梳选中的槽宽', 2.95],
+  ['f', '目标手指宽（毫米）', 10], ['dw', '抽屉内宽（毫米）', 162], ['dh', '抽屉内深（毫米）', 122],
+  ['sw', '板材宽（毫米）', 400], ['sh', '板材高（毫米）', 300], ['feed', '切割速度 毫米/分钟（假设）', 600]
+];
+$('params').innerHTML = FIELDS.map(([id, label, v]) => `<label>${label}<input id="p-${id}" type="number" step="any" value="${v}"></label>`).join('');
+const MODS = [{ id: 'A', nx: 2, ny: 2, q: 1 }, { id: 'B', nx: 2, ny: 1, q: 2 }, { id: 'C', nx: 1, ny: 1, q: 4 }];
+const P = () => Object.fromEntries(FIELDS.map(([id]) => [id, Number($('p-' + id).value)]));
+
+// ---------- 几何 ----------
+const area = Q => { let a = 0; for (let i = 0; i < Q.length; i++) { const [x1, y1] = Q[i], [x2, y2] = Q[(i + 1) % Q.length]; a += x1 * y2 - x2 * y1; } return a / 2; };
+const cross = (a, b) => a[0] * b[1] - a[1] * b[0];
+function offsetPoly(Q, d) {
+  const n = Q.length, s = area(Q) > 0 ? 1 : -1;
+  const E = Q.map((p, i) => { const q = Q[(i + 1) % n], dx = q[0] - p[0], dy = q[1] - p[1], L = Math.hypot(dx, dy); return { p: [p[0] + s * dy / L * d, p[1] - s * dx / L * d], r: [dx, dy] }; });
+  return Q.map((p, i) => { const a = E[(i - 1 + n) % n], b = E[i], den = cross(a.r, b.r); if (Math.abs(den) < 1e-12) return b.p; const t = cross([b.p[0] - a.p[0], b.p[1] - a.p[1]], b.r) / den; return [a.p[0] + a.r[0] * t, a.p[1] + a.r[1] * t]; });
+}
+function inside(pt, Q) { let c = false; for (let i = 0, j = Q.length - 1; i < Q.length; j = i++) { const [xi, yi] = Q[i], [xj, yj] = Q[j]; if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < (xj - xi) * (pt[1] - yi) / (yj - yi) + xi) c = !c; } return c; }
+const perim = Q => Q.reduce((s, p, i) => { const q = Q[(i + 1) % Q.length]; return s + Math.hypot(q[0] - p[0], q[1] - p[1]); }, 0);
+const fnv = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(16).padStart(8, '0'); };
+
+// 手指数取奇数，两端都归墙板；bug 用来故意制造错误，检验组装检查能不能发现
+const oddN = (L, f, even) => { let n = Math.max(3, Math.round(L / f)); if (even) return n % 2 ? n + 1 : n; if (n % 2 === 0) n += L / f > n ? 1 : -1; return Math.max(3, n); };
+const bnd = (L, N) => Array.from({ length: N + 1 }, (_, i) => L * i / N);
+function makeBox(X, Y, Z, t, f, bug = null) {
+  const Nx = oddN(X, f, bug === 'even'), Ny = oddN(Y, f, bug === 'even'), Nz = oddN(Z, f, false);
+  const seg = (x, L, N) => Math.min(N - 1, Math.floor(x / (L / N)));
+  const wall = j => j % 2 === 0, front = j => j % 2 === 0;
+  const FK = { W: X, H: Z, bu: bnd(X, Nx), bv: bnd(Z, Nz), cut: (u, v) => (v < t && !wall(seg(u, X, Nx))) || ((u < t || u > X - t) && !front(seg(v, Z, Nz))) };
+  const LR = both => ({ W: Y, H: Z, bu: bnd(Y, Ny), bv: bnd(Z, Nz), cut: (u, v) => (v < t && !wall(seg(u, Y, Ny))) || ((u < t || u > Y - t) && !both && front(seg(v, Z, Nz))) });
+  const raw = {
+    B: { W: X, H: Y, bu: bnd(X, Nx), bv: bnd(Y, Ny), cut: (u, v) => ((v < t || v > Y - t) && wall(seg(u, X, Nx))) || ((u < t || u > X - t) && wall(seg(v, Y, Ny))) },
+    F: FK, K: FK, L: LR(bug === 'both'), R: LR(false)
+  };
+  const panels = {};
+  for (const [name, p] of Object.entries(raw)) panels[name] = { name, W: p.W, H: p.H, loops: trace(p, t) };
+  return { X, Y, Z, t, Nx, Ny, Nz, panels };
+}
+// 把板面切成格子（断点：0、t、W−t、W 与手指分界），留下的格子连成轮廓：材料在左手边，逆时针
+function trace(p, t) {
+  const us = uniq([0, t, p.W - t, p.W, ...p.bu]), vs = uniq([0, t, p.H - t, p.H, ...p.bv]), nu = us.length - 1, nv = vs.length - 1;
+  const M = Array.from({ length: nu }, (_, i) => Array.from({ length: nv }, (_, j) => !p.cut((us[i] + us[i + 1]) / 2, (vs[j] + vs[j + 1]) / 2)));
+  const mat = (i, j) => i >= 0 && j >= 0 && i < nu && j < nv && M[i][j];
+  const key = q => q[0].toFixed(6) + ',' + q[1].toFixed(6), E = new Map();
+  const add = (a, b) => E.set(key(a), { a, b });
+  for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) {
+    if (!mat(i, j)) continue;
+    if (!mat(i, j - 1)) add([us[i], vs[j]], [us[i + 1], vs[j]]);
+    if (!mat(i + 1, j)) add([us[i + 1], vs[j]], [us[i + 1], vs[j + 1]]);
+    if (!mat(i, j + 1)) add([us[i + 1], vs[j + 1]], [us[i], vs[j + 1]]);
+    if (!mat(i - 1, j)) add([us[i], vs[j + 1]], [us[i], vs[j]]);
+  }
+  const loops = [];
+  while (E.size) {
+    const first = E.values().next().value, loop = [];
+    let e = first;
+    while (e) { loop.push(e.a); E.delete(key(e.a)); e = E.get(key(e.b)); }
+    loops.push(loop.filter((q, i) => { const a = loop[(i - 1 + loop.length) % loop.length], b = loop[(i + 1) % loop.length]; return Math.abs(cross([q[0] - a[0], q[1] - a[1]], [b[0] - q[0], b[1] - q[1]])) > 1e-9; }));
+  }
+  return loops;
+}
+// 组装检查：每块板按它在盒子里的位置放回三维，逐格数“这一格被几块板占着”
+function assemble(box) {
+  const { X, Y, Z, t, panels: p } = box, U = n => p[n].loops.flatMap(l => l.map(q => q[0])), V = n => p[n].loops.flatMap(l => l.map(q => q[1]));
+  const xs = uniq([0, t, X - t, X, ...U('B'), ...U('F'), ...U('K')]), ys = uniq([0, t, Y - t, Y, ...V('B'), ...U('L'), ...U('R')]), zs = uniq([0, t, Z, ...V('F'), ...V('K'), ...V('L'), ...V('R')]);
+  const inP = (n, a, b) => p[n].loops.reduce((c, l) => c !== inside([a, b], l), false);
+  let cells = 0, gaps = 0, over = 0, stray = 0, gapV = 0, overV = 0, matV = 0;
+  for (let i = 0; i + 1 < xs.length; i++) for (let j = 0; j + 1 < ys.length; j++) for (let k = 0; k + 1 < zs.length; k++) {
+    const x = (xs[i] + xs[i + 1]) / 2, y = (ys[j] + ys[j + 1]) / 2, z = (zs[k] + zs[k + 1]) / 2, vol = (xs[i + 1] - xs[i]) * (ys[j + 1] - ys[j]) * (zs[k + 1] - zs[k]);
+    const n = (z < t && inP('B', x, y)) + (y < t && inP('F', x, z)) + (y > Y - t && inP('K', x, z)) + (x < t && inP('L', y, z)) + (x > X - t && inP('R', y, z));
+    const shell = x < t || x > X - t || y < t || y > Y - t || z < t;
+    cells++; matV += n * vol;
+    if (shell && n === 0) { gaps++; gapV += vol; }
+    if (n > 1) { over++; overV += (n - 1) * vol; }
+    if (!shell && n) stray++;
+  }
+  const shellV = X * Y * Z - (X - 2 * t) * (Y - 2 * t) * (Z - t);
+  const panelV = Object.values(p).reduce((s, q) => s + q.loops.reduce((a, l) => a + Math.abs(area(l)), 0) * t, 0);
+  return { cells, gaps, over, stray, gapV, overV, shellV, panelV, loops: Object.values(p).map(q => q.loops.length) };
+}
+
+// ---------- 渲染：2 × 1 模块的爆炸视图 ----------
+const renderer = new THREE.WebGLRenderer({ canvas: $('view'), antialias: true });
+renderer.setPixelRatio(1); renderer.setSize(1080, 608, false);
+const scene = new THREE.Scene(); scene.background = new THREE.Color('#eef1f5');
+const cam = new THREE.PerspectiveCamera(30, 1080 / 608, 1, 2000);
+scene.add(new THREE.HemisphereLight('#ffffff', '#8a7a66', 2.2)); const sun = new THREE.DirectionalLight('#ffffff', 1.6); sun.position.set(120, 260, 180); scene.add(sun);
+const group = new THREE.Group(); scene.add(group);
+const COLORS = { B: '#d9c39a', F: '#e6cfa3', K: '#cdb184', L: '#dcc18f', R: '#c9ab7a' };
+// 板面坐标 (u, v, 厚度 w) → 世界坐标（three.js 的 y 向上）；e 为爆炸距离
+function place(name, box, e) {
+  const { X, Y, t } = box, m = new THREE.Matrix4();
+  const M = { B: [[1, 0, 0], [0, 0, 1], [0, 1, 0], [0, -e, 0]], F: [[1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, -e]], K: [[1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, Y - t + e]], L: [[0, 0, 1], [0, 1, 0], [1, 0, 0], [-e, 0, 0]], R: [[0, 0, 1], [0, 1, 0], [1, 0, 0], [X - t + e, 0, 0]] }[name];
+  const [u, v, w, o] = M;
+  m.set(u[0], v[0], w[0], o[0], u[1], v[1], w[1], o[1], u[2], v[2], w[2], o[2], 0, 0, 0, 1);
+  return m;
+}
+function draw3D(box) {
+  group.clear();
+  for (const [name, p] of Object.entries(box.panels)) {
+    const shape = new THREE.Shape(p.loops[0].map(([u, v]) => new THREE.Vector2(u, v)));
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: box.t, bevelEnabled: false });
+    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: COLORS[name], roughness: 0.85, side: THREE.DoubleSide }));
+    const lines = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 30), new THREE.LineBasicMaterial({ color: '#4a3a22' }));
+    const mtx = place(name, box, 9);
+    mesh.applyMatrix4(mtx); lines.applyMatrix4(mtx); group.add(mesh, lines);
+  }
+  const c = new THREE.Vector3(box.X / 2, box.Z / 2, box.Y / 2);
+  cam.position.set(c.x + 85, c.y + 150, c.z - 105); cam.lookAt(c.x, c.y - 8, c.z);
+  renderer.render(scene, cam);
+}
+
+// ---------- 主流程 ----------
+let LAST = null;
+function run() {
+  const p = P(), a = p.s - p.t, off = p.k / 2 - a / 4;
+  const mods = MODS.map(m => ({ ...m, X: m.nx * p.U - p.c, Y: m.ny * p.U - p.c }));
+  for (const m of mods) { m.box = makeBox(m.X, m.Y, p.Z, p.t, p.f); m.asm = assemble(m.box); }
+  // 1 模块表
+  $('mods').innerHTML = '<tr><th>模块</th><th>格数</th><th>外尺寸（毫米）</th><th>数量</th><th>手指数 长／宽／高</th><th>手指宽</th></tr>' + mods.map(m => {
+    const fw = [m.X / m.box.Nx, m.Y / m.box.Ny, p.Z / m.box.Nz], minF = Math.min(...fw);
+    return `<tr><td>${m.id}</td><td>${m.nx} × ${m.ny}</td><td class="num">${fmt(m.X, 1)} × ${fmt(m.Y, 1)} × ${fmt(p.Z, 1)}</td><td class="num">${m.q}</td><td class="num">${m.box.Nx}／${m.box.Ny}／${m.box.Nz}</td><td class="num ${minF >= 2 * p.t ? '' : 'poor'}">${fw.map(v => fmt(v, 1)).join('／')}</td></tr>`;
+  }).join('');
+  // 抽屉
+  const cols = Math.floor((p.dw + p.c) / p.U), rows = Math.floor((p.dh + p.c) / p.U), grid = Array.from({ length: rows }, () => Array(cols).fill(null)), placed = [];
+  const list = mods.flatMap(m => Array.from({ length: m.q }, (_, i) => ({ m, i }))).sort((a2, b2) => b2.m.nx * b2.m.ny - a2.m.nx * a2.m.ny);
+  for (const it of list) {
+    let done = false;
+    for (let r = 0; r <= rows - it.m.ny && !done; r++) for (let q = 0; q <= cols - it.m.nx && !done; q++) {
+      let free = true;
+      for (let rr = r; rr < r + it.m.ny; rr++) for (let qq = q; qq < q + it.m.nx; qq++) if (grid[rr][qq]) free = false;
+      if (!free) continue;
+      for (let rr = r; rr < r + it.m.ny; rr++) for (let qq = q; qq < q + it.m.nx; qq++) grid[rr][qq] = it.m.id;
+      placed.push({ ...it, r, q }); done = true;
+    }
+  }
+  const usedW = cols * p.U - p.c, usedH = rows * p.U - p.c, fits = placed.length === list.length && usedW <= p.dw && usedH <= p.dh;
+  drawDrawer(p, placed, cols, rows);
+  $('mdrawer').innerHTML = `抽屉放得下 ${cols} × ${rows} 格；${list.length} 个模块 ${placed.length === list.length ? '全部放下' : `只放下 ${placed.length} 个`}，占 ${fmt(usedW, 0)} × ${fmt(usedH, 0)} 毫米，四周余 ${fmt(p.dw - usedW, 1)} 与 ${fmt(p.dh - usedH, 1)} 毫米 ${ok(fits)}。模块外尺寸 = 格数 × ${p.U} − ${p.c}，间隙让相邻的盒子能拿出来。`;
+  // 2 组装检查（含故意改错）
+  const mB = mods[1], bugs = [['正确的规则', mB.asm], ['故意改错：底边手指数取偶数', assemble(makeBox(mB.X, mB.Y, p.Z, p.t, p.f, 'even'))], ['故意改错：一条竖边两块板都留手指', assemble(makeBox(mB.X, mB.Y, p.Z, p.t, p.f, 'both'))]];
+  $('asm').innerHTML = '<tr><th>生成规则</th><th>检查格</th><th>缺口</th><th>重叠</th><th>体积比</th><th>结论</th></tr>' + bugs.map(([name, r]) => {
+    const good = r.gaps === 0 && r.over === 0 && r.stray === 0;
+    return `<tr><td>${name}</td><td class="num">${r.cells}</td><td class="num ${r.gaps ? 'poor' : ''}">${r.gaps}${r.gaps ? `（${fmt(r.gapV, 1)} 立方毫米）` : ''}</td><td class="num ${r.over ? 'poor' : ''}">${r.over}${r.over ? `（${fmt(r.overV, 1)} 立方毫米）` : ''}</td><td class="num">${fmt(r.panelV / r.shellV, 4)}</td><td style="white-space:nowrap">${ok(good, '能拼合', good ? '' : r.gaps ? '角上有洞' : '拼不进去')}</td></tr>`;
+  }).join('');
+  const allOk = mods.every(m => m.asm.gaps === 0 && m.asm.over === 0 && m.asm.stray === 0 && m.asm.loops.every(n => n === 1));
+  $('masm').innerHTML = `三种模块按正确规则生成，组装检查全部 ${ok(allOk, '通过')}：每块板只有一条轮廓，盒壁每一格恰好被一块板占着。规则是：手指数取奇数，底边两端的手指归墙板，竖边两端归前后板，于是每个角上那一小块 t × t × t 只属于一块板。下面两行是故意改错的生成器，用来证明这个检查真能抓到问题：底边取偶数，有一个角相交的三块板都让开了，留下一个 t × t × t 的洞；竖边两块都留手指，重叠的部分会顶住，盒子拼不进去。体积比（板材体积 ÷ 盒壁体积）是另一道独立核对：正确时正好等于 1。上图为 ${mB.id} 模块（${mB.nx} × ${mB.ny}）向外拉开 9 毫米的样子。`;
+  draw3D(mB.box);
+  // 3 排版（切缝与插接余量补偿后的轮廓）
+  const parts = mods.flatMap(m => Array.from({ length: m.q }, (_, i) => Object.values(m.box.panels).map(pn => ({ m, i, pn, loop: offsetPoly(pn.loops[0], off) })))).flat();
+  for (const q of parts) { const xs2 = q.loop.map(v => v[0]), ys2 = q.loop.map(v => v[1]); q.minx = Math.min(...xs2); q.miny = Math.min(...ys2); q.w = Math.max(...xs2) - q.minx; q.h = Math.max(...ys2) - q.miny; }
+  parts.sort((a2, b2) => b2.h - a2.h || b2.w - a2.w);
+  const GAP = 3, sheets = [[]];
+  let x = GAP, y = GAP, rowH = 0;
+  for (const q of parts) {
+    if (x + q.w + GAP > p.sw) { x = GAP; y += rowH + GAP; rowH = 0; }
+    if (y + q.h + GAP > p.sh) { sheets.push([]); x = GAP; y = GAP; rowH = 0; }
+    q.ox = x - q.minx; q.oy = y - q.miny; q.sheet = sheets.length - 1; sheets[sheets.length - 1].push(q); x += q.w + GAP; rowH = Math.max(rowH, q.h);
+  }
+  const cutL = parts.reduce((s, q) => s + perim(q.loop), 0), partA = parts.reduce((s, q) => s + Math.abs(area(q.loop)), 0);
+  drawSheet(p, sheets[0]);
+  $('msheet').innerHTML = `${parts.length} 块板（${mods.map(m => `${m.id} ${m.q} 个 × 5`).join('、')}），${sheets.length} 张 ${p.sw} × ${p.sh} 毫米的板材，用料 ${fmt(partA / (sheets.length * p.sw * p.sh) * 100, 0)}%；零件间留 ${GAP} 毫米。轮廓已按 补偿量 = k/2 − a/4 = ${fmt(p.k / 2, 3)} − ${fmt(a / 4, 4)} = ${fmt(off, 4)} 毫米 外扩（a = 选中的槽宽 − 板厚 = ${fmt(a, 2)} 毫米，是插接要留的间隙，平分到手指两侧和插口两侧）。切割线 ${fmt(cutL / 1000, 2)} 米，按 ${p.feed} 毫米/分钟约 ${fmt(cutL / p.feed, 0)} 分钟（假设值，不含空走与加减速）。图中只画第 1 张。`;
+  // 4 分阶段
+  const one = mods.find(m => m.nx === 1 && m.ny === 1), lenOf = (m, names) => names.reduce((s, n) => s + perim(offsetPoly(m.box.panels[n].loops[0], off)), 0);
+  const corner = lenOf(one, ['F', 'L']), single = lenOf(one, ['B', 'F', 'K', 'L', 'R']);
+  const st = [
+    ['1 校准件', '16-11 的槽宽梳与十块试片', '切缝 k、哪一档槽宽插紧不晃、板厚四处', '得到 k 与 a，写进参数', 875],
+    ['2 一个角', `${one.id} 模块的前板与左板`, '手指能不能用手压进、会不会晃、角是否成 90°', '手压能进、不晃（不用锤子）', corner],
+    ['3 一个模块', `一个完整的 ${one.id}（1 × 1）`, '外尺寸、两条对角线、能否放进一格', `外尺寸与设计差 ≤ 0.3 毫米，对角线差 ≤ 0.5 毫米（本例取值）`, single],
+    ['4 全套', `全部 ${list.length} 个模块`, '放进抽屉、相邻的能否单独取出、批次之间板厚是否变化', '全部放下且能取出；换一批板材先重做第 1 步', cutL]
+  ];
+  $('stages').innerHTML = '<tr><th>阶段</th><th>切什么</th><th>量什么</th><th>通过才进下一步</th><th>切割线</th></tr>' + st.map(r => `<tr><th>${r[0]}</th><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td class="num">${fmt(r[4] / 1000, 2)} 米</td></tr>`).join('');
+  $('mstages').innerHTML = `从 0.88 米切割线的小样到 ${fmt(cutL / 1000, 2)} 米的全套，每一步只增加一种风险：第 2 步只验证手指的松紧，第 3 步再加整体尺寸与方正，第 4 步才是批量与抽屉。任何一步不通过，就回到参数改一个数，并在记录里写下改了什么、为什么。设备操作按工坊规程；第一次切新材料时人守在旁边。`;
+  // 5 记录
+  const svg = buildSVG(p, sheets[0]), print = fnv(svg);
+  LAST = { p, a, off, mods, svg, print, sheets: sheets.length, cutL };
+  if (!$('stage').options.length) $('stage').innerHTML = st.map((r, i) => `<option value="${i}">${r[0]}</option>`).join('');
+  const auto = [
+    ['生成器', '16-12 第 1 版'], ['日期', new Date().toLocaleDateString('zh-CN')], ['参数', `网格 ${p.U}、盒高 ${p.Z}、间隙 ${p.c}、板厚 ${p.t}、切缝 ${p.k}、槽宽 ${p.s}、手指 ${p.f}`],
+    ['派生', `插接间隙 a = ${fmt(a, 2)}，补偿 ${fmt(off, 4)}；手指数 ${mods.map(m => `${m.id} ${m.box.Nx}/${m.box.Ny}/${m.box.Nz}`).join('，')}`],
+    ['检查', `组装 ${allOk ? '通过' : '未通过'}；抽屉 ${fits ? '放得下' : '放不下'}；${sheets.length} 张板材`], ['文件指纹', `${print}（第 1 张板材的 SVG）`]
+  ];
+  const todo = [['material', '板材批次与实测厚度'], ['machine', '设备与功率、速度、焦距'], ['size', '成品外尺寸实测'], ['diag', '对角线差'], ['fit', '手指松紧（紧／合适／松）'], ['issue', '问题与下次改什么']];
+  if (!$('rec').innerHTML) $('rec').innerHTML = '<tbody id="recauto"></tbody>' + todo.map(([id, label]) => `<tr><th>${label}</th><td><input id="r-${id}" placeholder="切出来以后填"></td></tr>`).join('');
+  $('recauto').innerHTML = auto.map(([k2, v]) => `<tr><th>${k2}</th><td>${v}</td></tr>`).join('');
+  // 6 参数影响
+  const imp = [
+    ['板厚 t', '手指深度、补偿量 a、组装检查', '换一批板材必须重量；同一张板不同位置也会差 0.1 毫米左右'],
+    ['切缝 k', '所有轮廓的补偿量', '随材料、功率、速度、焦距变化；改任何一项先重切试片'],
+    ['槽宽（校准梳）', '插接间隙 a', '想更紧就选窄一档；木材受潮会变厚'],
+    ['网格单位 U、间隙 c', '模块外尺寸、抽屉能放几格', '与抽屉内尺寸一起决定；c 太小相邻盒子取不出'],
+    ['目标手指宽 f', '手指数（取奇数）', `手指太窄易断，本例要求手指宽 ≥ 2t = ${fmt(2 * p.t, 1)} 毫米（取值依材料而定）`],
+    ['板材尺寸', '排版、要几张板', '要扣掉夹具和边缘留白']
+  ];
+  $('impact').innerHTML = '<tr><th>参数</th><th>会改变</th><th>要注意</th></tr>' + imp.map(r => `<tr><th>${r[0]}</th><td>${r[1]}</td><td class="sub">${r[2]}</td></tr>`).join('');
+  $('mimpact').innerHTML = `参数集中在一处、所有结果由它们算出来，是“参数化”的意思：改了板厚，手指、补偿、排版、切割时间和记录一起更新。成品出问题时，靠记录里的文件指纹和参数找回当时的设置，而不是凭记忆。`;
+  Object.assign(R, { a, off, mods: mods.map(m => ({ id: m.id, X: m.X, Y: m.Y, N: [m.box.Nx, m.box.Ny, m.box.Nz], asm: m.asm })), bugs: bugs.map(([n, r]) => ({ n, gaps: r.gaps, over: r.over, gapV: r.gapV, overV: r.overV, ratio: r.panelV / r.shellV, cells: r.cells })), drawer: { cols, rows, placed: placed.length, total: list.length, usedW, usedH, fits }, parts: parts.length, sheets: sheets.length, util: partA / (sheets.length * p.sw * p.sh), cutL, corner, single, print, allOk });
+  window.__mod = R;
+}
+function drawDrawer(p, placed, cols, rows) {
+  const g = $('drawer').getContext('2d'), S = Math.min(500 / p.dw, 300 / p.dh), ox = 10, oy = 10;
+  g.clearRect(0, 0, 520, 320);
+  g.fillStyle = '#f7f1e6'; g.strokeStyle = '#8a7a66'; g.lineWidth = 2; g.fillRect(ox, oy, p.dw * S, p.dh * S); g.strokeRect(ox, oy, p.dw * S, p.dh * S);
+  const col = { A: '#d9c39a', B: '#e6cfa3', C: '#c9ab7a' };
+  g.font = '22px "Noto Sans SC"'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  for (const it of placed) {
+    const x = ox + it.q * p.U * S, y = oy + it.r * p.U * S, w = (it.m.nx * p.U - p.c) * S, h = (it.m.ny * p.U - p.c) * S;
+    g.fillStyle = col[it.m.id]; g.fillRect(x, y, w, h); g.strokeStyle = '#6b5636'; g.lineWidth = 1.5; g.strokeRect(x, y, w, h);
+    g.fillStyle = '#3b2f1e'; g.fillText(`${it.m.id}  ${it.m.nx}×${it.m.ny}`, x + w / 2, y + h / 2);
+  }
+}
+function drawSheet(p, parts) {
+  const c = $('sheet'), g = c.getContext('2d'), S = Math.min(1060 / p.sw, 640 / p.sh);
+  c.height = Math.round(p.sh * S + 20); g.clearRect(0, 0, c.width, c.height);
+  g.fillStyle = '#f7f1e6'; g.fillRect(10, 10, p.sw * S, p.sh * S); g.strokeStyle = '#c9b997'; g.setLineDash([6, 4]); g.strokeRect(10, 10, p.sw * S, p.sh * S); g.setLineDash([]);
+  const col = { A: '#b3261e', B: '#d06a10', C: '#8a5a00' }, NAME = { B: '底', F: '前', K: '后', L: '左', R: '右' };
+  g.font = '15px "Noto Sans SC"'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  for (const q of parts) {
+    g.beginPath(); q.loop.forEach(([u, v], i) => { const X = 10 + (u + q.ox) * S, Y = 10 + (p.sh - (v + q.oy)) * S; i ? g.lineTo(X, Y) : g.moveTo(X, Y); }); g.closePath();
+    g.strokeStyle = col[q.m.id]; g.lineWidth = 1.4; g.stroke();
+    g.fillStyle = '#5b4a33'; g.fillText(`${q.m.id}${q.i + 1}${NAME[q.pn.name]}`, 10 + (q.minx + q.ox + q.w / 2) * S, 10 + (p.sh - (q.miny + q.oy + q.h / 2)) * S);
+  }
+}
+function buildSVG(p, parts) {
+  const d = q => 'M' + q.loop.map(([u, v]) => `${(u + q.ox).toFixed(3)} ${(p.sh - (v + q.oy)).toFixed(3)}`).join(' L') + ' Z';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${p.sw}mm" height="${p.sh}mm" viewBox="0 0 ${p.sw} ${p.sh}">\n<desc>16-12 指接收纳盒 第 1 版；切缝 ${p.k} 毫米；材料实测 ${p.t} 毫米；槽宽 ${p.s} 毫米；网格 ${p.U}；盒高 ${p.Z}</desc>\n<g id="cut" fill="none" stroke="#ff0000" stroke-width="0.05">\n${parts.map(q => `<path d="${d(q)}"/>`).join('\n')}\n</g>\n</svg>`;
+}
+function download(name, text, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
+$('dlsvg').addEventListener('click', () => download(`16-12-${LAST.print}.svg`, LAST.svg, 'image/svg+xml'));
+$('dljson').addEventListener('click', () => {
+  const meas = Object.fromEntries([...document.querySelectorAll('#rec input')].map(i => [i.closest('tr').firstChild.textContent, i.value.trim() || null]));
+  download(`16-12-记录-${LAST.print}.json`, JSON.stringify({ 生成器: '16-12 第 1 版', 阶段: $('stage').selectedOptions[0].textContent, 参数: LAST.p, 插接间隙: LAST.a, 补偿量: LAST.off, 文件指纹: LAST.print, 板材张数: LAST.sheets, 实测: meas }, null, 2), 'application/json');
+});
+for (const [id] of FIELDS) $('p-' + id).addEventListener('input', run);
+await document.fonts.ready;
+run();
+window.__modReady = true;
+</script>
+</body>
+</html>
