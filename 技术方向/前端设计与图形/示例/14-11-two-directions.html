@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>综合项目：同一主题的两种艺术方向</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/900.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-serif-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 10px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .row { display: grid; grid-template-columns: 300px repeat(3, 240px); gap: 12px; align-items: stretch; }
+  .stmt { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 12px; display: grid; gap: 3px; align-content: start; background: #fbfbfa; color: var(--ink); font-family: "Noto Sans SC", sans-serif; }
+  .stmt ol { margin: 0; padding-left: 18px; } .stmt b { font-size: 13px; }
+  .phone { border: 1px solid #c9ccd2; border-radius: 14px; overflow: hidden; display: flex; }
+  #issues td:nth-child(-n+3) { white-space: nowrap; }
+  .w { color: #fff; border-radius: 3px; padding: 0 4px; font-size: 11px; } .w.hit { background: #1f7a4d; } .w.neu { background: #8a93a3; } .w.neg { background: #b3261e; }
+
+  /* ---------- 两个方向的令牌：页面里的颜色、字号、圆角、动效只能来自这里 ---------- */
+  .dir-a { --bg: #f7f3ec; --surface: #fffdf8; --text: #2b2a28; --sub: #625c55; --rule: #e4ddd2; --accent: #a8553a; --on-accent: #ffffff; --accent2: #5f7360;
+           --head: "Noto Serif SC", serif; --body: "Noto Sans SC", sans-serif; --hw: 700; --h: 22px; --m: 18px; --t: 14px; --s: 12px; --r: 6px; --gap: 18px; --cg: 8px; --pad: 20px; --lh: 1.8; --art: 96; --dur: 300ms; --ease: cubic-bezier(0, 0, 0.2, 1); }
+  .dir-b { --bg: #141b45; --surface: #222c66; --text: #ffffff; --sub: #c8cff5; --rule: #3a4585; --accent: #ff6b1a; --on-accent: #141b45; --accent2: #ffd400;
+           --head: "Noto Sans SC", sans-serif; --body: "Noto Sans SC", sans-serif; --hw: 900; --h: 34px; --m: 22px; --t: 14px; --s: 12px; --r: 2px; --gap: 8px; --cg: 2px; --pad: 12px; --lh: 1.4; --art: 150; --dur: 150ms; --ease: cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .screen { flex: 1; background: var(--bg); color: var(--text); font: 400 var(--s)/var(--lh) var(--body); display: flex; flex-direction: column; gap: var(--gap); padding-bottom: var(--pad); }
+  .screen canvas { display: block; width: 100%; height: auto; }
+  .screen .in { display: flex; flex-direction: column; gap: var(--gap); padding: 0 var(--pad); }
+  .screen p, .screen h1, .screen ul { margin: 0; }
+  .screen [data-role="label"] { color: var(--sub); font-size: var(--s); }
+  .screen [data-role="title"] { font: var(--hw) var(--h)/1.2 var(--head); color: var(--text); word-break: keep-all; }   /* 中文标题只在空格和 <wbr> 处换行，避免最后一个字单独成行 */
+  .screen [data-role="body"] { font-size: var(--t); color: var(--text); }
+  .screen [data-role="cta"] { align-self: flex-start; font: 700 var(--t)/1.4 var(--body); color: var(--on-accent); background: var(--accent); border: 0; border-radius: var(--r); padding: 8px 16px; cursor: pointer; transition: background-color var(--dur) var(--ease), transform var(--dur) var(--ease); }
+  .screen [data-role="cta"]:hover { transform: translateY(-1px); }
+  .screen [data-role="card"] { background: var(--surface); border-radius: var(--r); padding: 10px 12px; border: 1px solid var(--rule); display: grid; gap: var(--cg); }
+  .screen [data-role="card"] li { list-style: none; color: var(--sub); }
+  .screen ul { padding: 0; }
+  .screen [data-role="badge"] { align-self: flex-start; font: 700 var(--s)/1.6 var(--body); color: var(--on-accent); background: var(--accent2); border-radius: var(--r); padding: 0 8px; }
+  .screen [data-role="stat"] { font: var(--hw) var(--m)/1.2 var(--head); color: var(--text); }
+  .dir-b .screen [data-role="stat"] { color: var(--accent2); }
+  .stats { display: flex; gap: 20px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>主题：学习计划应用的三个页面（本周任务、课程详情、完成一周），两种艺术方向</h2>
+  <p class="sub">两个方向使用同样的信息与结构，只改变字体、颜色、版面密度、插图、动效和文案语气。每个方向先写一页说明，再按说明制作页面；下方的检查把说明中的每一条形式选择落实成可以测量的标准。</p>
+  <div class="row dir-a" id="row-a"></div>
+  <div class="row dir-b" id="row-b"></div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>检查：说明里的每条形式选择都能在页面上测到</h2><table id="chk"></table><h3>初稿中被发现的问题（已修正）</h3><table id="issues"><tr><th>方向</th><th>页面</th><th>元素</th><th>问题</th></tr></table></div>
+    <div style="display:grid;gap:6px"><h2>别人感受到的与设计意图（以下描述为演示而构造）</h2>
+      <p class="sub">做法：先让每位观察者看三个页面各 10 秒，不说明意图，请对方写下三个词；再由两人分别归类（<span class="w hit">命中意图</span> <span class="w neu">中性联想</span> <span class="w neg">偏离</span>），不一致的词讨论后决定。</p>
+      <table id="obs"></table><table id="obs-sum"></table><div id="next" style="display:grid;gap:4px"></div></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const DIRS = {
+  a: { name: '书房', intent: ['安静', '可信', '温暖'],
+    form: ['低饱和：纸白底、墨色字，陶土色只用于主要按钮（面积加权平均色度 ≤ 0.03）', '留白多：留白 ≥ 60%', '宋体标题＋黑体正文，字号对比 ≤ 2', '动效 300 ms 缓出，不弹跳', '陈述句，不用感叹号'],
+    key: ['本周任务与时长', '开始按钮', '接下来的任务'],
+    copy: [{ label: '本周 · 第 3 周，共 12 周', title: 'JavaScript 基础', body: '本周 8 小时，分 4 次完成。', cta: '开始学习', list: ['接下来', 'DOM 与事件 · 6 小时', '异步与网络 · 6 小时', 'Git 基础 · 4 小时'] },
+      { label: '课程', title: '数据可视化<wbr>入门', body: '用真实数据画出第一张图表，再把它做成作品集里的一页。', cta: '加入计划', list: ['四节课，共 10 小时', '读取与清洗数据 · 2 小时', '比例尺与坐标轴 · 2 小时', '第一张图表 · 3 小时', '作品集页面 · 3 小时'] },
+      { badge: '第 3 周', title: '这周完成了', stats: [['8.5', '小时'], ['4', '项任务']], body: '休息一下，下周继续。', cta: '查看下周', list: ['下周', '数据可视化入门 · 第 1、2 节', 'DOM 与事件 · 2 小时'] }],
+    draft: { 1: { sel: '[data-role="body"]', style: 'color:#9a948c' } } },
+  b: { name: '训练营', intent: ['有活力', '有挑战', '直接'],
+    form: ['高饱和：深蓝底，橙色与黄色色块（面积加权平均色度 ≥ 0.08）', '紧凑：留白 ≤ 50%', '粗黑体，字号对比 ≥ 2.5', '动效 150 ms，干脆', '短句，每页最多一个感叹号'],
+    key: ['本周目标', '开练按钮', '连续达标'],
+    copy: [{ label: '本周冲刺 · 第 3 周', title: 'JavaScript 基础', body: '8 小时 · 4 次训练', cta: '马上开练', list: ['下一关', 'DOM 与事件 · 6 小时', '异步与网络 · 6 小时', 'Git 基础 · 4 小时'] },
+      { label: '挑战', title: '数据可视化<wbr>入门', body: '拿真实数据，做出第一张图表。', cta: '加入挑战', list: ['4 关 · 10 小时', '读取与清洗数据 · 2 小时', '比例尺与坐标轴 · 2 小时', '第一张图表 · 3 小时', '作品集页面 · 3 小时'] },
+      { badge: '连续 3 周', title: '第 3 周拿下！', stats: [['8.5', '小时'], ['4/4', '全部完成']], body: '下周继续冲。', cta: '挑战下周', list: ['下一关', '数据可视化入门 · 第 1、2 关', 'DOM 与事件 · 2 小时'] }],
+    draft: { 1: { sel: '[data-role="cta"]', style: 'padding:6px 10px' }, 2: { sel: '[data-role="badge"]', style: 'background:#ff5a1f' } } }
+};
+const PAGE_NAMES = ['本周任务', '课程详情', '完成一周'];
+const ROLE_CN = { title: '标题', body: '正文', cta: '主按钮', badge: '徽章', label: '小标签', card: '卡片', stat: '数字' };
+const PROP_CN = { fontSize: '字号', fontWeight: '字重', fontFamily: '字体', color: '文字色', backgroundColor: '背景色', borderTopLeftRadius: '圆角', paddingTop: '上下内边距', paddingLeft: '左右内边距', transitionDuration: '动效时长' };
+// ---------- 插图：同一套规则、不同种子 ----------
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function art(c, d, k, tok) {
+  const g = c.getContext('2d', { willReadFrequently: true }), W = c.width, H = c.height, r = rng(k * 31 + (d === 'a' ? 1 : 2));
+  g.fillStyle = tok.bg; g.fillRect(0, 0, W, H);
+  if (d === 'a') {   // 安静：少量柔和的形，水平线，低透明度
+    g.globalAlpha = 0.35; for (let i = 0; i < 3; i++) { g.fillStyle = i % 2 ? tok.accent2 : tok.accent; g.beginPath(); g.arc(40 + r() * (W - 80), 30 + r() * 40, 18 + r() * 22, 0, 7); g.fill(); }
+    g.globalAlpha = 1; g.strokeStyle = tok.rule; g.lineWidth = 2; g.beginPath(); g.moveTo(18, H - 14); g.lineTo(W - 18, H - 14); g.stroke();
+  } else {           // 有活力：斜向色条，大面积高饱和
+    g.save(); g.translate(W / 2, H / 2); g.rotate(-0.5);
+    for (let i = -7; i <= 7; i++) { g.fillStyle = [tok.accent, tok.accent2, tok.surface][(i + 21 + k) % 3]; g.fillRect(i * 26 - 10, -H, 14 + r() * 8, H * 2); }
+    g.restore();
+  }
+}
+// ---------- 生成页面 ----------
+function tokens(row) { const cs = getComputedStyle(row), v = n => cs.getPropertyValue('--' + n).trim(); return Object.fromEntries(['bg', 'surface', 'text', 'sub', 'rule', 'accent', 'on-accent', 'accent2', 'head', 'body', 'hw', 'h', 'm', 't', 's', 'r', 'lh', 'art', 'dur', 'ease'].map(n => [n.replace('-', '_'), v(n)])); }
+function build(d) {
+  const D = DIRS[d], row = $('row-' + d), tok0 = tokens(row);
+  row.innerHTML = `<div class="stmt"><b>方向 ${d.toUpperCase()}：${D.name}</b><span class="sub">希望传达</span><div>${D.intent.join('、')}</div><span class="sub">哪些形式选择支持它</span><ol>${D.form.map(f => `<li>${f}</li>`).join('')}</ol><span class="sub">哪些内容最重要（按顺序）</span><ol>${D.key.map(f => `<li>${f}</li>`).join('')}</ol></div>` +
+    D.copy.map((c, k) => `<div class="phone"><div class="screen" data-page="${k}"><canvas data-role="art" width="240" height="${tok0.art}"></canvas><div class="in">${c.badge ? `<span data-role="badge">${c.badge}</span>` : `<p data-role="label">${c.label}</p>`}<h1 data-role="title" data-key="1">${c.title}</h1>${c.stats ? `<div class="stats">${c.stats.map(([n, u]) => `<div><div data-role="stat">${n}</div><p data-role="label">${u}</p></div>`).join('')}</div>` : ''}<p data-role="body">${c.body}</p><button data-role="cta">${c.cta}</button>${c.list ? `<ul data-role="card">${c.list.map((t, i) => i ? `<li>${t}</li>` : `<p data-role="label">${t}</p>`).join('')}</ul>` : ''}</div></div></div>`).join('');
+  const tok = tokens(row);
+  row.querySelectorAll('canvas').forEach((c, k) => art(c, d, k, tok));
+  for (const [k, f] of Object.entries(D.draft)) { const el = row.querySelector(`[data-page="${k}"] ${f.sel}`); el.setAttribute('style', f.style); el.dataset.draft = '1'; }
+}
+// ---------- 颜色工具 ----------
+const lin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+function oklab([r, g, b]) { [r, g, b] = [r, g, b].map(lin); const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b), m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b), s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b); return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s, 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s]; }
+const chroma = c => { const L = oklab(c); return Math.hypot(L[1], L[2]); };
+const rgba = s => s.match(/[\d.]+/g).map(Number);
+const lum = c => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+const contrast = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+const probe = document.createElement('i'); document.body.appendChild(probe);
+const resolve = c => { probe.style.color = c; return getComputedStyle(probe).color; };
+function effBg(el) { for (let e = el; e; e = e.parentElement) { const c = rgba(getComputedStyle(e).backgroundColor); if (c.length < 4 || c[3] > 0) return c.slice(0, 3); } return [255, 255, 255]; }
+const ownText = el => [...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim());
+// ---------- 检查 ----------
+function check(d) {
+  const row = $('row-' + d), tok = tokens(row), screens = [...row.querySelectorAll('.screen')];
+  const allow = { color: new Set(['bg', 'surface', 'text', 'sub', 'rule', 'accent', 'on_accent', 'accent2'].map(n => resolve(tok[n]))), size: new Set([tok.h, tok.m, tok.t, tok.s]), family: new Set([tok.head, tok.body].map(f => f.replace(/\s*,\s*/g, ', '))), radius: new Set([tok.r]), dur: new Set([(parseFloat(tok.dur) / 1000) + 's']) };
+  const out = [], res = { chroma: [], white: [], ratio: [], bang: [], key: [], minContrast: Infinity };
+  screens.forEach((sc, k) => {
+    const els = [sc, ...sc.querySelectorAll('*')];
+    for (const el of els) {
+      if (el.tagName === 'CANVAS') continue;
+      const cs = getComputedStyle(el), bad = (p, v) => out.push({ k, el, kind: 'off', msg: `${p} ${v} 不在令牌中` });
+      const bg = cs.backgroundColor; if (rgba(bg).length < 4 || rgba(bg)[3] > 0) { if (!allow.color.has(bg)) bad('背景色', bg); }
+      if (parseFloat(cs.borderTopWidth) > 0 && !allow.color.has(cs.borderTopColor)) bad('边框色', cs.borderTopColor);
+      if (cs.borderTopLeftRadius !== '0px' && !allow.radius.has(cs.borderTopLeftRadius)) bad('圆角', cs.borderTopLeftRadius);
+      if (cs.transitionDuration !== '0s' && !cs.transitionDuration.split(', ').every(v => allow.dur.has(v))) bad('动效时长', cs.transitionDuration);
+      if (ownText(el)) {
+        if (!allow.color.has(cs.color)) bad('文字色', cs.color);
+        if (!allow.size.has(cs.fontSize)) bad('字号', cs.fontSize);
+        if (!allow.family.has(cs.fontFamily.replace(/\s*,\s*/g, ', '))) bad('字体', cs.fontFamily);
+      }
+    }
+    // 文字：字号对比、对比度、突出度
+    const texts = els.filter(ownText).map(el => { const cs = getComputedStyle(el), px = parseFloat(cs.fontSize), w = +cs.fontWeight, c = contrast(rgba(cs.color), effBg(el)); return { el, px, w, c, score: px * (w >= 600 ? 1.3 : 1) * Math.min(c, 7) / 7 }; });
+    const sizes = texts.map(t => t.px); res.ratio.push(Math.max(...sizes) / Math.min(...sizes));
+    for (const t of texts) { const large = t.px >= 24 || (t.px >= 18.66 && t.w >= 700); res.minContrast = Math.min(res.minContrast, t.c); if (t.c < (large ? 3 : 4.5)) out.push({ k, el: t.el, kind: 'contrast', msg: `对比度 ${t.c.toFixed(2)}（要求 ≥ ${large ? 3 : 4.5}）` }); }
+    const [top, second] = texts.slice().sort((a, b) => b.score - a.score); res.key.push(top.el.dataset.key === '1' && top.score > second.score);
+    res.bang.push((sc.textContent.match(/[！!]/g) || []).length);
+    // 取样：面积加权色度与留白
+    sc.scrollIntoView({ block: 'center' }); const R = sc.getBoundingClientRect(), cv = sc.querySelector('canvas'), CR = cv.getBoundingClientRect(), img = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+    const content = [CR, ...[...sc.querySelectorAll('[data-role="cta"], [data-role="badge"]')].map(e => e.getBoundingClientRect())];
+    const walker = document.createTreeWalker(sc, NodeFilter.SHOW_TEXT); for (let n; (n = walker.nextNode());) if (n.textContent.trim()) { const rg = document.createRange(); rg.selectNodeContents(n); content.push(...rg.getClientRects()); }
+    let ch = 0, n = 0, filled = 0;
+    for (let y = R.top + 1; y < R.bottom - 1; y += 3) for (let x = R.left + 1; x < R.right - 1; x += 3) {
+      const el = document.elementFromPoint(x, y); if (!el || !sc.contains(el)) continue;
+      let c; if (el === cv) { const px = Math.floor((x - CR.left) * cv.width / CR.width), py = Math.floor((y - CR.top) * cv.height / CR.height), i = (py * cv.width + px) * 4; c = [img[i], img[i + 1], img[i + 2]]; } else c = effBg(el);
+      ch += chroma(c); n++; if (content.some(r => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom)) filled++;
+    }
+    res.chroma.push(ch / n); res.white.push(1 - filled / n);
+  });
+  // 同一角色在三个页面上的样式是否一致
+  const PROPS = ['fontSize', 'fontWeight', 'fontFamily', 'color', 'backgroundColor', 'borderTopLeftRadius', 'paddingTop', 'paddingLeft', 'transitionDuration'];
+  const roles = {}; screens.forEach((sc, k) => sc.querySelectorAll('[data-role]').forEach(el => { const r = el.dataset.role; if (r === 'art') return; (roles[r] = roles[r] || []).push([k, el]); }));
+  for (const [r, list] of Object.entries(roles)) {
+    const base = getComputedStyle(list[0][1]);
+    for (const [k, el] of list.slice(1)) { const cs = getComputedStyle(el); for (const p of PROPS) if (cs[p] !== base[p]) out.push({ k, el, kind: 'role', msg: `${PROP_CN[p]}与“${PAGE_NAMES[list[0][0]]}”页的${ROLE_CN[r]}不同（${cs[p]} 对 ${base[p]}）` }); }
+  }
+  const cta = getComputedStyle(screens[0].querySelector('[data-role="cta"]'));
+  res.motion = { dur: cta.transitionDuration.split(', ')[0], ease: cta.transitionTimingFunction.match(/^(cubic-bezier\([^)]*\)|[a-z-]+)/)[0] };
+  const bz = res.motion.ease.match(/[-\d.]+/g); res.motion.bounce = bz ? (+bz[1] < 0 || +bz[1] > 1 || +bz[3] < 0 || +bz[3] > 1) : false;
+  const cnt = kind => out.filter(o => o.kind === kind).length; res.offToken = cnt('off'); res.roleDiff = cnt('role'); res.lowContrast = cnt('contrast'); res.issues = out;
+  return res;
+}
+// ---------- 运行：初稿检查 → 修正 → 再检查 ----------
+const fmt = (a, f) => a.map(f).join(' / '), ms = v => Math.round(parseFloat(v) * 1000) + ' ms';
+document.fonts.ready.then(() => {
+  build('a'); build('b');
+  const draft = { a: check('a'), b: check('b') };
+  for (const d of ['a', 'b']) {   // 同一个元素的问题合并成一行
+    const by = new Map(); for (const o of draft[d].issues) { if (!by.has(o.el)) by.set(o.el, { k: o.k, msgs: [] }); by.get(o.el).msgs.push(o.msg); }
+    for (const [el, { k, msgs }] of by) $('issues').insertAdjacentHTML('beforeend', `<tr><td>${DIRS[d].name}</td><td>${PAGE_NAMES[k]}</td><td>${ROLE_CN[el.dataset.role] || '页面'}</td><td>${msgs.join('；')}</td></tr>`);
+  }
+  document.querySelectorAll('[data-draft]').forEach(el => { el.removeAttribute('style'); delete el.dataset.draft; });   // 修正：回到令牌
+  const fin = { a: check('a'), b: check('b') };
+  window.scrollTo(0, 0);
+  const A = fin.a, B = fin.b, pass = ok => `<span class="${ok ? 'good' : 'poor'}">${ok ? '✓' : '✗'}</span>`;
+  const rows = [
+    ['面积加权平均色度（三页）', `${fmt(A.chroma, v => v.toFixed(3))} ${pass(A.chroma.every(v => v <= 0.03))}<br><span class="sub">目标 ≤ 0.03</span>`, `${fmt(B.chroma, v => v.toFixed(3))} ${pass(B.chroma.every(v => v >= 0.08))}<br><span class="sub">目标 ≥ 0.08</span>`],
+    ['留白比例', `${fmt(A.white, v => (100 * v).toFixed(0) + '%')} ${pass(A.white.every(v => v >= 0.6))}<br><span class="sub">目标 ≥ 60%</span>`, `${fmt(B.white, v => (100 * v).toFixed(0) + '%')} ${pass(B.white.every(v => v <= 0.5))}<br><span class="sub">目标 ≤ 50%</span>`],
+    ['字号对比（最大 ÷ 最小）', `${fmt(A.ratio, v => v.toFixed(2))} ${pass(A.ratio.every(v => v <= 2))}`, `${fmt(B.ratio, v => v.toFixed(2))} ${pass(B.ratio.every(v => v >= 2.5))}`],
+    ['主按钮动效（时长，缓动曲线）', `${ms(A.motion.dur)}，${A.motion.ease.replace('cubic-bezier', '')}${A.motion.bounce ? '（弹跳）' : ''} ${pass(A.motion.dur === '0.3s' && !A.motion.bounce)}`, `${ms(B.motion.dur)}，${B.motion.ease.replace('cubic-bezier', '')} ${pass(B.motion.dur === '0.15s')}`],
+    ['感叹号（每页）', `${fmt(A.bang, String)} ${pass(A.bang.every(v => v === 0))}`, `${fmt(B.bang, String)} ${pass(B.bang.every(v => v <= 1))}`],
+    ['最重要的内容最突出', `${A.key.filter(Boolean).length}/3 ${pass(A.key.every(Boolean))}`, `${B.key.filter(Boolean).length}/3 ${pass(B.key.every(Boolean))}`],
+    ['令牌之外的值（初稿 → 修正后）', `${draft.a.offToken} → ${A.offToken}`, `${draft.b.offToken} → ${B.offToken}`],
+    ['同一角色样式不一致（初稿 → 修正后）', `${draft.a.roleDiff} → ${A.roleDiff}`, `${draft.b.roleDiff} → ${B.roleDiff}`],
+    ['文字对比度最低值（初稿 → 修正后）', `${draft.a.minContrast.toFixed(2)} → ${A.minContrast.toFixed(2)} ${pass(A.lowContrast === 0)}`, `${draft.b.minContrast.toFixed(2)} → ${B.minContrast.toFixed(2)} ${pass(B.lowContrast === 0)}`]
+  ];
+  $('chk').innerHTML = `<tr><th>检查</th><th>A 书房</th><th>B 训练营</th></tr>` + rows.map(r => `<tr><td>${r[0]}</td><td class="num">${r[1]}</td><td class="num">${r[2]}</td></tr>`).join('');
+  // ---------- 观察者描述（构造） ----------
+  const OBS = {
+    a: [['平静', '专业', '柔和'], ['安静', '无聊', '温暖'], ['沉稳', '可靠', '像图书馆'], ['舒缓', '有点慢', '亲切'], ['冷淡', '正式', '平静'], ['安静', '踏实', '温和']],
+    b: [['兴奋', '醒目', '运动'], ['有压力', '吵', '活泼'], ['热烈', '竞争', '直接'], ['焦虑', '刺激', '清楚'], ['有能量', '像健身房', '干脆'], ['吵', '年轻', '紧张感']]
+  };
+  const MAP = { 安静: ['安静', '平静', '舒缓', '沉稳'], 可信: ['可信', '可靠', '专业', '踏实', '正式'], 温暖: ['温暖', '温和', '亲切', '柔和'],
+    有活力: ['有活力', '活泼', '热烈', '兴奋', '有能量'], 有挑战: ['有挑战', '竞争', '紧张感', '刺激', '运动'], 直接: ['直接', '清楚', '干脆', '醒目'] };
+  const NEG = ['无聊', '有点慢', '冷淡', '有压力', '吵', '焦虑'];
+  const cls = w => { for (const [k, l] of Object.entries(MAP)) if (l.includes(w)) return ['hit', k]; return [NEG.includes(w) ? 'neg' : 'neu', null]; };
+  $('obs').innerHTML = `<tr><th>观察者</th><th>A 书房</th><th>B 训练营</th></tr>` + OBS.a.map((_, i) => `<tr><td>O${i + 1}</td>${['a', 'b'].map(d => `<td>${OBS[d][i].map(w => `<span class="w ${cls(w)[0]}">${w}</span>`).join(' ')}</td>`).join('')}</tr>`).join('');
+  const sum = {};
+  for (const d of ['a', 'b']) {
+    const words = OBS[d].flat(), per = Object.fromEntries(DIRS[d].intent.map(k => [k, OBS[d].filter(o => o.some(w => cls(w)[1] === k)).length]));
+    sum[d] = { per, hit: words.filter(w => cls(w)[0] === 'hit').length, neu: words.filter(w => cls(w)[0] === 'neu').length, neg: words.filter(w => cls(w)[0] === 'neg'), negPeople: OBS[d].filter(o => o.some(w => NEG.includes(w))).length };
+  }
+  $('obs-sum').innerHTML = `<tr><th>汇总</th><th>A 书房</th><th>B 训练营</th></tr>` +
+    `<tr><td>每个意图词被几人提到</td>${['a', 'b'].map(d => `<td>${Object.entries(sum[d].per).map(([k, v]) => `${k} ${v}/6`).join('，')}</td>`).join('')}</tr>` +
+    `<tr><td>命中／中性／偏离（共 18 词）</td>${['a', 'b'].map(d => `<td class="num">${sum[d].hit}／${sum[d].neu}／${sum[d].neg.length}</td>`).join('')}</tr>` +
+    `<tr><td>出现偏离词的人数</td>${['a', 'b'].map(d => `<td class="num">${sum[d].negPeople}/6：${[...new Set(sum[d].neg)].join('、')}</td>`).join('')}</tr>`;
+  $('next').innerHTML = `<h3>下一轮修改（假设，需要再测）</h3><p class="sub">A：“安静”被所有人读到，但有 ${sum.a.negPeople} 人读成“冷淡、无聊、有点慢”。可以加大插图里暖色的面积，在完成页加一句具体的反馈（例如这周最难的一项），检查“温暖”是否上升而“安静”不下降。</p><p class="sub">B：“有活力”“有挑战”“直接”各有 4 人读到，但 ${sum.b.negPeople} 人感到“有压力、焦虑、吵”。学习不是比赛，挑战感容易变成压力：保留“连续达标”，去掉“冲刺”“拿下”这类词，减少斜条的面积，再看偏离词是否减少。</p>`;
+  window.__two = { draft: { a: { off: draft.a.offToken, role: draft.a.roleDiff, minC: +draft.a.minContrast.toFixed(2) }, b: { off: draft.b.offToken, role: draft.b.roleDiff, minC: +draft.b.minContrast.toFixed(2) } }, issues: [...document.querySelectorAll('#issues tr')].slice(1).map(r => r.textContent),
+    fin: Object.fromEntries(['a', 'b'].map(d => [d, { chroma: fin[d].chroma.map(v => +v.toFixed(3)), white: fin[d].white.map(v => +v.toFixed(3)), ratio: fin[d].ratio.map(v => +v.toFixed(2)), motion: fin[d].motion, bang: fin[d].bang, key: fin[d].key, off: fin[d].offToken, role: fin[d].roleDiff, minC: +fin[d].minContrast.toFixed(2) }])), sum };
+});
+</script>
+</body>
+</html>
