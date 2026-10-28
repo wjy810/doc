@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>测量与实验：眼动不等于理解，小样本的不确定性，时间与问卷的计算</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  canvas { display: block; width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); }
+  figure { margin: 0; display: grid; gap: 4px; } figcaption { font-size: 12px; color: var(--muted); }
+  .note { background: #fff8e6; border-radius: 6px; padding: 4px 8px; font-size: 12px; color: #7a4a00; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 同样的热区图，完全不同的经历</h2>
+  <p class="note">本节数据是为了说明而构造的两位参与者，不是真实的眼动记录。</p>
+  <p class="sub">任务：在设置页中找到“推送时段”并改为晚上。两人注视过的位置和时长完全相同，所以热区图一模一样。甲沿着“标题 → 字段”的顺序看下来，第 8 次注视找到目标并完成；乙先在三个分组标题之间来回，最后一次注视其实落在“推送时段”上，却没有认出它就是目标，放弃了。眼动数据告诉我们“看了哪里”，不直接告诉我们“看懂了没有、喜不喜欢”。</p>
+  <div class="four">
+    <figure><canvas id="h1" width="300" height="220"></canvas><figcaption>甲的热区图</figcaption></figure>
+    <figure><canvas id="s1" width="300" height="220"></canvas><figcaption id="capA">甲的扫视路径</figcaption></figure>
+    <figure><canvas id="h2" width="300" height="220"></canvas><figcaption>乙的热区图</figcaption></figure>
+    <figure><canvas id="s2" width="300" height="220"></canvas><figcaption id="capB">乙的扫视路径</figcaption></figure>
+  </div>
+  <p class="sub" id="hnote"></p>
+</section>
+
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px">
+      <h2>2 完成率：人少时，不确定性很大</h2>
+      <p class="sub">同样是 80% 完成，人数不同，可信的范围差很多。下表用调整 Wald 法（Agresti—Coull）计算 95% 置信区间——它在小样本时比直接套用正态近似更可靠。</p>
+      <table id="ci"><tr><th>完成／人数</th><th>完成率</th><th>95% 置信区间</th><th>区间宽度</th></tr></table>
+    </div>
+    <div style="display:grid;gap:6px">
+      <h2>3 任务时间：通常是右偏的</h2>
+      <p class="note">以下 8 个时间是构造的示例数据。</p>
+      <p class="sub">任务时间不会小于 0，偶尔有人特别慢，分布向右拖尾。一个慢的人会把算术平均拉高；对数变换后再平均（几何平均）更能代表“典型的人”，置信区间也在对数尺度上计算再换回来。</p>
+      <table id="time"><tr><th>统计量</th><th>值</th></tr></table>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px">
+      <h2>4 主观评价：系统可用性量表（SUS）怎样计分</h2>
+      <p class="note">一位参与者的构造作答，用来演示计分规则。</p>
+      <table id="sus"><tr><th>#</th><th>题目（简写）</th><th>作答 1—5</th><th>得分</th></tr></table>
+      <p class="sub" id="susNote"></p>
+    </div>
+    <div style="display:grid;gap:6px">
+      <h2>5 回忆与报告</h2>
+      <table>
+        <tr><th>指标</th><th>怎样测</th><th>注意</th></tr>
+        <tr><td>任务成功</td><td>事先写好成功标准（例如“推送时段为 20—22 点并已保存”）</td><td>部分完成怎样算，要事先定</td></tr>
+        <tr><td>错误</td><td>记录每次走错页面、点错控件、需要撤销</td><td>区分“走错又回来”和“导致失败”</td></tr>
+        <tr><td>耗时</td><td>从参与者开始到宣布完成或放弃</td><td>只比较成功的任务，或分开报告</td></tr>
+        <tr><td>回忆</td><td>任务结束后，不看界面，请参与者写出或画出刚才的结构（自由回忆），或从选项中辨认（再认）</td><td>自由回忆比再认更难；两者回答的问题不同</td></tr>
+        <tr><td>主观评价</td><td>标准问卷（SUS、NASA-TLX 等）或单题评分</td><td>喜欢不等于好用；评分受顺序与期望影响</td></tr>
+        <tr><td>眼动</td><td>注视位置、时长、顺序</td><td>只是证据的一部分，要与任务结果、访谈一起解释</td></tr>
+      </table>
+      <h3>报告中必须写明</h3>
+      <table><tr><td>参与者：人数、怎样招募、与目标用户的差别</td></tr><tr><td>任务与成功标准、两种设计中保持不变的内容</td></tr><tr><td>设备、环境、顺序安排（是否平衡）</td></tr><tr><td>每个指标的计算方法与不确定性（置信区间）</td></tr><tr><td>限制：哪些结论不能推广到哪里</td></tr></table>
+    </div>
+  </div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+// ---------- 1 热区图与扫视路径 ----------
+const AOIS = { 个人信息: [20, 20], 求职意向: [20, 80], 通知设置: [20, 140], 新职位: [160, 150], 推送时段: [160, 195], 姓名: [160, 30], 岗位: [160, 90] };
+// 两人注视过的位置与时长完全相同（同一组注视），只是顺序不同
+const FIX = [['个人信息', 400], ['求职意向', 500], ['通知设置', 700], ['新职位', 600], ['推送时段', 900], ['姓名', 500], ['岗位', 800], ['个人信息', 400], ['通知设置', 700], ['求职意向', 300]];
+const orderA = [0, 5, 1, 6, 2, 8, 3, 4, 7, 9];   // 甲：先粗看结构，再进入“通知设置”找到目标
+const orderB = [0, 1, 2, 7, 9, 5, 6, 8, 3, 4];   // 乙：在几个标题之间来回
+function page(g) { g.fillStyle = '#fff'; g.fillRect(0, 0, 300, 220); g.font = '12px "Noto Sans SC"'; for (const [n, [x, y]] of Object.entries(AOIS)) { g.fillStyle = x < 100 ? '#1d2330' : '#5b6475'; g.fillText(n, x, y + 4); if (x > 100) { g.strokeStyle = '#c3c9d3'; g.strokeRect(x + 50, y - 8, 80, 16); } } }
+function heat(id, order) {
+  const g = $(id).getContext('2d'), W = 300, H = 220, acc = new Float32Array(W * H);
+  for (const i of order) { const [n, d] = FIX[i], [cx, cy] = AOIS[n], sx = cx + 20, sig = 18; for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) acc[y * W + x] += d * Math.exp(-((x - sx) ** 2 + (y - cy) ** 2) / (2 * sig * sig)); }
+  page(g); const img = g.getImageData(0, 0, W, H), mx = Math.max(...acc);
+  for (let i = 0; i < acc.length; i++) { const v = acc[i] / mx; if (v < 0.05) continue; const a = Math.min(0.75, v); img.data[i * 4] = img.data[i * 4] * (1 - a) + 255 * a; img.data[i * 4 + 1] = img.data[i * 4 + 1] * (1 - a) + (255 * (1 - v)) * a; img.data[i * 4 + 2] = img.data[i * 4 + 2] * (1 - a); }
+  g.putImageData(img, 0, 0); return acc;
+}
+function path(id, order, color) {
+  const g = $(id).getContext('2d'); page(g); g.strokeStyle = color; g.lineWidth = 1.5; g.beginPath();
+  order.forEach((i, k) => { const [n] = FIX[i], [x, y] = AOIS[n]; const px = x + 20 + (k % 3) * 3, py = y + (k % 2) * 3; k ? g.lineTo(px, py) : g.moveTo(px, py); }); g.stroke();
+  order.forEach((i, k) => { const [n, d] = FIX[i], [x, y] = AOIS[n]; const px = x + 20 + (k % 3) * 3, py = y + (k % 2) * 3; g.fillStyle = color; g.beginPath(); g.arc(px, py, 4 + d / 150, 0, 7); g.globalAlpha = 0.85; g.fill(); g.globalAlpha = 1; g.fillStyle = '#fff'; g.font = '700 9px sans-serif'; g.fillText(k + 1, px - 3, py + 3); });
+}
+// ---------- 2 置信区间 ----------
+function adjWald(x, n, z = 1.959964) { const nt = n + z * z, pt = (x + z * z / 2) / nt, h = z * Math.sqrt(pt * (1 - pt) / nt); return [Math.max(0, pt - h), Math.min(1, pt + h)]; }
+// ---------- 3 时间 ----------
+const TIMES = [32, 41, 38, 45, 36, 52, 40, 121];
+function tq(df) { const T = { 7: 2.365 }; return T[df]; }   // t 分布 0.975 分位数（自由度 7）
+// ---------- 4 SUS ----------
+const SUS = [['我愿意经常使用这个系统', 4], ['系统不必要地复杂', 2], ['系统容易使用', 4], ['需要技术人员的帮助才能使用', 1], ['各项功能整合得很好', 4], ['系统中有太多不一致', 2], ['大多数人能很快学会', 5], ['系统用起来很笨重', 2], ['使用时我很有信心', 3], ['开始使用前需要学很多东西', 2]];
+
+document.fonts.ready.then(() => {
+  const a = heat('h1', orderA), b = heat('h2', orderB), totalS = (FIX.reduce((s, f) => s + f[1], 0) / 1000).toFixed(1);
+  $('capA').textContent = `甲的扫视路径：完成，注视共 ${totalS} 秒`; $('capB').textContent = `乙的扫视路径：放弃，注视共 ${totalS} 秒`; path('s1', orderA, '#1f7a4d'); path('s2', orderB, '#b3261e');
+  let diff = 0; for (let i = 0; i < a.length; i++) diff = Math.max(diff, Math.abs(a[i] - b[i]));
+  const back = order => order.slice(1).filter((i, k) => FIX[i][0] === FIX[order[k]][0] || ['个人信息', '求职意向', '通知设置'].includes(FIX[i][0]) && ['个人信息', '求职意向', '通知设置'].includes(FIX[order[k]][0])).length;
+  $('hnote').textContent = `两张热区图逐像素的最大相对差：${(diff / Math.max(...a)).toExponential(1)}（只有浮点舍入误差，两张图相同）。在三个分组标题之间直接跳转的次数：甲 ${back(orderA)} 次，乙 ${back(orderB)} 次。区分两人的，是顺序、任务结果和事后访谈，而不是热区图。`;
+  const ciRows = [[4, 5], [6, 8], [16, 20], [40, 50], [5, 5]].map(([x, n]) => { const [lo, hi] = adjWald(x, n); $('ci').insertAdjacentHTML('beforeend', `<tr><td class="num">${x}／${n}</td><td class="num">${(100 * x / n).toFixed(0)}%</td><td class="num">${(100 * lo).toFixed(0)}%—${(100 * hi).toFixed(0)}%</td><td class="num ${hi - lo > 0.4 ? 'poor' : hi - lo > 0.2 ? 'mid' : 'good'}">${(100 * (hi - lo)).toFixed(0)} 个百分点</td></tr>`); return [x, n, +(100 * lo).toFixed(1), +(100 * hi).toFixed(1)]; });
+  $('ci').insertAdjacentHTML('beforeend', `<tr><td colspan="4" class="sub">5 人全部完成，也只能说“完成率很可能在 ${(100 * adjWald(5, 5)[0]).toFixed(0)}% 以上”。小样本测试擅长发现问题，不适合精确地估计比例。</td></tr>`);
+  const n = TIMES.length, mean = TIMES.reduce((s, v) => s + v, 0) / n, sorted = [...TIMES].sort((x, y) => x - y), median = (sorted[3] + sorted[4]) / 2;
+  const logs = TIMES.map(Math.log), lm = logs.reduce((s, v) => s + v, 0) / n, lsd = Math.sqrt(logs.reduce((s, v) => s + (v - lm) ** 2, 0) / (n - 1)), gm = Math.exp(lm), half = tq(n - 1) * lsd / Math.sqrt(n);
+  const sd = Math.sqrt(TIMES.reduce((s, v) => s + (v - mean) ** 2, 0) / (n - 1)), half2 = tq(n - 1) * sd / Math.sqrt(n);
+  const rows = [['数据（秒）', TIMES.join('、')], ['算术平均', `${mean.toFixed(1)} 秒；95% 区间 ${(mean - half2).toFixed(1)}—${(mean + half2).toFixed(1)}`], ['中位数', `${median.toFixed(1)} 秒`], ['几何平均（对数尺度上平均）', `${gm.toFixed(1)} 秒；95% 区间 ${Math.exp(lm - half).toFixed(1)}—${Math.exp(lm + half).toFixed(1)}`], ['去掉 121 秒那一位后的算术平均', `${(TIMES.slice(0, 7).reduce((s, v) => s + v, 0) / 7).toFixed(1)} 秒`]];
+  for (const [k, v] of rows) $('time').insertAdjacentHTML('beforeend', `<tr><td>${k}</td><td class="num">${v}</td></tr>`);
+  $('time').insertAdjacentHTML('beforeend', '<tr><td colspan="2" class="sub">不要随意删除慢的人：先看录像，弄清楚他为什么慢——那可能正是要发现的问题。</td></tr>');
+  let total = 0; SUS.forEach(([q, r], i) => { const s = i % 2 === 0 ? r - 1 : 5 - r; total += s; $('sus').insertAdjacentHTML('beforeend', `<tr><td>${i + 1}</td><td>${q}</td><td class="num">${r}</td><td class="num">${s}</td></tr>`); });
+  $('susNote').textContent = `单数题（正面表述）得分 ＝ 作答 − 1；双数题（负面表述）得分 ＝ 5 − 作答。总分 ＝ 各题得分之和 × 2.5 ＝ ${total} × 2.5 ＝ ${total * 2.5}（0—100 分，不是百分比）。`;
+  window.__meas = { diff: diff / Math.max(...a), backA: back(orderA), backB: back(orderB), ci: ciRows, time: { mean: +mean.toFixed(1), median, gm: +gm.toFixed(1), gci: [+Math.exp(lm - half).toFixed(1), +Math.exp(lm + half).toFixed(1)], aci: [+(mean - half2).toFixed(1), +(mean + half2).toFixed(1)] }, sus: total * 2.5 };
+});
+</script>
+</body>
+</html>

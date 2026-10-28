@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>综合项目：只改变分组与层级的两个界面</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .main { display: grid; grid-template-columns: 300px 300px minmax(0, 1fr); gap: 14px; align-items: start; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .ui { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 13px; color: #1d2330; }
+  .ui .it { display: grid; grid-template-columns: 70px 1fr; gap: 6px; cursor: pointer; border-radius: 4px; padding: 0 4px; }
+  .ui .it:hover { background: #f1f5fd; } .ui .it.hit { background: #fff1c9; }
+  .ui .it span { color: #5b6475; }
+  .ui .gt { font-size: 13px; color: #1d2330; padding: 0 4px; }
+  /* 平铺：标题与内容同样的样式与间距 */
+  .flat .it, .flat .gt { margin-bottom: 4px; }
+  /* 分组：标题加粗并留出组间距离——只改间距与标题的强调 */
+  .grouped .g { margin-bottom: 14px; } .grouped .g:last-child { margin-bottom: 0; }
+  .grouped .gt { font-weight: 700; margin-bottom: 2px; } .grouped .it { margin-bottom: 4px; }
+  .task { background: #f6f7f9; border-radius: 6px; padding: 6px 8px; font-size: 12px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>同一份信息，两个界面：只改变分组与层级</h2>
+  <div class="main">
+    <div><h3>A：平铺（所有行同样的样式与间距）</h3><div class="ui flat" id="A"></div></div>
+    <div><h3>B：分组（标题加粗，组间留出距离）</h3><div class="ui grouped" id="B"></div></div>
+    <div style="display:grid;gap:6px"><h3>控制检查：两个版本之间，哪些地方不同</h3><table id="ctrl"><tr><th>检查</th><th>结果</th></tr></table></div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px">
+      <h2>任务与预测</h2>
+      <p class="sub">参与者每次只看到一个版本。任务不提示答案在哪一组。预测来自一个简单的查找模型：在平铺版本中，从上往下逐行看，直到找到目标；在分组版本中，先看组标题，进入正确的组后再逐行看。</p>
+      <table id="tasks"><tr><th>任务</th><th>成功标准</th><th>A：预测要看的行数</th><th>B：预测要看的行数</th></tr></table>
+      <h3>参与者安排：版本顺序与任务组都要平衡</h3>
+      <table id="plan"><tr><th>参与者</th><th>先用</th><th>任务组</th><th>后用</th><th>任务组</th></tr></table>
+    </div>
+    <div style="display:grid;gap:6px">
+      <h2>记录：操作过程与解释</h2>
+      <p class="sub">每项任务请参与者点一下自己认为是答案的那一行，记录指出的行（包括指错的）与解释（“说说你是怎样找到的”）。下表由测试脚本模拟的两位参与者产生，只用来展示记录格式，不是研究结果。</p>
+      <table id="log"><tr><th>参与者</th><th>版本</th><th>任务</th><th>指出的行</th><th style="white-space:nowrap">结果</th><th>解释</th></tr></table>
+      <h3>结论怎样写</h3>
+      <table><tr><th>可以说</th><th>不能说</th></tr>
+        <tr><td>在其他条件相同的前提下，两个版本的差别只在分组方式；如果正式测试中 B 的查找时间显著更短，可以归因于分组</td><td>“分组让用户更喜欢这个岗位”——没有测量偏好</td></tr>
+        <tr><td>预测：B 在“到岗时间”上要看的行更少（5 对 14）</td><td>“B 快了 2.8 倍”——这是模型的预测，不是测量结果</td></tr>
+        <tr><td>本结论适用于桌面浏览器、宽 300 像素、中文、熟悉求职网站的参与者</td><td>推广到手机、其他语言或第一次求职的人</td></tr></table>
+    </div>
+  </div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+const DATA = [['基本信息', [['岗位', '数据可视化工程师'], ['公司', '星图科技'], ['城市', '上海']]], ['薪资福利', [['薪资', '25—35K'], ['年终', '2 个月'], ['补贴', '交通与餐补']]], ['工作方式', [['远程', '每周可远程 2 天'], ['时间', '弹性 10:00—19:00'], ['出差', '很少']]], ['入职', [['到岗', '一个月内'], ['试用期', '3 个月'], ['面试', '两轮']]]];
+function build(id) { $(id).innerHTML = DATA.map(([g, items], gi) => `<div class="g"><div class="gt" data-r="${g}">${g}</div>${items.map(([k, v]) => `<div class="it" data-r="${k}"><span>${k}</span><b style="font-weight:400">${v}</b></div>`).join('')}</div>`).join(''); }
+build('A'); build('B');
+
+// ---------- 控制检查：只允许间距和标题强调不同 ----------
+const PROPS = ['fontFamily', 'fontSize', 'color', 'lineHeight', 'fontWeight', 'marginTop', 'marginBottom', 'backgroundColor', 'borderTopWidth'];
+function control() {
+  const ea = [...$('A').querySelectorAll('.gt, .it')], eb = [...$('B').querySelectorAll('.gt, .it')];
+  const textSame = ea.length === eb.length && ea.every((e, i) => e.textContent === eb[i].textContent);
+  const diffs = new Map();
+  ea.forEach((e, i) => { const a = getComputedStyle(e), b = getComputedStyle(eb[i]); for (const p of PROPS) if (a[p] !== b[p]) { const k = `${e.classList.contains('gt') ? '组标题' : '内容行'}的 ${p}`; diffs.set(k, `${a[p]} → ${b[p]}`); } });
+  // 组容器的间距
+  const ga = [...$('A').querySelectorAll('.g')], gb = [...$('B').querySelectorAll('.g')];
+  ga.forEach((g, i) => { const a = getComputedStyle(g).marginBottom, b = getComputedStyle(gb[i]).marginBottom; if (a !== b) diffs.set('组之间的 marginBottom', `${a} → ${b}`); });
+  const allowed = k => /marginBottom|marginTop|组标题的 fontWeight/.test(k);
+  const bad = [...diffs.keys()].filter(k => !allowed(k));
+  const hA = $('A').getBoundingClientRect().height, hB = $('B').getBoundingClientRect().height;
+  const rows = [
+    ['文字内容与顺序', textSame ? '完全相同（16 行）' : '不同', textSame],
+    ['内容行的字体、字号、颜色、行高', [...diffs.keys()].some(k => k.startsWith('内容行') && !/margin/.test(k)) ? '不同' : '相同', ![...diffs.keys()].some(k => k.startsWith('内容行') && !/margin/.test(k))],
+    ['不同之处', [...diffs.entries()].map(([k, v]) => `${k}：${v}`).join('；'), bad.length === 0],
+    ['界面宽度与设备', '相同：宽 300 像素，同一浏览器', true],
+    ['总高度', `${hA.toFixed(0)} → ${hB.toFixed(0)} 像素（分组版本多出 ${(hB - hA).toFixed(0)} 像素，是组间距离带来的）`, true]
+  ];
+  for (const [a, b, ok] of rows) $('ctrl').insertAdjacentHTML('beforeend', `<tr><td>${a}</td><td class="${ok ? 'good' : 'poor'}">${b}</td></tr>`);
+  $('ctrl').insertAdjacentHTML('beforeend', `<tr><td colspan="2" class="sub">${bad.length ? '有不允许的差异：' + bad.join('、') : '只有间距与标题的粗细不同——符合“一次只改一个因素”。'}</td></tr>`);
+  return { textSame, diffs: Object.fromEntries(diffs), bad, hA, hB };
+}
+
+// ---------- 任务与预测 ----------
+const TASKS = [['T1', '这个岗位多久内要到岗？', '说出“一个月内”', '到岗'], ['T2', '可以远程工作吗？每周几天？', '说出“每周 2 天”', '远程'], ['T3', '薪资是否达到你期望的 20K？', '说出“达到，25—35K”', '薪资']];
+function predict(target) {
+  const flat = DATA.flatMap(([g, items]) => [g, ...items.map(i => i[0])]);
+  const gi = DATA.findIndex(([, items]) => items.some(i => i[0] === target)), ii = DATA[gi][1].findIndex(i => i[0] === target);
+  return { A: flat.indexOf(target) + 1, B: (gi + 1) + (ii + 1) };
+}
+const preds = {};
+for (const [id, q, ok, target] of TASKS) { const p = predict(target); preds[id] = p; $('tasks').insertAdjacentHTML('beforeend', `<tr><td>${id} ${q}</td><td>${ok}</td><td class="num">${p.A} 行</td><td class="num">${p.B} 行（${DATA.findIndex(([, it]) => it.some(i => i[0] === target)) + 1} 个标题 ＋ ${p.B - DATA.findIndex(([, it]) => it.some(i => i[0] === target)) - 1} 行）</td></tr>`); }
+$('tasks').insertAdjacentHTML('beforeend', '<tr><td colspan="4" class="sub">另外准备与 T1—T3 难度相当的 T4—T6（试用期、出差、补贴），这样每人在两个版本上做的是不同但等价的任务，避免记住答案。</td></tr>');
+// 2 × 2 平衡：版本顺序 × 任务组
+for (let p = 1; p <= 8; p++) { const firstA = p % 2 === 1, set1 = Math.ceil(p / 2) % 2 === 1; $('plan').insertAdjacentHTML('beforeend', `<tr><td>P${String(p).padStart(2, '0')}</td><td>${firstA ? 'A' : 'B'}</td><td>${set1 ? 'T1—T3' : 'T4—T6'}</td><td>${firstA ? 'B' : 'A'}</td><td>${set1 ? 'T4—T6' : 'T1—T3'}</td></tr>`); }
+
+// ---------- 记录 ----------
+const LOG = [];
+document.addEventListener('click', e => { const it = e.target.closest('.it, .gt'); if (!it || !window.__cur) return; window.__cur.clicks.push(it.dataset.r); });
+window.__start = (pid, ver, task) => { window.__cur = { pid, ver, task, clicks: [] }; $(ver).querySelectorAll('.hit').forEach(x => x.classList.remove('hit')); };
+window.__end = (result, explain) => { const c = window.__cur; LOG.push({ ...c, result, explain }); const last = c.clicks[c.clicks.length - 1]; const row = $(c.ver).querySelector(`[data-r="${last}"]`); if (row) row.classList.add('hit'); $('log').insertAdjacentHTML('beforeend', `<tr><td>${c.pid}</td><td>${c.ver}</td><td>${c.task}</td><td>${c.clicks.join(' → ')}</td><td class="${result === '成功' ? 'good' : 'poor'}">${result}</td><td>${explain}</td></tr>`); window.__cur = null; };
+document.fonts.ready.then(() => { window.__ab = { ctrl: control(), preds, LOG }; });
+</script>
+</body>
+</html>
