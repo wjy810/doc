@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>批量修改与自动化任务：预览、停止、恢复与授权一致</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 4px 0 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .col { display: grid; gap: 6px; align-content: start; }
+  .step { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: grid; gap: 5px; font-size: 12px; }
+  .step > b:first-child { font-size: 12.5px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+  button { font: inherit; font-size: 12px; padding: 2px 10px; border: 1px solid #b9c3d3; background: #f3f6fb; border-radius: 6px; cursor: pointer; }
+  button.primary { background: #2f6fdb; color: #fff; border-color: #2f6fdb; } button.danger { border-color: #d9a39d; background: #fdf3f2; color: #8c2a20; }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; } button:disabled { opacity: 0.5; cursor: default; }
+  .prog { height: 8px; background: #e6e9ef; border-radius: 4px; overflow: hidden; } .prog i { display: block; height: 100%; background: #2f6fdb; }
+  .who { background: #fdf6e7; border: 1px solid #ecd9b0; border-radius: 6px; padding: 4px 8px; }
+  .chip { display: inline-block; border-radius: 9px; padding: 0 7px; font-size: 11px; background: #eef0f3; margin: 1px 2px; }
+  .chip.add { background: #e3f1e8; color: #1f5f3d; } .chip.up { background: #e8eefb; color: #1f4fae; } .chip.skip { background: #fbe1de; color: #8c2a20; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div class="col"><h2>1 批量修改：把第 3—5 周的资料共享给李老师（可编辑），并移到“第 2 单元”</h2>
+      <p class="sub">资料库 120 个文件；人、文件和文件夹为演示而虚构。测试脚本用真实的点击完成：预览 → 确认 → 中途停止 → 撤销已完成的部分 → 再做一遍 → 从历史里整批撤销。</p>
+      <div class="step" id="s1"></div><div class="step" id="s2"></div><div class="step" id="s3"></div><div class="step" id="s4"></div></div>
+    <div class="col"><h2>2 自动化任务：每周五 18:00 把未交作业的名单发给助教</h2>
+      <div class="step" id="a1"></div><div class="step" id="a2"></div><div class="step" id="a3"></div></div>
+  </div>
+</section>
+<section class="panel">
+  <h2>3 用户能不能判断：谁能访问、哪些会改变、怎样停止、怎样恢复，以及授权与实际是否一致</h2>
+  <table id="checks"></table>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ok = (b, y = '✓', n = '✗') => b ? `<span class="good">${y}</span>` : `<span class="poor">${n}</span>`;
+const fnv = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(16).padStart(8, '0'); };
+const R = {};
+
+// ---------- 数据：120 个文件、两个文件夹 ----------
+const FOLDERS = { 全部资料: { shares: [] }, 第2单元: { shares: [{ to: 'group:课程助理', role: '查看' }] } };
+const GROUPS = { 课程助理: ['王可', '陈雨'] };
+const RANK = { 查看: 1, 评论: 2, 编辑: 3, 所有者: 4 };
+let FILES = [];
+for (let w = 1; w <= 12; w++) for (const [type, n] of [['课件', 4], ['作业', 3], ['阅读', 3]]) for (let k = 1; k <= n; k++) FILES.push({ id: `${w}-${type}-${k}`, name: `第${w}周-${type}${k}`, week: w, type, owner: '林晓', folder: '全部资料', shares: [] });
+// 例外：2 个文件属于周舟；4 个文件已经以“查看”共享给李老师；目标文件夹里已有一个同名文件
+FILES.find(f => f.id === '4-阅读-2').owner = '周舟'; FILES.find(f => f.id === '5-作业-3').owner = '周舟';
+['3-课件-2', '3-课件-3', '4-课件-1', '5-课件-4'].forEach(id => FILES.find(f => f.id === id).shares.push({ to: '李老师', role: '查看' }));
+FILES.push({ id: 'old-3-1', name: '第3周-课件1', week: 0, type: '旧版', owner: '林晓', folder: '第2单元', shares: [] });
+const snapshot = () => JSON.stringify(FILES.map(f => [f.id, f.name, f.folder, f.owner, f.shares.map(s => s.to + s.role).sort()]).sort());
+const ORIGINAL = fnv(snapshot());
+
+// 权限系统：文件自己的共享 ∪ 所在文件夹的共享（继承）∪ 所有者
+function access(f, folder = f.folder, shares = f.shares) {
+  const m = { [f.owner]: '所有者' };
+  const give = (p, r) => { if (!m[p] || RANK[r] > RANK[m[p]]) m[p] = r; };
+  for (const s of shares) give(s.to, s.role);
+  for (const s of FOLDERS[folder].shares) { if (s.to.startsWith('group:')) GROUPS[s.to.slice(6)].forEach(p => give(p, s.role)); else give(s.to, s.role); }
+  return m;
+}
+// ---------- 计划：先算出会发生什么 ----------
+const ME = '林晓';
+function plan() {
+  const sel = FILES.filter(f => f.week >= 3 && f.week <= 5);
+  const items = [], gain = {};
+  for (const f of sel) {
+    if (f.owner !== ME) { items.push({ f, skip: `属于${f.owner}，只有所有者能改共享` }); continue; }
+    const had = f.shares.find(s => s.to === '李老师');
+    const newShares = [...f.shares.filter(s => s.to !== '李老师'), { to: '李老师', role: '编辑' }];
+    const collide = FILES.some(g => g !== f && g.folder === '第2单元' && g.name === f.name);
+    const before = access(f), after = access(f, '第2单元', newShares);
+    for (const [p, r] of Object.entries(after)) if (p !== ME && before[p] !== r) (gain[p] = gain[p] || { add: 0, up: 0, role: r, via: p === '李老师' ? '直接共享' : '文件夹“第 2 单元”继承' })[before[p] ? 'up' : 'add']++;
+    items.push({ f, had: had ? had.role : null, newShares, rename: collide ? f.name + '（2）' : null });
+  }
+  return { sel, items, todo: items.filter(i => !i.skip), skipped: items.filter(i => i.skip), gain };
+}
+let P = plan(), RUN = null, HISTORY = [], STOP = false;
+function renderBatch() {
+  const g = P.gain;
+  $('s1').innerHTML = `<b>① 选中了什么</b><div>条件：第 3—5 周的全部资料 → <b>${P.sel.length}</b> 个文件（课件 ${P.sel.filter(f => f.type === '课件').length}、作业 ${P.sel.filter(f => f.type === '作业').length}、阅读 ${P.sel.filter(f => f.type === '阅读').length}）</div>`;
+  $('s2').innerHTML = `<b>② 预览：哪些会改变</b><div><span class="chip add">改 ${P.todo.length} 个</span><span class="chip up">其中 ${P.todo.filter(i => i.had).length} 个李老师已能“查看”，将升为“编辑”</span><span class="chip">${P.todo.filter(i => i.rename).length} 个与目标文件夹重名，改名为“…（2）”</span><span class="chip skip">跳过 ${P.skipped.length} 个</span></div>
+    <div class="sub">跳过：${P.skipped.map(i => `${i.f.name}（${i.skip}）`).join('；')}</div>
+    <div class="who"><b>谁能访问会变：</b>${Object.entries(g).map(([p, v]) => `${p} ${v.add ? `新增 ${v.add} 个` : ''}${v.up ? `${v.add ? '、' : ''}升级 ${v.up} 个` : ''}（${v.role}，${v.via}）`).join('；')}。<br>注意：移进“第 2 单元”后，课程助理王可、陈雨会<b>通过文件夹继承</b>看到这些文件——这不是你在这一步直接设置的。</div>`;
+  const done = RUN ? RUN.done.length : 0, total = P.todo.length, running = !!(RUN && RUN.state === 'running');
+  // 按钮只创建一次：进度每次更新都重建按钮的话，用户按下“停止”的那一下可能落在被替换掉的旧按钮上
+  if (!$('go')) $('s3').innerHTML = `<b>③ 确认与执行</b><div class="bar"><button class="primary" id="go" type="button"></button><button class="danger" id="stop" type="button">停止</button><span class="sub" id="runState"></span></div><div class="prog"><i id="progI"></i></div><div id="stopInfo"></div>`;
+  $('go').textContent = `修改 ${total} 个文件（跳过 ${P.skipped.length} 个）`; $('go').disabled = running; $('stop').disabled = !running;
+  $('runState').textContent = `${RUN ? { running: '进行中', stopped: '已停止', done: '已完成', undone: '已撤销' }[RUN.state] : '还没有开始'}：${done}／${total}`;
+  $('progI').style.width = `${total ? done / total * 100 : 0}%`;
+  const info = RUN && RUN.state === 'stopped' ? `<div>已停止：<b>${done}</b> 个已经改完，<b>${total - done}</b> 个没有动；没有改了一半的文件。<button type="button" id="resume">继续剩下的 ${total - done} 个</button><button type="button" id="rollback">撤销已完成的 ${done} 个</button></div>` : '';
+  if ($('stopInfo').innerHTML !== info) $('stopInfo').innerHTML = info;
+  $('s4').innerHTML = `<b>④ 历史与恢复</b>${HISTORY.length ? HISTORY.map((h, i) => `<div>${h.who} ${h.label}${h.isUndo ? '' : h.undone ? '（已撤销）' : `<button type="button" data-undo="${i}">整批撤销</button>`}</div>`).join('') : '<div class="sub">还没有记录。</div>'}<div class="sub">撤销按每个文件修改前的快照恢复；30 天内可以撤销。当前状态指纹 ${fnv(snapshot())}（初始 ${ORIGINAL}）。</div>`;
+}
+async function execute(items) {
+  RUN = RUN && RUN.state === 'stopped' ? { ...RUN, state: 'running' } : { done: [], state: 'running' };
+  STOP = false; renderBatch();
+  for (const it of items) {
+    if (STOP) { RUN.state = 'stopped'; renderBatch(); return; }
+    const f = it.f, before = { name: f.name, folder: f.folder, shares: f.shares.map(s => ({ ...s })) };
+    // 每个文件的三处修改一起生效（原子），要么全改，要么不改
+    Object.assign(f, { shares: it.newShares.map(s => ({ ...s })), folder: '第2单元', name: it.rename || f.name });
+    RUN.done.push({ f, before });
+    renderBatch();
+    await new Promise(r => setTimeout(r, 40));
+  }
+  RUN.state = 'done';
+  HISTORY.push({ who: ME, label: `批量修改 ${RUN.done.length} 个文件：共享给李老师（编辑），移到“第 2 单元”`, log: RUN.done.slice() });
+  renderBatch();
+}
+function rollback(log) { for (const d of [...log].reverse()) Object.assign(d.f, { name: d.before.name, folder: d.before.folder, shares: d.before.shares.map(s => ({ ...s })) }); }
+document.addEventListener('click', e => {
+  const t = e.target.closest('button'); if (!t) return;
+  if (t.id === 'go') { P = plan(); execute(P.todo); }
+  else if (t.id === 'stop') STOP = true;
+  else if (t.id === 'resume') execute(P.todo.filter(it => !RUN.done.some(d => d.f === it.f)));
+  else if (t.id === 'rollback') { rollback(RUN.done); RUN = { done: [], state: 'undone' }; renderBatch(); }
+  else if (t.dataset.undo != null) { const h = HISTORY[Number(t.dataset.undo)]; rollback(h.log); h.undone = true; HISTORY.push({ who: ME, label: `撤销了“${h.label}”`, log: [], isUndo: true }); RUN = { done: [], state: 'undone' }; P = plan(); renderBatch(); }
+});
+renderBatch();
+
+// ---------- 2 自动化任务 ----------
+const COURSE = { 成员: new Set(['林晓', '李老师', '王可', '陈雨']), 助教: '李老师' };
+const RULE = { name: '未交作业提醒', when: '每周五 18:00', runAs: '林晓', to: '李老师', paused: false };
+const DECLARED = { draft: ['作业提交记录'], fixed: ['作业提交记录', '学生名单（姓名、学号）'] };
+const ACTUAL_READS = ['作业提交记录', '学生名单（姓名、学号）'];
+const WEEKS = [{ w: 9, missing: 5 }, { w: 10, missing: 3, event: 'pause' }, { w: 11, missing: 4, event: 'resume+removeTA' }, { w: 12, missing: 2, event: 'changeTA' }];
+function runAutomation(safe) {
+  const course = { 成员: new Set(COURSE.成员) }, rule = { ...RULE }, log = [];
+  for (const wk of WEEKS) {
+    if (wk.event === 'pause') rule.paused = true;
+    if (wk.event && wk.event.startsWith('resume')) rule.paused = false;
+    if (wk.event && wk.event.includes('removeTA')) course.成员.delete('李老师');
+    if (wk.event === 'changeTA') { course.成员.add('赵老师'); rule.to = '赵老师'; }
+    if (rule.paused) { log.push({ w: wk.w, result: '已暂停，没有运行', sent: false }); continue; }
+    // 运行前再检查一次：运行身份仍有权读取，收件人仍有权看到名单
+    const recipientOk = course.成员.has(rule.to);
+    if (safe && !recipientOk) { log.push({ w: wk.w, result: `没有发送：${rule.to}已不在课程中；已通知${rule.runAs}`, sent: false, blocked: true }); continue; }
+    log.push({ w: wk.w, result: `发给${rule.to}：${wk.missing} 人的名单`, sent: true, leak: !recipientOk });
+  }
+  return log;
+}
+const LOG_SAFE = runAutomation(true), LOG_NAIVE = runAutomation(false);
+const missingDecl = d => ACTUAL_READS.filter(r => !DECLARED[d].includes(r));
+$('a1').innerHTML = `<b>规则</b><div>何时：${RULE.when}　条件：本周作业未提交　动作：把名单发给 ${RULE.to}</div>
+  <div class="who"><b>以林晓的身份运行</b>，会读取：${DECLARED.fixed.join('、')}；会发给：${RULE.to}（他能看到学生姓名和学号）。<br><span class="sub">初稿只写了“读取作业提交记录”，漏了 ${missingDecl('draft').join('、')}——生成名单必须读到它。</span></div>
+  <div class="bar"><button type="button">暂停</button><button type="button">立即运行一次（先预览）</button><button type="button" class="danger">删除任务</button></div>`;
+$('a2').innerHTML = `<b>运行前预览</b><div>如果现在运行：发给 李老师，名单 5 人（第 9 周作业未交）。下三次：第 10、11、12 周的星期五 18:00。</div>`;
+$('a3').innerHTML = `<b>运行记录（模拟 4 周）</b><table><tr><th>周</th><th>发生了什么</th><th>运行前再检查</th><th>不检查的话</th></tr>${LOG_SAFE.map((l, i) => `<tr><td>${l.w}</td><td>${WEEKS[i].event === 'pause' ? '林晓暂停了任务' : WEEKS[i].event === 'resume+removeTA' ? '恢复任务；李老师已调走' : WEEKS[i].event === 'changeTA' ? '助教改为赵老师' : '—'}</td><td class="${l.blocked ? 'mid' : ''}">${l.result}</td><td class="${LOG_NAIVE[i].leak ? 'poor' : ''}">${LOG_NAIVE[i].result}${LOG_NAIVE[i].leak ? '（他已无权看到）' : ''}</td></tr>`).join('')}</table>`;
+R.auto = { safe: LOG_SAFE, naive: LOG_NAIVE, declMissingDraft: missingDecl('draft'), declMissingFixed: missingDecl('fixed') };
+
+window.__ba = { R, P: () => P, RUN: () => RUN, HISTORY: () => HISTORY, ORIGINAL, hash: () => fnv(snapshot()), files: () => FILES, access, report: rows => { $('checks').innerHTML = '<tr><th>要判断的事</th><th>界面给出的信息</th><th>测试结果</th></tr>' + rows.map(r => `<tr><th>${r[0]}</th><td>${r[1]}</td><td>${ok(r[2])} ${r[3]}</td></tr>`).join(''); } };
+</script>
+</body>
+</html>
