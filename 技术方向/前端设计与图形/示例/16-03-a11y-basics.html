@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>无障碍：七种基本做法的前后对照</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-width: 1140px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: grid; gap: 6px; align-content: start; }
+  .card.wide { grid-column: span 2; }
+  h2 { font-size: 13.5px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .demo { border: 1px dashed #c3c9d3; border-radius: 8px; padding: 6px 8px; font-size: 12px; display: grid; gap: 4px; align-content: start; min-width: 0; }
+  .demo > .t { font-size: 11px; color: var(--muted); }
+  .demo.before > .t::before { content: "之前 · "; color: var(--bad); font-weight: 700; } .demo.after > .t::before { content: "之后 · "; color: var(--ok); font-weight: 700; }
+  /* 1 语义 */
+  .fakenav span { margin-right: 8px; color: #2f6fdb; cursor: pointer; } .fakebtn { display: inline-block; background: #2f6fdb; color: #fff; padding: 2px 10px; border-radius: 4px; cursor: pointer; }
+  .demo nav ul { list-style: none; margin: 0; padding: 0; display: flex; gap: 8px; } .demo h3 { margin: 0; font-size: 13px; }
+  .demo button, .demo input { font: inherit; font-size: 12px; }
+  .demo button { background: #2f6fdb; color: #fff; border: 0; border-radius: 4px; padding: 2px 10px; }
+  /* 2 焦点 */
+  .k1 a { margin-right: 8px; } .k1 a:focus { outline: none; }
+  .k2 a { margin-right: 8px; } .k2 a:focus-visible { outline: 3px solid #1d2330; outline-offset: 2px; border-radius: 2px; }
+  .seq { font-size: 11px; color: var(--muted); min-height: 18px; }
+  /* 5 表单 */
+  .err-only input[aria-invalid="true"] { border: 1px solid #c62828; }
+  .fld { display: grid; gap: 1px; } .fld label { font-weight: 700; } .fld .hint { font-size: 11px; color: var(--muted); } .fld .err { font-size: 11px; color: #b3261e; }
+  .demo input { border: 1px solid #c3c9d3; border-radius: 4px; padding: 1px 6px; }
+  /* 6 重排 */
+  .viewport320 { width: 320px; overflow-x: auto; border: 1px solid #c3c9d3; border-radius: 4px; }
+  .fixed { width: 600px; position: relative; height: 70px; } .fixed .a { position: absolute; left: 0; top: 6px; width: 380px; } .fixed .b { position: absolute; left: 400px; top: 6px; width: 190px; }
+  .fluid { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0; } .fluid .a { flex: 1 1 200px; } .fluid .b { flex: 1 1 120px; }
+  .box { background: #eef3ff; border-radius: 4px; padding: 4px 6px; font-size: 12px; }
+  /* 7 动效 */
+  .banner { height: 26px; overflow: hidden; background: #fff8e6; border-radius: 4px; position: relative; } .banner span { position: absolute; white-space: nowrap; top: 3px; animation: slide 6s linear infinite; }
+  @keyframes slide { from { transform: translateX(100%); } to { transform: translateX(-100%); } }
+  @media (prefers-reduced-motion: reduce) { .respect span { animation: none; position: static; padding: 0 6px; } }
+  .cue { font-size: 12px; } .cue code { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="card"><h2>1 语义结构：让辅助技术知道“这是什么”</h2>
+    <div class="pair">
+      <div class="demo before" id="d1a"><span class="t">只用 div 和 span</span><div class="fakenav"><span onclick="">首页</span><span onclick="">课程</span><span onclick="">我的</span></div><div style="font-size:15px;font-weight:700">本周任务</div><div>JavaScript 基础 · 8 小时</div><div class="fakebtn" onclick="">开始学习</div></div>
+      <div class="demo after" id="d1b"><span class="t">语义元素</span><nav aria-label="主导航"><ul><li><a href="#">首页</a></li><li><a href="#">课程</a></li><li><a href="#">我的</a></li></ul></nav><h3>本周任务</h3><p style="margin:0">JavaScript 基础 · 8 小时</p><button>开始学习</button></div>
+    </div><table id="t1"></table></div>
+  <div class="card"><h2>2 键盘焦点：顺序合理、看得见</h2>
+    <div class="pair">
+      <div class="demo before k1" id="d2a"><span class="t">tabindex 打乱顺序，去掉焦点框</span><div><a href="#" tabindex="3">报名</a><a href="#" tabindex="1">课程介绍</a><a href="#" tabindex="2">常见问题</a></div><div class="seq" id="s2a">按 Tab 的顺序：</div></div>
+      <div class="demo after k2" id="d2b"><span class="t">文档顺序，清楚的焦点框</span><div><a href="#">课程介绍</a><a href="#">常见问题</a><a href="#">报名</a></div><div class="seq" id="s2b">按 Tab 的顺序：</div></div>
+    </div><table id="t2"></table></div>
+  <div class="card"><h2>3 文字对比：在各种屏幕和光线下都看得清</h2>
+    <div class="pair">
+      <div class="demo before" id="d3a"><span class="t">浅灰说明文字</span><p style="margin:0;color:#a3a9b2">完成全部任务后可以获得结业证书。</p><p style="margin:0;color:#fff;background:#7fb2f0;padding:2px 6px;border-radius:4px">立即报名</p></div>
+      <div class="demo after" id="d3b"><span class="t">加深文字与按钮</span><p style="margin:0;color:#5b6475">完成全部任务后可以获得结业证书。</p><p style="margin:0;color:#fff;background:#2456b0;padding:2px 6px;border-radius:4px">立即报名</p></div>
+    </div><table id="t3"></table></div>
+  <div class="card"><h2>4 字幕：有声内容都有文字</h2>
+    <div class="pair">
+      <div class="demo before"><span class="t">课程介绍视频，没有字幕</span><div class="cue">讲解 3 段，共 21 秒；字幕 0 条</div></div>
+      <div class="demo after"><span class="t">WebVTT 字幕文件</span><pre id="vtt" style="margin:0;font-size:11px;white-space:pre-wrap"></pre></div>
+    </div><table id="t4"></table></div>
+  <div class="card"><h2>5 表单提示：标签、说明与错误都能被读出</h2>
+    <div class="pair">
+      <div class="demo before err-only" id="d5a"><span class="t">占位符代替标签，错误只有红框</span><input id="p5a" placeholder="手机号" value="1380000000" aria-invalid="true"></div>
+      <div class="demo after" id="d5b"><span class="t">标签 ＋ 说明 ＋ 错误文字</span><div class="fld"><label for="p5b">手机号</label><input id="p5b" value="1380000000" aria-invalid="true" aria-describedby="h5b e5b"><span class="hint" id="h5b">11 位数字，用于登录</span><span class="err" id="e5b">现在是 10 位，请检查是否漏输。</span></div></div>
+    </div><table id="t5"></table></div>
+  <div class="card"><h2>6 放大阅读：放大到 400% 时不需要左右滚动</h2>
+    <p class="sub">在 1280 像素宽的屏幕上放大到 400%，等于页面只有 320 像素宽。下面两个框都是 320 像素宽。</p>
+    <div style="display:grid;gap:8px">
+      <div class="demo before"><span class="t">固定宽度与绝对定位</span><div class="viewport320" id="v6a"><div class="fixed"><div class="box a">本周任务：JavaScript 基础，8 小时，分 4 次完成</div><div class="box b">开始学习</div></div></div></div>
+      <div class="demo after"><span class="t">弹性布局、自动换行</span><div class="viewport320" id="v6b"><div class="fluid"><div class="box a">本周任务：JavaScript 基础，8 小时，分 4 次完成</div><div class="box b">开始学习</div></div></div></div>
+    </div><table id="t6"></table></div>
+  <div class="card wide"><h2>7 减少动态效果：尊重系统设置</h2>
+    <div class="pair">
+      <div class="demo before"><span class="t">一直滚动的公告条</span><div class="banner" id="b7a"><span>新课上线：数据可视化入门，本周报名立减</span></div></div>
+      <div class="demo after"><span class="t">开启“减少动态效果”时停下来</span><div class="banner respect" id="b7b"><span>新课上线：数据可视化入门，本周报名立减</span></div></div>
+    </div><table id="t7"></table></div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const R = {};
+const tag = ok => `<span class="${ok ? 'good' : 'poor'}">${ok ? '是' : '否'}</span>`;
+// ---------- 1 语义 ----------
+function semantics(root) {
+  const focusable = el => el.matches('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])');
+  const clickNotFocusable = [...root.querySelectorAll('[onclick]')].filter(el => !focusable(el)).length;
+  return { landmarks: root.querySelectorAll('nav, main, header, footer, aside, [role="navigation"], [role="main"]').length, headings: root.querySelectorAll('h1, h2, h3, h4, h5, h6, [role="heading"]').length, buttons: root.querySelectorAll('button, [role="button"]').length, clickNotFocusable, lists: root.querySelectorAll('ul, ol').length };
+}
+const s1a = semantics($('d1a')), s1b = semantics($('d1b')); R.sem = [s1a, s1b];
+$('t1').innerHTML = '<tr><th>测量</th><th>之前</th><th>之后</th></tr>' + [['导航等地标', 'landmarks'], ['标题', 'headings'], ['按钮', 'buttons'], ['列表', 'lists'], ['能点却不能用键盘聚焦的元素', 'clickNotFocusable']].map(([n, k]) => `<tr><td>${n}</td><td class="${k === 'clickNotFocusable' ? (s1a[k] ? 'poor' : '') : (s1a[k] ? '' : 'poor')}">${s1a[k]}</td><td class="good">${s1b[k]}</td></tr>`).join('') + '<tr><td colspan="3" class="sub">外观几乎一样；区别在读屏软件和键盘：之前的“开始学习”既读不出是按钮，也无法用 Tab 到达。</td></tr>';
+// ---------- 2 焦点：记录真实的 Tab 顺序 ----------
+const seq = { d2a: [], d2b: [] }, ring = { d2a: [], d2b: [] };
+for (const id of ['d2a', 'd2b']) $(id).addEventListener('focusin', e => { const cs = getComputedStyle(e.target); seq[id].push(e.target.textContent); ring[id].push(cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) >= 2); $(id === 'd2a' ? 's2a' : 's2b').textContent = '按 Tab 的顺序：' + seq[id].join(' → '); });
+function report2() {
+  const reading = id => [...$(id).querySelectorAll('a')].map(a => a.textContent);
+  R.focus = { a: { seq: seq.d2a, ring: ring.d2a }, b: { seq: seq.d2b, ring: ring.d2b } };
+  $('t2').innerHTML = '<tr><th>测量（真实按键）</th><th>之前</th><th>之后</th></tr>' +
+    `<tr><td>Tab 顺序与阅读顺序一致</td><td>${tag(seq.d2a.join() === reading('d2a').join())}</td><td>${tag(seq.d2b.join() === reading('d2b').join())}</td></tr>` +
+    `<tr><td>获得焦点时有 2 像素以上的焦点框</td><td>${tag(ring.d2a.length && ring.d2a.every(Boolean))}</td><td>${tag(ring.d2b.length && ring.d2b.every(Boolean))}</td></tr>` +
+    '<tr><td colspan="3" class="sub">正数的 tabindex 让焦点按 1、2、3 跳：从页面开头按 Tab，第一下就跳到这里的“课程介绍”，比页面最上方的导航还早，和眼睛看到的顺序不同。去掉焦点框后，键盘用户不知道自己在哪。</td></tr>';
+}
+// ---------- 3 对比度 ----------
+const lin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }, rgb = s => s.match(/[\d.]+/g).slice(0, 3).map(Number);
+const lum = c => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]), ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+const bgOf = el => { for (let e = el; e; e = e.parentElement) { const c = getComputedStyle(e).backgroundColor; if (!/rgba\(.*, 0\)$/.test(c) && c !== 'transparent') return rgb(c); } return [255, 255, 255]; };
+const cr = id => [...$(id).querySelectorAll('p')].map(p => ratio(rgb(getComputedStyle(p).color), bgOf(p)));
+const c3a = cr('d3a'), c3b = cr('d3b'); R.contrast = [c3a.map(v => +v.toFixed(2)), c3b.map(v => +v.toFixed(2))];
+$('t3').innerHTML = '<tr><th>文字（要求 ≥ 4.5）</th><th>之前</th><th>之后</th></tr>' + ['说明文字', '按钮文字'].map((n, i) => `<tr><td>${n}</td><td class="${c3a[i] >= 4.5 ? 'good' : 'poor'}">${c3a[i].toFixed(2)}</td><td class="${c3b[i] >= 4.5 ? 'good' : 'poor'}">${c3b[i].toFixed(2)}</td></tr>`).join('');
+// ---------- 4 字幕 ----------
+const SPEECH = [[0, 6.5], [7.2, 14.0], [14.6, 21.0]];   // 讲解的三段（秒）
+const VTT = `WEBVTT
+
+00:00.000 --> 00:06.500
+这门课用 12 周带你从零做出第一个数据作品。
+
+00:07.200 --> 00:14.000
+每周有讲解、练习和一个小作业，大约需要 8 小时。
+
+00:14.600 --> 00:21.000
+[轻快的音乐] 完成全部任务后可以获得结业证书。`;
+$('vtt').textContent = VTT;
+const cues = [...VTT.matchAll(/(\d\d):(\d\d\.\d+) --> (\d\d):(\d\d\.\d+)\n(.+)/g)].map(m => ({ s: +m[1] * 60 + +m[2], e: +m[3] * 60 + +m[4], text: m[5] }));
+const covered = SPEECH.reduce((a, [s, e]) => a + cues.reduce((t, c) => t + Math.max(0, Math.min(e, c.e) - Math.max(s, c.s)), 0), 0) / SPEECH.reduce((a, [s, e]) => a + e - s, 0);   // 讲解时间中有字幕的比例
+const cps = cues.map(c => c.text.replace(/\[.*?\]\s*/, '').replace(/\s/g, '').length / (c.e - c.s));
+R.captions = { cues: cues.length, covered: +(100 * covered).toFixed(0), cps: cps.map(v => +v.toFixed(1)), sound: cues.filter(c => /\[.*\]/.test(c.text)).length };
+$('t4').innerHTML = '<tr><th>测量</th><th>之前</th><th>之后</th></tr>' + `<tr><td>讲解被字幕覆盖的时间</td><td class="poor">0%</td><td class="good">${R.captions.covered}%</td></tr><tr><td>每条字幕的阅读速度</td><td>—</td><td>${R.captions.cps.join('、')} 字／秒</td></tr><tr><td>非语音声音的说明</td><td class="poor">无</td><td class="good">${R.captions.sound} 处（[轻快的音乐]）</td></tr>` + '<tr><td colspan="3" class="sub">网页里用 &lt;track kind="captions" src="intro.vtt"&gt; 加到 &lt;video&gt; 上；阅读速度的上限由团队按观众约定，示例中最快约 4 字／秒。</td></tr>';
+// ---------- 5 表单 ----------
+function accName(el) { const l = el.labels && el.labels[0]; return el.getAttribute('aria-label') || (el.getAttribute('aria-labelledby') && $(el.getAttribute('aria-labelledby')).textContent) || (l && l.textContent.trim()) || el.title || ''; }
+function form(el) { const desc = (el.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean).map(id => $(id).textContent).join(' '); return { name: accName(el), placeholderOnly: !accName(el) && !!el.placeholder, desc, errText: el.getAttribute('aria-invalid') === 'true' && /位|请/.test(desc) }; }
+const f5a = form($('p5a')), f5b = form($('p5b')); R.form = [f5a, f5b];
+$('t5').innerHTML = '<tr><th>读屏软件能读到</th><th>之前</th><th>之后</th></tr>' + `<tr><td>名称（标签）</td><td class="poor">${f5a.name || '无（占位符一输入就消失）'}</td><td class="good">${f5b.name}</td></tr><tr><td>说明</td><td class="poor">${f5a.desc || '无'}</td><td class="good">${f5b.desc}</td></tr><tr><td>错误不只靠颜色</td><td>${tag(f5a.errText)}</td><td>${tag(f5b.errText)}</td></tr>`;
+// ---------- 6 重排 ----------
+const over = id => { const v = $(id); return v.scrollWidth - v.clientWidth; };
+R.reflow = [over('v6a'), over('v6b')];
+$('t6').innerHTML = '<tr><th>测量（宽 320 像素）</th><th>之前</th><th>之后</th></tr>' + `<tr><td>需要左右滚动的宽度</td><td class="${R.reflow[0] > 0 ? 'poor' : 'good'}">${R.reflow[0]} 像素</td><td class="${R.reflow[1] > 0 ? 'poor' : 'good'}">${R.reflow[1]} 像素</td></tr>`;
+// ---------- 7 减少动态效果 ----------
+const mq = matchMedia('(prefers-reduced-motion: reduce)'), states = [];
+function report7() {
+  const running = id => $(id).querySelector('span').getAnimations().filter(a => a.playState === 'running').length;
+  states.push({ reduce: mq.matches, a: running('b7a'), b: running('b7b') }); R.motion = states;
+  $('t7').innerHTML = '<tr><th>系统设置</th><th>之前：正在运行的动画</th><th>之后：正在运行的动画</th></tr>' + states.map(s => `<tr><td>${s.reduce ? '减少动态效果：开' : '减少动态效果：关'}</td><td class="${s.reduce && s.a ? 'poor' : ''}">${s.a}</td><td class="${s.reduce ? (s.b ? 'poor' : 'good') : ''}">${s.b}</td></tr>`).join('') + '<tr><td colspan="3" class="sub">CSS 的 @media (prefers-reduced-motion: reduce) 读取系统设置；动画改成静止的文字，信息不丢。</td></tr>';
+}
+mq.addEventListener('change', report7);
+window.__a11y = { R, report2, report7 };
+report2(); report7();
+</script>
+</body>
+</html>
