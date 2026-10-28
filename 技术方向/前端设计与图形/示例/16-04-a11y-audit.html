@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>无障碍改进项目：自动检查、键盘任务与修正证据</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  iframe { width: 100%; height: 470px; border: 1px solid #c3c9d3; border-radius: 8px; background: #fff; }
+  .lbl { font-size: 12px; font-weight: 700; } .lbl.b { color: var(--bad); } .lbl.a { color: var(--ok); }
+  .tree { font: 11px/1.5 ui-monospace, monospace; background: #f6f7f9; border-radius: 6px; padding: 6px 8px; margin: 0; white-space: pre-wrap; max-height: 210px; overflow: auto; }
+  .src { display: inline-block; font-size: 10.5px; padding: 0 5px; border-radius: 3px; white-space: nowrap; }
+  .src.axe { background: #eef3ff; color: #2456b0; } .src.key { background: #fff4e0; color: #8a5300; } .src.zoom { background: #eef7f1; color: #1f7a4d; } .src.read { background: #f1f2f4; color: #5b6475; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>同一个课程报名页：改进前与改进后</h2>
+  <p class="sub">两个页面放在各自的 iframe 里，是完整的文档（有自己的语言、标题与样式）。可以直接用键盘在里面操作：下方的键盘记录会实时更新。</p>
+  <div class="two"><div><span class="lbl b">改进前</span><iframe id="fb" title="改进前的报名页"></iframe></div><div><span class="lbl a">改进后</span><iframe id="fa" title="改进后的报名页"></iframe></div></div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>1 自动检查（axe-core 4.10.3，中文规则说明）</h2><table id="axe"></table></div>
+    <div style="display:grid;gap:6px"><h2>2 键盘任务：只用键盘完成报名</h2><table id="kb"></table><h3>3 放大到 400%（宽 320 像素）</h3><table id="zoom"></table></div>
+  </div>
+  <div class="two">
+    <div style="display:grid;gap:6px"><h3>4 辅助技术看到的结构（按页面顺序列出标题、地标与可操作元素的角色和名称）</h3><div class="two"><pre class="tree" id="tb"></pre><pre class="tree" id="ta"></pre></div></div>
+    <div style="display:grid;gap:6px"><h3>结论</h3><p id="concl" style="margin:0;font-size:12px"></p></div>
+  </div>
+</section>
+<section class="panel"><h2>问题与修正证据</h2><p class="sub"><span class="src axe">自动检查</span><span class="src key">键盘任务</span><span class="src zoom">放大检查</span><span class="src read">人工阅读</span>　每一项都写明发现方式、对应的 WCAG 2.2 条款、怎样修正，以及修正前后的证据。</p><table id="log"></table></section>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);   // 规则说明和修正文字里有 <title>、<label> 等，必须转义
+const AXE = 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js';
+const LOGO = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="24"><rect width="80" height="24" rx="4" fill="#2f6fdb"/><text x="40" y="17" font-size="13" fill="#fff" text-anchor="middle">学习站</text></svg>');
+const DECO = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="40"><path d="M0 30 Q50 0 100 25 T200 15" stroke="#9db7e8" stroke-width="6" fill="none"/></svg>');
+const SHARE = '<svg width="16" height="16" viewBox="0 0 16 16"><circle cx="4" cy="8" r="2"/><circle cx="12" cy="4" r="2"/><circle cx="12" cy="12" r="2"/><path d="M4 8 12 4M4 8l8 4" stroke="#000"/></svg>';
+const BEFORE = `<!doctype html><html><head><meta charset="utf-8"><script src="${AXE}"><\/script><style>
+body{margin:0;font:13px/1.6 "Noto Sans SC",sans-serif;color:#1d2330}*:focus{outline:none}
+.page{width:520px;position:relative;height:440px;padding:10px}.top{display:flex;gap:10px;align-items:center}.nav{color:#2f6fdb;cursor:pointer}
+.banner{position:absolute;top:44px;left:10px;width:500px;height:34px;background:#fff8e6;padding:6px 10px}
+h4{position:absolute;top:84px;left:10px;margin:0;font-size:20px}.muted{position:absolute;top:116px;left:10px;margin:0;color:#a3a9b2}
+.deco{position:absolute;top:144px;left:10px}.form{position:absolute;top:190px;left:10px;width:500px;display:grid;gap:6px}
+input,select{font:inherit;padding:2px 6px;border:1px solid #c3c9d3;width:240px}.btn{background:#7fb2f0;color:#fff;width:100px;text-align:center;padding:4px;cursor:pointer;border-radius:4px}
+.icon{width:30px;height:28px;background:#eee;border:0}.modal{position:absolute;top:120px;left:120px;width:260px;background:#fff;border:1px solid #888;padding:16px}
+</style></head><body><div class="page">
+<div class="top"><img src="${LOGO}"><span class="nav" onclick="">首页</span><span class="nav" onclick="">课程</span><span class="nav" onclick="">我的</span></div>
+<div class="banner" id="car">新课上线：数据可视化入门</div>
+<h4>数据可视化入门</h4><p class="muted">12 周 · 每周 8 小时 · 适合零基础</p><img class="deco" src="${DECO}" alt="IMG_2041.png">
+<div class="form"><input placeholder="姓名"><input placeholder="手机号"><select><option>选择开课时间</option><option>11 月 3 日</option><option>12 月 1 日</option></select>
+<div class="btn" onclick="document.getElementById('dlg').hidden=false">报名</div><button class="icon" onclick="">${SHARE}</button>
+<p style="margin:0">想了解更多？<a href="#">点击这里</a></p></div>
+<div class="modal" id="dlg" hidden>报名成功！<span onclick="this.parentNode.hidden=true" style="float:right;cursor:pointer">×</span></div>
+</div><script>let k=0;const T=['新课上线：数据可视化入门','限时：前 100 名送练习册','本周直播：怎样读懂图表'];setInterval(()=>{document.getElementById('car').textContent=T[++k%3]},3000)<\/script></body></html>`;
+const AFTER = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>数据可视化入门 · 报名 · 学习站</title><script src="${AXE}"><\/script><style>
+body{margin:0;font:13px/1.6 "Noto Sans SC",sans-serif;color:#1d2330}:focus-visible{outline:3px solid #1d2330;outline-offset:2px}
+.page{max-width:520px;padding:10px;display:grid;gap:8px}header{display:flex;gap:10px;align-items:center;flex-wrap:wrap}nav ul{list-style:none;margin:0;padding:0;display:flex;gap:10px}
+.banner{background:#fff8e6;padding:6px 10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}.banner p{margin:0;flex:1}h1{margin:0;font-size:20px}h2{margin:0;font-size:15px}
+.muted{margin:0;color:#5b6475}form{display:grid;gap:6px}label{display:grid;gap:1px;font-weight:700}input,select{font:inherit;font-weight:400;padding:2px 6px;border:1px solid #6b7280;max-width:100%}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}button{font:inherit;padding:4px 12px;border-radius:4px;border:1px solid #2456b0}.primary{background:#2456b0;color:#fff}.icon{background:#fff;color:#1d2330;border-color:#6b7280}
+dialog{border:1px solid #888;padding:16px;max-width:280px}
+@media (prefers-reduced-motion:reduce){.banner [data-auto]{display:none}}
+</style></head><body><div class="page">
+<header><a href="#"><img src="${LOGO}" alt="学习站首页"></a><nav aria-label="主导航"><ul><li><a href="#">首页</a></li><li><a href="#">课程</a></li><li><a href="#">我的</a></li></ul></nav></header>
+<main><div style="display:grid;gap:8px">
+<section class="banner" aria-label="课程消息"><p id="car">新课上线：数据可视化入门</p><button type="button" class="icon" id="pause" aria-pressed="false" data-auto>暂停轮播</button></section>
+<h1>数据可视化入门</h1><p class="muted">12 周 · 每周 8 小时 · 适合零基础</p><img src="${DECO}" alt="">
+<form id="f"><h2>报名</h2><label>姓名<input id="n" autocomplete="name" required></label><label>手机号<input id="p" inputmode="tel" autocomplete="tel" aria-describedby="ph" required><span id="ph" style="font-weight:400;font-size:12px;color:#5b6475">11 位数字，用于接收开课提醒</span></label>
+<label>开课时间<select id="s"><option>11 月 3 日</option><option>12 月 1 日</option></select></label>
+<div class="row"><button type="submit" class="primary" id="go">提交报名</button><button type="button" class="icon" aria-label="分享课程">${SHARE.replace('<svg', '<svg aria-hidden="true" focusable="false"')}</button></div>
+<p style="margin:0">想了解更多？<a href="#">查看课程大纲</a></p></form></div></main>
+<dialog id="dlg" aria-labelledby="dt"><h2 id="dt">报名成功</h2><p>开课前一天会发短信提醒你。</p><button id="cl">关闭</button></dialog>
+</div><script>
+const d=document.getElementById('dlg'),go=document.getElementById('go');document.getElementById('f').onsubmit=e=>{e.preventDefault();d.showModal()};document.getElementById('cl').onclick=()=>d.close();d.addEventListener('close',()=>go.focus());
+let k=0,on=!matchMedia('(prefers-reduced-motion: reduce)').matches;const T=['新课上线：数据可视化入门','限时：前 100 名送练习册','本周直播：怎样读懂图表'];const b=document.getElementById('pause');b.onclick=()=>{on=!on;b.setAttribute('aria-pressed',String(!on));b.textContent=on?'暂停轮播':'继续轮播'};setInterval(()=>{if(on)document.getElementById('car').textContent=T[++k%3]},3000)
+<\/script></body></html>`;
+// ---------- 键盘记录（在两个 iframe 里实时记录） ----------
+const KB = { fb: { steps: [], dialogOpened: false, focusInDialog: false, closedByEsc: false, focusReturned: false, submitReached: false }, fa: { steps: [], dialogOpened: false, focusInDialog: false, closedByEsc: false, focusReturned: false, submitReached: false } };
+const desc = el => { if (!el || el === el.ownerDocument.body) return '页面'; const r = role(el), n = name(el); return `${r}${n ? '“' + n + '”' : '（无名称）'}`; };
+function role(el) { const t = el.tagName.toLowerCase(), ty = (el.getAttribute('type') || '').toLowerCase(); return el.getAttribute('role') || { a: el.hasAttribute('href') ? '链接' : '', button: '按钮', select: '下拉框', input: ty === 'checkbox' ? '复选框' : '文本框', img: '图片', nav: '导航', main: '主要内容', header: '页眉', dialog: '对话框', h1: '标题 1', h2: '标题 2', h3: '标题 3', h4: '标题 4', section: el.getAttribute('aria-label') ? '区域' : '' }[t] || ''; }
+function name(el) {
+  const doc = el.ownerDocument;
+  if (el.getAttribute('aria-label')) return el.getAttribute('aria-label');
+  if (el.getAttribute('aria-labelledby')) return el.getAttribute('aria-labelledby').split(' ').map(id => doc.getElementById(id)?.textContent.trim()).join(' ');
+  if (el.labels && el.labels[0]) return [...el.labels[0].childNodes].filter(n => n.nodeType === 3).map(n => n.textContent.trim()).join('');
+  if (el.tagName === 'IMG') return el.getAttribute('alt') ?? '';
+  if (el.tagName === 'SELECT') return '';
+  if (['A', 'BUTTON', 'H1', 'H2', 'H3', 'H4'].includes(el.tagName)) return [...el.querySelectorAll('*')].length && el.querySelector('img') ? name(el.querySelector('img')) : el.textContent.trim();
+  return '';
+}
+function hook(fid) {
+  const w = $(fid).contentWindow, doc = w.document, K = KB[fid];
+  doc.addEventListener('keydown', e => { if (['Tab', 'Enter', 'Escape', ' '].includes(e.key)) setTimeout(() => {
+    const el = doc.activeElement, dlg = doc.getElementById('dlg'), isOpen = () => dlg && (dlg.tagName === 'DIALOG' ? dlg.open : !dlg.hidden), open = isOpen();
+    if (open && !K.dialogOpened) { K.dialogOpened = true; K.focusInDialog = dlg.contains(el); }
+    if (e.key === 'Escape' && K.dialogOpened && !isOpen()) { K.closedByEsc = true; K.focusReturned = el && el.id === 'go'; }
+    if (/提交|报名/.test(el?.textContent || '') && /按钮/.test(role(el))) K.submitReached = true;
+    K.steps.push([e.key === ' ' ? '空格' : e.key, desc(el), (() => { const cs = w.getComputedStyle(el); return el !== doc.body && cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) >= 2; })()]);
+    showKb();
+  }, 30); }, true);
+}
+function showKb() {
+  const row = (n, f) => `<tr><td>${n}</td><td>${f(KB.fb)}</td><td>${f(KB.fa)}</td></tr>`, yn = v => `<span class="${v ? 'good' : 'poor'}">${v ? '是' : '否'}</span>`;
+  $('kb').innerHTML = '<tr><th>步骤</th><th>改进前</th><th>改进后</th></tr>' +
+    row('按键次数', k => k.steps.length) +
+    row('Tab 依次到达', k => k.steps.filter(s => s[0] === 'Tab').map(s => s[1]).slice(0, 7).join(' → ') || '—') +
+    row('能到达“提交”按钮', k => yn(k.submitReached)) +
+    row('提交后对话框打开，焦点移进对话框', k => yn(k.dialogOpened && k.focusInDialog)) +
+    row('Esc 关闭对话框，焦点回到提交按钮', k => yn(k.closedByEsc && k.focusReturned)) +
+    row('每一步都看得见焦点', k => yn(k.steps.length && k.steps.filter(s => s[1] !== '页面').every(s => s[2])));
+}
+// ---------- 结构、放大、自动检查 ----------
+function tree(doc) {
+  const out = []; doc.querySelectorAll('header, nav, main, section[aria-label], h1, h2, h3, h4, a[href], button, input, select, img, [onclick], dialog').forEach(el => {
+    if (el.closest('[hidden]')) return; const r = role(el); const n = name(el);
+    if (!r) { out.push(`（${el.tagName.toLowerCase()}，读屏软件不知道它能点）“${el.textContent.trim()}”`); return; }
+    if (r === '图片' && n === '' && el.getAttribute('alt') === '') return;   // 装饰图片：被忽略
+    out.push(`${r}${n ? '“' + n + '”' : '（无名称）'}`);
+  }); return out;
+}
+function reflow(fid) { const f = $(fid), w0 = f.style.width; f.style.width = '320px'; const d = f.contentDocument.documentElement, over = d.scrollWidth - d.clientWidth; f.style.width = w0; return over; }
+const ZH = fetch('https://cdn.jsdelivr.net/npm/axe-core@4.10.3/locales/zh_CN.json').then(r => r.json()).catch(() => null);
+async function runAxe(fid, locale) { const w = $(fid).contentWindow; if (locale) w.axe.configure({ locale }); const r = await w.axe.run(w.document, { resultTypes: ['violations'] }); return r.violations.map(v => ({ id: v.id, impact: v.impact, n: v.nodes.length, help: v.help, tags: v.tags.filter(t => /^wcag\d+$/.test(t)) })); }
+const load = (fid, html) => new Promise(res => { const f = $(fid); f.onload = () => res(); f.srcdoc = html; });
+const WCAG = { 'html-has-lang': '3.1.1', 'document-title': '2.4.2', 'image-alt': '1.1.1', 'color-contrast': '1.4.3', label: '4.1.2／1.3.1', 'button-name': '4.1.2', 'select-name': '4.1.2', 'page-has-heading-one': '最佳实践', 'landmark-one-main': '最佳实践', region: '最佳实践', 'heading-order': '最佳实践' };
+Promise.all([load('fb', BEFORE), load('fa', AFTER)]).then(async () => {
+  await Promise.all(['fb', 'fa'].map(f => new Promise(r => { const w = $(f).contentWindow; (function wait() { w.axe ? r() : setTimeout(wait, 50); })(); })));
+  ['fb', 'fa'].forEach(hook); showKb();
+  const locale = await ZH, vb = await runAxe('fb', locale), va = await runAxe('fa', locale);
+  const ids = [...new Set([...vb, ...va].map(v => v.id))];
+  $('axe').innerHTML = '<tr><th>规则</th><th>说明</th><th>WCAG</th><th>改进前</th><th>改进后</th></tr>' + ids.map(id => { const b = vb.find(v => v.id === id), a = va.find(v => v.id === id), v = b || a; return `<tr><td><code>${id}</code></td><td>${esc(v.help)}</td><td class="num">${WCAG[id] || (v.tags.length ? v.tags.join(' ') : '最佳实践')}</td><td class="num ${b ? 'poor' : 'good'}">${b ? b.n + ' 处' : '0'}</td><td class="num ${a ? 'poor' : 'good'}">${a ? a.n + ' 处' : '0'}</td></tr>`; }).join('') + `<tr><td colspan="5" class="sub">改进前 ${vb.length} 条规则、${vb.reduce((s, v) => s + v.n, 0)} 处；改进后 ${va.length} 条规则、${va.reduce((s, v) => s + v.n, 0)} 处。</td></tr>`;
+  const zb = reflow('fb'), za = reflow('fa');
+  $('zoom').innerHTML = `<tr><th>测量</th><th>改进前</th><th>改进后</th></tr><tr><td>需要左右滚动的宽度</td><td class="num ${zb > 0 ? 'poor' : 'good'}">${zb} 像素</td><td class="num ${za > 0 ? 'poor' : 'good'}">${za} 像素</td></tr>`;
+  const tb = tree($('fb').contentDocument), ta = tree($('fa').contentDocument);
+  $('tb').textContent = '改进前\n' + tb.map((t, i) => `${i + 1}. ${t}`).join('\n'); $('ta').textContent = '改进后\n' + ta.map((t, i) => `${i + 1}. ${t}`).join('\n');
+  window.__a4 = { vb, va, zb, za, tb, ta, KB, report() {
+    showKb();
+    const axeFound = vb.reduce((s, v) => s + v.n, 0), K = KB.fb, Ka = KB.fa;
+    const LOG = [
+      ...vb.map(v => [`<span class="src axe">自动检查</span>`, `${v.help}（${v.n} 处）`, WCAG[v.id] || '最佳实践', { 'html-has-lang': '加上 lang="zh-CN"', 'document-title': '写出页面标题“数据可视化入门 · 报名 · 学习站”', 'image-alt': '标志写“学习站首页”，装饰图片用空 alt', 'color-contrast': '说明文字改为 #5b6475、按钮改为深蓝底', label: '每个输入框都有可见的 <label>', 'select-name': '下拉框放进“开课时间”的 <label>', 'button-name': '图标按钮加 aria-label="分享课程"', 'page-has-heading-one': '课程名改为 h1', 'landmark-one-main': '内容放进 <main>', region: '页眉、导航、主要内容用地标元素', 'heading-order': '标题按层级 h1 → h2' }[v.id] || '按规则说明修正', `${v.n} 处 → ${va.find(a => a.id === v.id)?.n || 0} 处`]),
+      ['<span class="src key">键盘任务</span>', '“报名”是带点击事件的 div，Tab 到不了，只用键盘无法报名', '2.1.1', '改为 <button type="submit">提交报名</button>', `能到达提交：${K.submitReached ? '是' : '否'} → ${Ka.submitReached ? '是' : '否'}`],
+      ['<span class="src key">键盘任务</span>', '全局去掉了焦点框，不知道焦点在哪', '2.4.7', '用 :focus-visible 画 3 像素的焦点框', `看得见焦点：否 → ${Ka.steps.length && Ka.steps.filter(s => s[1] !== '页面').every(s => s[2]) ? '是' : '否'}`],
+      ['<span class="src key">键盘任务</span>', '成功提示不是对话框，焦点留在原处，Esc 关不掉', '2.4.3、2.1.2', '用原生 <dialog> 的 showModal()，关闭后焦点回到提交按钮', `焦点进入对话框并能用 Esc 返回：否 → ${Ka.dialogOpened && Ka.focusInDialog && Ka.closedByEsc && Ka.focusReturned ? '是' : '否'}`],
+      ['<span class="src zoom">放大检查</span>', '固定 520 像素宽与绝对定位，放大后要左右滚动', '1.4.10', '弹性布局、最大宽度、自动换行', `${zb} → ${za} 像素`],
+      ['<span class="src read">人工阅读</span>', '轮播每 3 秒自动切换，无法暂停', '2.2.2', '加“暂停轮播”按钮；开启“减少动态效果”时不自动播放', '无法暂停 → 可以暂停'],
+      ['<span class="src read">人工阅读</span>', '链接文字“点击这里”离开上下文就不知道去哪', '2.4.4', '改为“查看课程大纲”', '链接名称：“点击这里” → “查看课程大纲”'],
+      ['<span class="src read">人工阅读</span>', '装饰图片的 alt 是文件名，读屏软件会读出“IMG_2041.png”', '1.1.1', '装饰图片用空 alt', 'axe 不报告这个问题：有 alt 就通过']
+    ];
+    $('log').innerHTML = '<tr><th>#</th><th>发现方式</th><th>问题</th><th>WCAG 2.2</th><th>修正</th><th>证据（改进前 → 改进后）</th></tr>' + LOG.map((r, i) => `<tr><td>${i + 1}</td>${r.map((c, k) => `<td>${k ? esc(c) : c}</td>`).join('')}</tr>`).join('');
+    const manual = LOG.length - vb.length;
+    $('concl').innerHTML = `axe 在改进前的页面上报告了 ${vb.length} 条规则、共 ${axeFound} 处问题；键盘任务、放大检查和人工阅读又发现了 ${manual} 个 axe 没有报告的问题——包括最严重的一个：只用键盘根本无法报名。自动检查覆盖有限，人工任务检查仍然重要。改进后 axe 报告 ${va.length} 条，键盘任务完成。下一步应当请使用读屏软件和放大软件的人来测试（示例中没有这一步的数据）。`;
+    return LOG.length;
+  } };
+});
+</script>
+</body>
+</html>
