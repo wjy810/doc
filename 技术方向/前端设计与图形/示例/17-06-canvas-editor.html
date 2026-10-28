@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>画布编辑器：撤销、评论、版本恢复与多人协作</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": {
+  "yjs": "https://cdn.jsdelivr.net/npm/yjs@13.6.33/dist/yjs.mjs",
+  "lib0/array": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/array.js", "lib0/binary": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/binary.js",
+  "lib0/buffer": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/buffer.js", "lib0/decoding": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/decoding.js",
+  "lib0/encoding": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/encoding.js", "lib0/environment": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/environment.js",
+  "lib0/error": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/error.js", "lib0/function": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/function.js",
+  "lib0/iterator": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/iterator.js", "lib0/logging": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/logging.js",
+  "lib0/map": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/map.js", "lib0/math": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/math.js",
+  "lib0/object": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/object.js", "lib0/observable": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/observable.js",
+  "lib0/promise": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/promise.js", "lib0/random": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/random.js",
+  "lib0/set": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/set.js", "lib0/string": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/string.js",
+  "lib0/time": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/time.js", "lib0/webcrypto": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/webcrypto.js"
+} }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 12px; margin: 0; color: var(--muted); font-weight: 700; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .editor { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 10px; }
+  .toolbar { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; font-size: 12px; }
+  button { font: inherit; font-size: 12px; padding: 1px 8px; border: 1px solid #b9c3d3; background: #f3f6fb; border-radius: 6px; cursor: pointer; }
+  button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+  kbd { font: 10.5px ui-monospace, Menlo, monospace; border: 1px solid #c9d0db; border-bottom-width: 2px; border-radius: 4px; padding: 0 3px; color: var(--muted); background: #fff; }
+  svg.canvas:focus { outline: 2px solid #9fb8e8; outline-offset: 1px; }
+  svg.canvas { overflow: hidden; width: 100%; height: auto; background: #fbfbfa; border: 1px solid var(--line); border-radius: 8px; display: block; }
+  .side { display: grid; gap: 6px; align-content: start; }
+  .pnl { border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; font-size: 11.5px; }
+  .pnl.collapsed { color: var(--muted); }
+  .pnl ol, .pnl ul { margin: 2px 0; padding-left: 16px; } .pnl li { margin: 0; }
+  .who { font-weight: 700; } .who.林晓 { color: #2f6fdb; } .who.周舟 { color: #1f7a4d; }
+  .notice { border: 1px solid #ecd9b0; background: #fdf6e7; border-radius: 6px; padding: 4px 8px; font-size: 12px; }
+  .palette { border: 1px solid #b9c3d3; border-radius: 8px; padding: 6px; background: #fff; box-shadow: 0 6px 20px #0002; font-size: 12px; }
+  .palette input { width: 100%; font: inherit; padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; }
+  .palette li.on { background: #e8eefb; }
+  .status { display: flex; gap: 12px; font-size: 11.5px; color: var(--muted); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .mini { width: 100%; height: auto; background: #fbfbfa; border: 1px solid var(--line); border-radius: 6px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>课程地图编辑器（林晓的窗口）</h2>
+  <p class="sub">真实的 Yjs 文档；另一位编辑者周舟和服务器在页面里模拟。测试脚本用真实的点击与按键完成一轮编辑。课程内容为演示而写。</p>
+  <div class="editor">
+    <div style="display:grid;gap:6px">
+      <div class="toolbar" id="toolbar"></div>
+      <div id="paletteHost"></div>
+      <svg class="canvas" id="canvas" viewBox="0 0 640 330" tabindex="0" aria-label="画布：用方向键移动选中的形状"></svg>
+      <div class="status" id="status"></div>
+      <div id="notices"></div>
+    </div>
+    <div class="side" id="side"></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>验收：内容一致、操作可解释、异常时不丢数据</h2><table id="accept"></table><p class="m" id="maccept"></p></div>
+    <div><h2>周舟看到的画布</h2><svg class="mini" id="mini" viewBox="0 0 640 330"></svg><h2 style="margin-top:6px">先把单人编辑做完整</h2><table id="single"></table></div>
+  </div>
+</section>
+<script type="module">
+import * as Y from 'yjs';
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ok = (b, y = '是', n = '否') => b ? `<span class="good">${y}</span>` : `<span class="poor">${n}</span>`;
+const R = {};
+const store = (() => { const m = new Map(); try { localStorage.setItem('__t', '1'); localStorage.removeItem('__t'); return { get: k => localStorage.getItem(k), set: (k, v) => localStorage.setItem(k, v) }; } catch (e) { return { get: k => m.get(k) ?? null, set: (k, v) => m.set(k, v) }; } })();
+const b64 = u => btoa(String.fromCharCode(...u)), unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+
+// ---------- 服务器与周舟（模拟） ----------
+const server = new Y.Doc(), peers = new Set();
+const relay = (from, update) => { Y.applyUpdate(server, update, 'srv'); for (const p of peers) if (p !== from && p.online) Y.applyUpdate(p.doc, update, 'remote'); };
+function makePeer(name, doc) {
+  const p = { name, doc, online: true };
+  doc.on('update', (u, origin) => { if (origin !== 'remote' && p.online) relay(p, u); });
+  p.sync = () => { const a = Y.encodeStateAsUpdate(p.doc, Y.encodeStateVector(server)), b = Y.encodeStateAsUpdate(server, Y.encodeStateVector(p.doc)); Y.applyUpdate(p.doc, b, 'remote'); relay(p, a); };
+  peers.add(p); return p;
+}
+const zz = makePeer('周舟', new Y.Doc());
+
+// ---------- 编辑器（林晓） ----------
+const COLORS = ['#dbe7fb', '#e3f1e8', '#fdf0d9', '#f6e1ef'];
+const ME = '林晓';
+class Editor {
+  constructor() {
+    this.doc = new Y.Doc(); this.peer = makePeer(ME, this.doc);
+    const saved = store.get('ed:local'); if (saved) Y.applyUpdate(this.doc, unb64(saved), 'remote');
+    this.peer.sync();
+    this.shapes = this.doc.getMap('shapes'); this.comments = this.doc.getArray('comments'); this.log = this.doc.getArray('log'); this.versions = this.doc.getArray('versions');
+    this.undo = new Y.UndoManager([this.shapes, this.comments], { trackedOrigins: new Set([ME]), captureTimeout: 0 });
+    this.sel = new Set(); this.editing = null; this.cache = {}; this.notices = []; this.palette = null;
+    this.ws = JSON.parse(store.get('ed:workspace') || 'null') || { panels: { 图层: true, 属性: true, 历史: true, 评论: true }, zoom: 1 };
+    // 每次变化：本地自动保存（未同步的修改也在），更新缓存，检查“我正在编辑的形状被别人删了”
+    this.doc.on('afterTransaction', tr => {
+      store.set('ed:local', b64(Y.encodeStateAsUpdate(this.doc)));
+      for (const [id, m] of this.shapes) this.cache[id] = m.toJSON();
+      if (this.editing && !this.shapes.has(this.editing) && tr.origin === 'remote') {
+        const del = [...this.log.toArray()].reverse().find(e => e.by !== ME && e.label.startsWith('删除')), who = del ? del.by : '别人';
+        this.notices.push({ id: this.editing, text: `你正在编辑的“${this.cache[this.editing].label}”被${who}删除了。你的修改没有丢：` });
+        this.editing = null;
+      }
+      this.render();
+    });
+    this.render();
+  }
+  act(label, fn, origin = ME) { this.doc.transact(() => { fn(); this.log.push([{ by: ME, label, t: this.log.length }]); }, origin); }
+  addShape(id, x, y, label, color = 0) { const m = new Y.Map(); m.set('x', x); m.set('y', y); m.set('w', 120); m.set('h', 44); m.set('label', label); m.set('color', color); this.shapes.set(id, m); }
+  // 所有功能都注册成命令：快捷键、工具栏和命令搜索共用一份
+  commands() {
+    const sel = () => [...this.sel].filter(id => this.shapes.has(id)), names = ids => ids.map(id => `“${this.shapes.get(id).get('label')}”`).join('、');
+    return [
+      { id: 'alignLeft', title: '左对齐选中的形状', keys: 'Alt+A', when: () => sel().length > 1, run: () => { const ids = sel(), x = Math.min(...ids.map(id => this.shapes.get(id).get('x'))); this.act(`把 ${ids.length} 个形状左对齐`, () => ids.forEach(id => this.shapes.get(id).set('x', x))); } },
+      { id: 'distribute', title: '垂直等距分布', keys: 'Alt+V', when: () => sel().length > 2, run: () => { const ids = sel().sort((a, b) => this.shapes.get(a).get('y') - this.shapes.get(b).get('y')); const y0 = this.shapes.get(ids[0]).get('y'), y1 = this.shapes.get(ids[ids.length - 1]).get('y'); this.act(`把 ${ids.length} 个形状垂直等距分布`, () => ids.forEach((id, i) => this.shapes.get(id).set('y', Math.round(y0 + (y1 - y0) * i / (ids.length - 1))))); } },
+      { id: 'recolor', title: '把选中的形状改成绿色', keys: 'Alt+G', when: () => sel().length > 0, run: () => { const ids = sel(); this.act(`把 ${names(ids)} 改成绿色`, () => ids.forEach(id => this.shapes.get(id).set('color', 1))); } },
+      { id: 'duplicate', title: '复制选中的形状', keys: 'Ctrl+D', when: () => sel().length > 0, run: () => { const ids = sel(); this.act(`复制了 ${names(ids)}`, () => ids.forEach(id => { const s = this.shapes.get(id).toJSON(); this.addShape(id + '-副本', s.x + 16, s.y + 16, s.label + '（副本）', s.color); })); } },
+      { id: 'delete', title: '删除选中的形状', keys: 'Delete', when: () => sel().length > 0, run: () => { const ids = sel(); this.act(`删除了 ${names(ids)}`, () => ids.forEach(id => this.shapes.delete(id))); this.sel.clear(); } },
+      { id: 'undo', title: '撤销', keys: 'Ctrl+Z', when: () => this.undo.undoStack.length > 0, run: () => { const last = [...this.log.toArray()].reverse().find(e => e.by === ME && !e.label.startsWith('撤销') && !e.label.startsWith('重做')); this.undo.undo(); this.doc.transact(() => this.log.push([{ by: ME, label: `撤销：${last ? last.label : ''}`, t: this.log.length }]), 'meta'); } },
+      { id: 'redo', title: '重做', keys: 'Ctrl+Shift+Z', when: () => this.undo.redoStack.length > 0, run: () => { this.undo.redo(); this.doc.transact(() => this.log.push([{ by: ME, label: '重做', t: this.log.length }]), 'meta'); } },
+      { id: 'saveVersion', title: '保存为命名版本', keys: 'Ctrl+S', when: () => true, run: arg => { const name = arg || `版本 ${this.versions.length + 1}`; this.doc.transact(() => { this.versions.push([{ name, by: ME, data: JSON.stringify(this.shapes.toJSON()) }]); this.log.push([{ by: ME, label: `保存了“${name}”`, t: this.log.length }]); }, 'meta'); } },
+      { id: 'comment', title: '给选中的形状加评论', keys: 'Ctrl+Alt+M', when: () => sel().length === 1, run: body => { const id = sel()[0]; this.act(`在${names([id])}上评论`, () => this.comments.push([{ shape: id, by: ME, body }])); } },
+      { id: 'togglePanel', title: '显示／隐藏图层面板', keys: 'Ctrl+H', when: () => true, run: () => { this.ws.panels.图层 = !this.ws.panels.图层; this.saveWs(); } },
+      { id: 'zoomIn', title: '放大', keys: 'Ctrl+=', when: () => true, run: () => { this.ws.zoom = Math.min(2, +(this.ws.zoom + 0.25).toFixed(2)); this.saveWs(); } },
+      { id: 'zoomReset', title: '缩放到 100%', keys: 'Ctrl+0', when: () => true, run: () => { this.ws.zoom = 1; this.saveWs(); } }
+    ];
+  }
+  saveWs() { store.set('ed:workspace', JSON.stringify(this.ws)); this.render(); }
+  run(id, arg) { const c = this.commands().find(c => c.id === id); if (c && c.when()) { c.run(arg); this.render(); return true; } return false; }
+  search(q) { const cs = this.commands(); const score = c => { const t = c.title; let i = 0, s = 0; for (const ch of q) { const j = t.indexOf(ch, i); if (j < 0) return -1; s += j - i; i = j + 1; } return s; }; return cs.map(c => ({ c, s: score(c) })).filter(x => x.s >= 0).sort((a, b) => a.s - b.s).map(x => x.c); }
+  // 恢复版本：先算出会改变什么，确认后作为一次新的、可以撤销的修改
+  diffTo(name) {
+    const v = this.versions.toArray().find(v => v.name === name), target = JSON.parse(v.data), cur = this.shapes.toJSON();
+    const add = Object.keys(target).filter(id => !cur[id]), del = Object.keys(cur).filter(id => !target[id]), mod = Object.keys(target).filter(id => cur[id] && JSON.stringify(cur[id]) !== JSON.stringify(target[id]));
+    return { v, target, add, del, mod };
+  }
+  restore(name) {
+    const d = this.diffTo(name);
+    this.act(`恢复到“${name}”（加回 ${d.add.length} 个、删除 ${d.del.length} 个、改回 ${d.mod.length} 个）`, () => {
+      d.del.forEach(id => this.shapes.delete(id));
+      for (const id of [...d.add, ...d.mod]) { const t = d.target[id]; if (!this.shapes.has(id)) this.addShape(id, t.x, t.y, t.label, t.color); else for (const k of Object.keys(t)) this.shapes.get(id).set(k, t[k]); }
+    });
+  }
+  bringBack(id) { const s = this.cache[id]; this.act(`恢复了被删除的“${s.label}”（含你的修改）`, () => { this.addShape(id, s.x, s.y, s.label, s.color); }); this.notices = this.notices.filter(n => n.id !== id); }
+  render() {
+    if (!this.shapes) return;
+    const z = this.ws.zoom, cms = this.comments.toArray();
+    $('canvas').setAttribute('viewBox', `0 0 ${(640 / z).toFixed(1)} ${(330 / z).toFixed(1)}`);
+    $('canvas').innerHTML = `<g>${[...this.shapes].map(([id, m]) => { const s = m.toJSON(), n = cms.filter(c => c.shape === id).length; return `<g data-id="${esc(id)}" style="cursor:pointer"><rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" rx="8" fill="${COLORS[s.color]}" stroke="${this.sel.has(id) ? '#2f6fdb' : '#9aa6b8'}" stroke-width="${this.sel.has(id) ? 2.5 : 1}"/><text x="${s.x + s.w / 2}" y="${s.y + s.h / 2 + 5}" text-anchor="middle" font-size="13" font-family="Noto Sans SC">${esc(s.label)}</text>${n ? `<circle cx="${s.x + s.w}" cy="${s.y}" r="8" fill="#c77700"/><text x="${s.x + s.w}" y="${s.y + 4}" text-anchor="middle" font-size="10" fill="#fff">${n}</text>` : ''}</g>`; }).join('')}</g>`;
+    $('toolbar').innerHTML = [['alignLeft', '左对齐'], ['distribute', '等距'], ['recolor', '改绿色'], ['duplicate', '复制'], ['delete', '删除'], ['undo', '撤销'], ['redo', '重做'], ['saveVersion', '存版本']].map(([id, t]) => { const c = this.commands().find(c => c.id === id); return `<button type="button" data-cmd="${id}" ${c.when() ? '' : 'disabled'}>${t} <kbd>${c.keys}</kbd></button>`; }).join('') + `<span class="sub">命令搜索 <kbd>Ctrl+K</kbd></span>`;
+    $('status').innerHTML = `<span>缩放 ${Math.round(z * 100)}%</span><span>已选 ${[...this.sel].filter(id => this.shapes.has(id)).length} 个</span><span>${this.peer.online ? '在线，已同步' : '离线：修改保存在本机，上线后同步'}</span><span>本机自动保存 ${Math.round((store.get('ed:local') || '').length * 0.75)} 字节</span>`;
+    $('notices').innerHTML = this.notices.map(n => `<div class="notice">${esc(n.text)}<button type="button" data-back="${esc(n.id)}">恢复这个形状</button></div>`).join('');
+    const P = this.ws.panels, panel = (name, body) => P[name] ? `<div class="pnl"><h3>${name}</h3>${body}</div>` : `<div class="pnl collapsed">${name}（已收起）</div>`;
+    const orphan = cms.filter(c => !this.shapes.has(c.shape));
+    const sel1 = [...this.sel].filter(id => this.shapes.has(id));
+    $('side').innerHTML = panel('图层', `<ul>${[...this.shapes].map(([id, m]) => `<li>${esc(m.get('label'))}</li>`).join('')}</ul>`) +
+      panel('属性', sel1.length === 1 ? (() => { const s = this.shapes.get(sel1[0]).toJSON(); return `x ${s.x}、y ${s.y}、${esc(s.label)}`; })() : `<span class="sub">${sel1.length ? `选中 ${sel1.length} 个，可以批量对齐、改色` : '未选中'}</span>`) +
+      panel('历史', `<ol>${this.log.toArray().slice(-9).map(e => `<li><span class="who ${e.by}">${e.by}</span> ${esc(e.label)}</li>`).join('')}</ol><span class="sub">共 ${this.log.length} 条；版本：${this.versions.toArray().map(v => esc(v.name)).join('、') || '无'}</span>`) +
+      panel('评论', `<ul>${cms.map(c => `<li><span class="who ${c.by}">${c.by}</span>${this.shapes.has(c.shape) ? `在“${esc(this.shapes.get(c.shape).get('label'))}”上` : '<span class="mid">（所附形状已删除，评论保留）</span>'}：${esc(c.body)}</li>`).join('')}</ul>${orphan.length ? '' : ''}`);
+    $('paletteHost').innerHTML = this.palette ? `<div class="palette" role="dialog" aria-label="命令搜索"><input id="pq" value="${esc(this.palette.q)}" aria-label="搜索命令"><ol>${this.search(this.palette.q).slice(0, 5).map((c, i) => `<li class="${i === 0 ? 'on' : ''}">${c.title} <kbd>${c.keys}</kbd>${c.when() ? '' : ' <span class="sub">（现在不可用）</span>'}</li>`).join('')}</ol></div>` : '';
+    if (this.palette) { const q = $('pq'); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
+    drawMini();
+  }
+}
+function drawMini() { const sh = zz.doc.getMap('shapes'); $('mini').innerHTML = [...sh].map(([id, m]) => { const s = m.toJSON(); return `<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" rx="8" fill="${COLORS[s.color]}" stroke="#9aa6b8"/><text x="${s.x + s.w / 2}" y="${s.y + s.h / 2 + 5}" text-anchor="middle" font-size="13" font-family="Noto Sans SC">${esc(s.label)}</text>`; }).join(''); }
+zz.doc.on('afterTransaction', () => drawMini());
+
+// ---------- 初始内容（由周舟创建，林晓打开时同步到） ----------
+const zsh = zz.doc.getMap('shapes'), zlog = zz.doc.getArray('log');
+const zAct = (label, fn) => zz.doc.transact(() => { fn(); zlog.push([{ by: '周舟', label, t: zlog.length }]); }, '周舟');
+const zAdd = (id, x, y, label, color = 0) => { const m = new Y.Map(); m.set('x', x); m.set('y', y); m.set('w', 120); m.set('h', 44); m.set('label', label); m.set('color', color); zsh.set(id, m); };
+zAct('建立课程地图（6 个形状）', () => { zAdd('html', 30, 30, 'HTML 与 CSS'); zAdd('js', 46, 100, 'JavaScript 基础'); zAdd('git', 24, 175, 'Git 与协作', 2); zAdd('clean', 38, 250, '数据清洗'); zAdd('vis', 260, 120, '可视化入门', 3); zAdd('proj', 470, 200, '期末项目', 2); });
+
+let ED = new Editor();
+// ---------- 交互 ----------
+$('canvas').addEventListener('click', e => { const g = e.target.closest('g[data-id]'); if (!g) { ED.sel.clear(); ED.render(); return; } const id = g.dataset.id; if (!e.shiftKey) ED.sel.clear(); ED.sel.has(id) && e.shiftKey ? ED.sel.delete(id) : ED.sel.add(id); ED.render(); });
+document.addEventListener('click', e => { const b = e.target.closest('[data-cmd]'); if (b) ED.run(b.dataset.cmd); const k = e.target.closest('[data-back]'); if (k) ED.bringBack(k.dataset.back); });
+const KEYMAP = { 'Alt+a': 'alignLeft', 'Alt+v': 'distribute', 'Alt+g': 'recolor', 'Ctrl+d': 'duplicate', 'Delete': 'delete', 'Ctrl+z': 'undo', 'Ctrl+Shift+z': 'redo', 'Ctrl+s': 'saveVersion', 'Ctrl+h': 'togglePanel', 'Ctrl+=': 'zoomIn', 'Ctrl+0': 'zoomReset' };
+document.addEventListener('keydown', e => {
+  if (ED.palette) {
+    if (e.key === 'Escape') { ED.palette = null; ED.render(); e.preventDefault(); }
+    else if (e.key === 'Enter') { const c = ED.search(ED.palette.q)[0]; ED.palette = null; if (c) ED.run(c.id); else ED.render(); e.preventDefault(); }
+    return;
+  }
+  const key = (e.ctrlKey || e.metaKey ? 'Ctrl+' : '') + (e.altKey ? 'Alt+' : '') + (e.shiftKey && e.key.length === 1 ? 'Shift+' : '') + (e.key.length === 1 ? e.key.toLowerCase() : e.key);
+  const altKey = e.altKey && e.code.startsWith('Key') ? 'Alt+' + e.code.slice(3).toLowerCase() : null;
+  if (key === 'Ctrl+k') { ED.palette = { q: '' }; ED.render(); e.preventDefault(); return; }
+  const id = KEYMAP[key] || (altKey && KEYMAP[altKey]);
+  if (id) { e.preventDefault(); ED.run(id); return; }
+  const mv = { ArrowLeft: [-8, 0], ArrowRight: [8, 0], ArrowUp: [0, -8], ArrowDown: [0, 8] }[e.key];
+  if (mv && ED.sel.size) { e.preventDefault(); const ids = [...ED.sel].filter(id => ED.shapes.has(id)); ED.act(`移动了${ids.map(id => `“${ED.shapes.get(id).get('label')}”`).join('、')}`, () => ids.forEach(id => { const m = ED.shapes.get(id); m.set('x', m.get('x') + mv[0]); m.set('y', m.get('y') + mv[1]); })); }
+});
+document.addEventListener('input', e => { if (e.target.id === 'pq') { ED.palette.q = e.target.value; ED.render(); } });
+
+// ---------- 供测试脚本调用的“周舟”与“异常” ----------
+window.__ed = {
+  ed: () => ED, R,
+  zMove: (id, dx) => zAct(`移动了“${zsh.get(id).get('label')}”`, () => zsh.get(id).set('x', zsh.get(id).get('x') + dx)),
+  zAdd: () => zAct('新建了“统计基础”', () => zAdd('stat', 260, 40, '统计基础')),
+  zDelete: id => zAct(`删除了“${zsh.get(id).get('label')}”`, () => zsh.delete(id)),
+  meEditLabel: (id, label) => { ED.editing = id; ED.act(`把“${ED.shapes.get(id).get('label')}”改名为“${label}”`, () => ED.shapes.get(id).set('label', label)); },
+  offline: v => { ED.peer.online = !v; if (!v) ED.peer.sync(); ED.render(); },
+  // 模拟页面崩溃后重新打开：丢掉内存里的一切，只靠本机保存的数据和服务器重建
+  crashAndReopen: () => { peers.delete(ED.peer); const was = ED.peer.online; ED = new Editor(); return was; },
+  json: d => JSON.stringify(d.getMap('shapes').toJSON(), Object.keys(d.getMap('shapes').toJSON()).sort()),
+  report: (single, accept, note) => {
+    $('single').innerHTML = '<tr><th>功能</th><th>测试脚本怎样操作</th><th>结果</th></tr>' + single.map(r => `<tr><th>${r[0]}</th><td>${r[1]}</td><td>${r[2] ? '<span class="good">✓</span> ' : '<span class="poor">✗</span> '}${r[3]}</td></tr>`).join('');
+    $('accept').innerHTML = '<tr><th>验收重点</th><th>检查</th><th>结果</th></tr>' + accept.map(r => `<tr><th>${r[0]}</th><td>${r[1]}</td><td>${r[2] ? '<span class="good">✓</span> ' : '<span class="poor">✗</span> '}${r[3]}</td></tr>`).join('');
+    $('maccept').innerHTML = note;
+  },
+  state: () => ({ me: ED.shapes.toJSON(), zz: zz.doc.getMap('shapes').toJSON(), srv: server.getMap('shapes').toJSON(), log: ED.log.toArray(), versions: ED.versions.toArray().map(v => v.name), ws: ED.ws, undo: ED.undo.undoStack.length, comments: ED.comments.toArray() })
+};
+</script>
+</body>
+</html>
