@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>数字制造：单位、切缝、校准与可切割文件</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 4px 0 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .col { display: grid; gap: 6px; align-content: start; }
+  .inputs { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; align-items: center; }
+  .inputs input { font: inherit; width: 5.5em; padding: 1px 4px; border: 1px solid var(--line); border-radius: 4px; }
+  .inputs input.wide { width: 15em; }
+  input:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+  button { font: inherit; font-size: 12px; padding: 2px 10px; border: 1px solid #b9c3d3; background: #f3f6fb; border-radius: 6px; cursor: pointer; }
+  .tag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 9px; background: #fff3d6; color: #7a4a00; }
+  .sheet { background: #f7f1e6; border: 1px solid #e3d8c3; border-radius: 4px; display: block; width: 100%; height: auto; }
+  .sizes { display: flex; gap: 18px; align-items: flex-end; }
+  .sizes figure { margin: 0; font-size: 11px; color: var(--muted); text-align: center; }
+  .sizes img { display: block; background: #f7f1e6; outline: 1px dashed #c9b997; }
+  pre { margin: 0; font: 11px/1.45 ui-monospace, "SFMono-Regular", Menlo, monospace; background: #f6f7f9; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; }
+  .note { background: #fdf6e7; border: 1px solid #ecd9b0; border-radius: 6px; padding: 6px 8px; font-size: 12px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div class="col"><h2>1 单位：同一个 50 毫米的正方形，导入后变成多大</h2>
+      <div class="sizes" id="sizes"></div><table id="units"></table><p class="m" id="munits"></p></div>
+    <div class="col"><h2>2 切缝：激光烧掉的那一条也有宽度</h2>
+      <div class="inputs"><span class="tag">示例输入，换成你量到的数</span>
+        <label>10 块 10 毫米方块并排总长 <input id="L" type="number" step="0.01" value="98.40"> 毫米</label>
+        <label>材料厚度（四处）<input id="T" class="wide" value="2.86, 2.91, 2.88, 2.95"> 毫米</label></div>
+      <canvas id="kerf" width="1120" height="380" style="width:560px;max-width:100%;height:auto"></canvas>
+      <table id="kerft"></table><p class="m" id="mkerf"></p></div>
+  </div>
+</section>
+<section class="panel">
+  <h2>3 校准梳与切缝试片：先切一小块，量出参数再做正式零件</h2>
+  <div class="two">
+    <div class="col"><svg id="combPrev" class="sheet" viewBox="0 0 130 44"></svg>
+      <div class="inputs"><button id="dlcomb" type="button">下载校准件 SVG</button><button id="dlgcode" type="button">下载 G 代码</button><span class="sub" id="combinfo"></span></div></div>
+    <div class="col"><table id="combt"></table><p class="m" id="mcomb"></p></div>
+  </div>
+</section>
+<section class="panel">
+  <h2>4 可切割文件检查：检查导出的文件本身，而不是设计软件里的样子</h2>
+  <div class="two">
+    <div class="col"><h3>初稿</h3><div id="prevA"></div></div>
+    <div class="col"><h3>修正后</h3><div id="prevB"></div></div>
+  </div>
+  <table id="checks"></table><p class="m" id="mchecks"></p>
+</section>
+<section class="panel">
+  <div class="two">
+    <div class="col"><h2>5 交给设备：G 代码、坐标方向与切割顺序</h2><table id="gstat"></table><pre id="gcode"></pre><p class="m" id="mg"></p></div>
+    <div class="col"><h2>6 设备、文件格式与要注意的事</h2><table id="devices"></table>
+      <div class="note"><b>使用设备之前</b>：先完成工坊的培训，按操作规程开机；材料先查允许清单（例如 PVC 等含氯材料在激光切割时会产生有害气体，通常禁止）；切割时人不离开机器，旁边放好灭火器材；先用校准件这样的小样验证参数，再切正式零件，最后才批量。</div></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const fmt = (v, d = 2) => v == null || Number.isNaN(v) ? '—' : v.toFixed(d);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ok = (b, y = '✓', n = '✗') => b ? `<span class="good">${y}</span>` : `<span class="poor">${n}</span>`;
+const R = {};
+
+// ---------- 几何 ----------
+const area = P => { let a = 0; for (let i = 0; i < P.length; i++) { const [x1, y1] = P[i], [x2, y2] = P[(i + 1) % P.length]; a += x1 * y2 - x2 * y1; } return a / 2; };
+const cross = (a, b) => a[0] * b[1] - a[1] * b[0];
+// 把多边形每条边沿外法线平移 d（d > 0 变大），相邻两条平移后的边求交点作为新顶点
+function offsetPoly(P, d) {
+  const n = P.length, s = area(P) > 0 ? 1 : -1;
+  const edges = P.map((p, i) => { const q = P[(i + 1) % n], dx = q[0] - p[0], dy = q[1] - p[1], L = Math.hypot(dx, dy); const nx = s * dy / L, ny = -s * dx / L; return { p: [p[0] + nx * d, p[1] + ny * d], r: [dx, dy] }; });
+  return P.map((p, i) => {
+    const a = edges[(i - 1 + n) % n], b = edges[i], den = cross(a.r, b.r);
+    if (Math.abs(den) < 1e-12) return b.p;
+    const t = cross([b.p[0] - a.p[0], b.p[1] - a.p[1]], b.r) / den;
+    return [a.p[0] + a.r[0] * t, a.p[1] + a.r[1] * t];
+  });
+}
+const segsOf = (P, closed = true) => { const out = []; for (let i = 0; i < P.length - (closed ? 0 : 1); i++) out.push([P[i], P[(i + 1) % P.length]]); return out; };
+function ptSeg(p, a, b) { const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy; let t = L2 ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2 : 0; t = Math.max(0, Math.min(1, t)); return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy); }
+const segDist = (s, u) => Math.min(ptSeg(s[0], u[0], u[1]), ptSeg(s[1], u[0], u[1]), ptSeg(u[0], s[0], s[1]), ptSeg(u[1], s[0], s[1]));
+const polyDist = (P, Q) => { let m = Infinity; for (const s of segsOf(P)) for (const u of segsOf(Q)) m = Math.min(m, segDist(s, u)); return m; };
+function inside(pt, P) { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const [xi, yi] = P[i], [xj, yj] = P[j]; if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < (xj - xi) * (pt[1] - yi) / (yj - yi) + xi) c = !c; } return c; }
+const plen = (P, closed = true) => segsOf(P, closed).reduce((s, [a, b]) => s + Math.hypot(b[0] - a[0], b[1] - a[1]), 0);
+const r3 = v => +v.toFixed(3);
+const dOf = (P, closed = true) => 'M' + P.map(p => `${r3(p[0])} ${r3(p[1])}`).join(' L') + (closed ? ' Z' : '');
+
+// ---------- 1 单位 ----------
+const svgA = '<svg xmlns="http://www.w3.org/2000/svg" width="50mm" height="50mm" viewBox="0 0 50 50"><rect x="0.5" y="0.5" width="49" height="49" fill="none" stroke="#d00" stroke-width="1"/></svg>';
+const svgB = '<svg xmlns="http://www.w3.org/2000/svg" width="189" height="189" viewBox="0 0 50 50"><rect x="0.5" y="0.5" width="49" height="49" fill="none" stroke="#d00" stroke-width="1"/></svg>';
+const url = s => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
+$('sizes').innerHTML = `<figure><img id="imA" src="${url(svgA)}" alt="写明毫米的 50 毫米正方形"><figcaption>width="50mm"</figcaption></figure><figure><img id="imB" src="${url(svgB)}" alt="不写单位的正方形"><figcaption>width="189"（不写单位）</figcaption></figure>`;
+function units() {
+  const wa = $('imA').getBoundingClientRect().width, wb = $('imB').getBoundingClientRect().width;
+  const mm = px => px * 25.4 / 96, at = (px, dpi) => px * 25.4 / dpi;
+  $('units').innerHTML = '<tr><th>文件里写的</th><th>浏览器显示（实测）</th><th>导入软件按 96 像素/英寸</th><th>按 90</th><th>按 72</th></tr>' +
+    `<tr><td>width="50mm"</td><td class="num">${fmt(wa)} 像素 = ${fmt(mm(wa), 1)} 毫米</td><td class="num good">50.0 毫米</td><td class="num good">50.0</td><td class="num good">50.0</td></tr>` +
+    `<tr><td>width="189"</td><td class="num">${fmt(wb)} 像素 = ${fmt(mm(wb), 1)} 毫米</td><td class="num">${fmt(at(189, 96), 1)} 毫米</td><td class="num poor">${fmt(at(189, 90), 1)}</td><td class="num poor">${fmt(at(189, 72), 1)}</td></tr>`;
+  $('munits').innerHTML = `屏幕上两个一样大，交给机器却可能差出三分之一：不写单位的数字，导入软件要自己猜“一英寸多少像素”（CSS 规定 96；有的软件按 72 点或旧版的 90）。做法：根元素写 width="…mm"，viewBox 的宽高等于这个毫米数，这样 1 个坐标单位 = 1 毫米；导入后量一条已知长度的线核对。`;
+  R.units = { wa, wb, at90: at(189, 90), at72: at(189, 72) };
+}
+
+// ---------- 2 切缝 ----------
+let K = 0.16, TH = 2.9, TH_RANGE = 0;
+function kerf() {
+  const L = Number($('L').value), ts = $('T').value.split(/[,，\s]+/).filter(Boolean).map(Number);
+  K = (100 - L) / 10; TH = ts.reduce((a, b) => a + b, 0) / ts.length; TH_RANGE = Math.max(...ts) - Math.min(...ts);
+  const w = TH, rows = [
+    ['设计尺寸', w, w], ['不补偿，直接切', w + K, w - K], ['补偿：外形外扩 k/2，孔与槽内缩 k/2', w, w]
+  ];
+  $('kerft').innerHTML = '<tr><th></th><th>槽宽</th><th>插片宽</th><th>间隙</th></tr>' + rows.map(([n, s, t]) => `<tr><th>${n}</th><td class="num">${fmt(s)}</td><td class="num">${fmt(t)}</td><td class="num ${s - t > 0.05 ? 'poor' : 'good'}">${fmt(s - t)}</td></tr>`).join('');
+  $('mkerf').innerHTML = `切缝 k = (100 − ${fmt(L)}) ÷ 10 = <b>${fmt(K, 3)} 毫米</b>（每块方块每边被烧掉 k/2，十块一共少 10k）。材料标称 3 毫米，四处实测平均 ${fmt(TH)}、最大差 ${fmt(TH_RANGE)} 毫米：槽宽按实测厚度设计，不按标称值。不补偿时间隙是 2k = ${fmt(2 * K)} 毫米，插接会松；补偿后间隙为 0，再用第 3 部分的校准梳决定要紧一点还是松一点。切缝随材料、功率、速度和焦距变化，换任何一项都要重测。`;
+  drawKerf(rows);
+  R.kerf = { K, TH, TH_RANGE, clearance: 2 * K };
+}
+function drawKerf(rows) {
+  const c = $('kerf'), g = c.getContext('2d'), S = 14, dpr = 2;
+  g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, 560, 190); g.textBaseline = 'middle';
+  rows.forEach(([name, s, t], i) => {
+    const y = 8 + i * 58, x0 = 150;
+    g.fillStyle = '#1d2330'; g.font = '12px "Noto Sans SC"'; g.fillText(name.split('：')[0], 0, y + 22);
+    g.fillStyle = '#e8d9bd'; g.fillRect(x0, y, 170, 44);
+    g.fillStyle = '#fff'; g.fillRect(x0 + 85 - s * S / 2, y, s * S, 30);
+    g.fillStyle = '#c99b5a'; g.fillRect(x0 + 230 - t * S / 2, y - 4, t * S, 40);
+    g.fillStyle = '#5b6475'; g.font = '11px "Noto Sans SC"';
+    g.fillText(`槽 ${fmt(s)}`, x0 + 85 + s * S / 2 + 6, y + 12); g.fillText(`插片 ${fmt(t)}`, x0 + 230 + t * S / 2 + 6, y + 8);
+    g.fillStyle = s - t > 0.05 ? '#b3261e' : '#1f7a4d'; g.fillText(`间隙 ${fmt(s - t)}`, x0 + 230 + t * S / 2 + 6, y + 26);
+  });
+  g.fillStyle = '#8a93a3'; g.font = '11px "Noto Sans SC"'; g.fillText('放大 14 倍示意：浅色板材上的白色缺口是槽，深色是要插进去的插片', 0, 182);
+}
+
+// ---------- 3 校准梳 ----------
+const SLOTS = Array.from({ length: 11 }, (_, i) => +(2.7 + i * 0.05).toFixed(2));
+const SEG = { a: [[0, 0], [1, 0]], b: [[1, 0], [1, 1]], c: [[1, 1], [1, 2]], d: [[0, 2], [1, 2]], e: [[0, 1], [0, 2]], f: [[0, 0], [0, 1]], g: [[0, 1], [1, 1]] };
+const DIG = { 0: 'abcdef', 1: 'bc', 2: 'abged', 3: 'abgcd', 4: 'fgbc', 5: 'afgcd', 6: 'afgedc', 7: 'abc', 8: 'abcdefg', 9: 'abcdfg' };
+// 单线数字（七段）：刻线而不是文字，机器那边不需要字体
+function digits(str, x, y, h = 3) {
+  const w = h * 0.5, out = [];
+  [...str].forEach((ch, i) => { const shift = ch === '1' ? -0.5 : 0; for (const s of DIG[ch]) out.push(SEG[s].map(([u, v]) => [x + i * (w + h * 0.3) + (u + shift) * w, y + v * h / 2])); });
+  return out;
+}
+function combModel() {
+  const H = 22, D = 10, P = [[0, 0]];
+  SLOTS.forEach((w, i) => { const cx = 6 + i * 9; P.push([cx - w / 2, 0], [cx - w / 2, D], [cx + w / 2, D], [cx + w / 2, 0]); });
+  P.push([102, 0], [102, H], [0, H]);
+  const comb = P.map(([x, y]) => [x + 4, y + 4]);
+  const squares = Array.from({ length: 10 }, (_, i) => { const x = 4 + i * 12, y = 30; return [[x, y], [x + 10, y], [x + 10, y + 10], [x, y + 10]]; });
+  const labels = SLOTS.flatMap((w, i) => digits(String(Math.round(w * 100)), 4 + 6 + i * 9 - 3.15, 4 + 13));
+  return { comb, squares, labels };
+}
+let CUT = null;
+function comb() {
+  const m = combModel(), k2 = K / 2;
+  const comb = offsetPoly(m.comb, k2), squares = m.squares.map(q => offsetPoly(q, k2));
+  // 模拟切割：激光沿路径中心走，每边烧掉 k/2，相当于再向内收 k/2
+  const cutComb = offsetPoly(comb, -k2), cutSq = squares.map(q => offsetPoly(q, -k2));
+  const slotW = P => { const out = []; for (let i = 1; i + 3 < P.length - 3; i += 4) out.push(P[i + 3][0] - P[i][0]); return out; };
+  const fileW = slotW(comb), cutW = slotW(cutComb);
+  const sqFile = squares[0][1][0] - squares[0][0][0], sqCut = cutSq[0][1][0] - cutSq[0][0][0];
+  const maxErr = Math.max(...cutW.map((v, i) => Math.abs(v - SLOTS[i])), Math.abs(sqCut - 10));
+  $('combt').innerHTML = '<tr><th>尺寸</th><th>设计</th><th>文件里（补偿后）</th><th>切出来（模拟）</th></tr>' +
+    [0, 5, 10].map(i => `<tr><td>槽 ${i + 1}</td><td class="num">${fmt(SLOTS[i])}</td><td class="num">${fmt(fileW[i], 3)}</td><td class="num">${fmt(cutW[i], 3)}</td></tr>`).join('') +
+    `<tr><td>试片边长</td><td class="num">10.00</td><td class="num">${fmt(sqFile, 3)}</td><td class="num">${fmt(sqCut, 3)}</td></tr>`;
+  const cutLen = plen(comb) + squares.reduce((s, q) => s + plen(q), 0), scoreLen = m.labels.reduce((s, l) => s + plen(l, false), 0);
+  $('mcomb').innerHTML = `槽宽从 ${fmt(SLOTS[0])} 到 ${fmt(SLOTS[10])} 毫米，每档 0.05；刻的数字是槽宽的百分之一毫米。文件里槽比设计窄 k、试片比设计大 k，模拟切割后全部回到设计值，最大误差 ${maxErr.toExponential(1)} 毫米 ${ok(maxErr < 1e-6)}。用法：切好后把材料依次插进各槽，能插进、插紧后不晃的那一档就是正式零件的槽宽；再并排量十块试片核对切缝。切割线 ${fmt(cutLen, 0)} 毫米、刻线 ${fmt(scoreLen, 0)} 毫米。`;
+  const svg = buildSVG({ w: 130, h: 44, cut: [comb, ...squares], score: m.labels, desc: `16-11 校准件；切缝 ${fmt(K, 3)} 毫米（已补偿 k/2）；材料实测 ${fmt(TH)} 毫米；槽宽 ${SLOTS.join('/')} 毫米` });
+  CUT = { svg, comb, squares, labels: m.labels };
+  $('combPrev').innerHTML = `<g fill="none" stroke="#0057d9" stroke-width="0.2">${m.labels.map(l => `<path d="${dOf(l, false)}"/>`).join('')}</g><g fill="none" stroke="#d00" stroke-width="0.25">${[comb, ...squares].map(p => `<path d="${dOf(p)}"/>`).join('')}</g>`;
+  $('combinfo').textContent = `130 × 44 毫米；红色切割、蓝色刻线`;
+  R.comb = { fileW, cutW, sqFile, sqCut, maxErr, cutLen, scoreLen };
+}
+function buildSVG({ w, h, cut, score, desc }) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}mm" height="${h}mm" viewBox="0 0 ${w} ${h}">\n<desc>${esc(desc)}</desc>\n` +
+    `<g id="score" fill="none" stroke="#0000ff" stroke-width="0.05">\n${score.map(l => `<path d="${dOf(l, false)}"/>`).join('\n')}\n</g>\n` +
+    `<g id="cut" fill="none" stroke="#ff0000" stroke-width="0.05">\n${cut.map(p => `<path d="${dOf(p)}"/>`).join('\n')}\n</g>\n</svg>`;
+}
+function download(name, text, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
+$('dlcomb').addEventListener('click', () => download('16-11-校准件.svg', CUT.svg, 'image/svg+xml'));
+
+// ---------- 4 可切割文件检查 ----------
+const SHEET = { w: 200, h: 120 }, MIN_WEB = 1.5;
+const draft = `<svg xmlns="http://www.w3.org/2000/svg" width="756" height="454" viewBox="0 0 200 120">
+<path d="M10 10 L90 10 L90 50 L10 50 Z" fill="#222" stroke="#000" stroke-width="1"/>
+<path d="M30 20 L70 20 L70 23 L30 23 Z" fill="#222" stroke="#000" stroke-width="1"/>
+<rect x="83" y="30" width="6" height="6" fill="#222" stroke="#000" stroke-width="1"/>
+<path d="M90 10 L170 10 L170 50 L90 50 Z" fill="#222" stroke="#000" stroke-width="1"/>
+<path d="M10 60 L60 60 L60 100 L10 100" fill="none" stroke="#000" stroke-width="1"/>
+<path d="M150 66 L210 66 L210 106 L150 106 Z" fill="#222" stroke="#000" stroke-width="1"/>
+<text x="20" y="44" font-size="6" fill="#00f">v1</text>
+</svg>`;
+function fixedSVG() {
+  const k2 = K / 2, o = p => offsetPoly(p, k2), h = p => offsetPoly(p, -k2);
+  const slotA = h([[30, 20], [70, 20], [70, 20 + TH], [30, 20 + TH]]), holeA = h([[80, 30], [86, 30], [86, 36], [80, 36]]);
+  const A = o([[10, 10], [90, 10], [90, 50], [10, 50]]), B = o([[93, 10], [173, 10], [173, 50], [93, 50]]);
+  const C = o([[10, 60], [60, 60], [60, 100], [10, 100]]), D = o([[130, 66], [190, 66], [190, 106], [130, 106]]);
+  return buildSVG({ w: SHEET.w, h: SHEET.h, cut: [slotA, holeA, A, B, C, D], score: digits('2', 20, 38, 5), desc: `16-11 支架 第 2 版；切缝 ${fmt(K, 3)} 毫米（已补偿）；材料实测 ${fmt(TH)} 毫米；槽宽 = 实测厚度` });
+}
+// 解析 SVG：只支持本页用到的 path（M/L/Z 绝对坐标）、rect、text
+function parseSVG(text) {
+  const doc = new DOMParser().parseFromString(text, 'image/svg+xml'), root = doc.documentElement;
+  const vb = (root.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number);
+  const items = [];
+  const walk = el => {
+    for (const c of el.children) {
+      const tag = c.tagName, st = n => { for (let e = c; e && e !== root.parentNode; e = e.parentNode) { const v = e.getAttribute && e.getAttribute(n); if (v != null) return v; } return null; };
+      const base = { tag, stroke: (st('stroke') || 'none').toLowerCase(), fill: (st('fill') || '#000').toLowerCase(), sw: Number(st('stroke-width') || 1), idx: items.length };
+      if (tag === 'g') { walk(c); continue; }
+      if (tag === 'path') {
+        const d = c.getAttribute('d'), closed = /z\s*$/i.test(d), pts = d.replace(/[MLZ]/gi, ' ').trim().split(/\s+/).map(Number), P = [];
+        for (let i = 0; i < pts.length; i += 2) P.push([pts[i], pts[i + 1]]);
+        items.push({ ...base, P, closed });
+      } else if (tag === 'rect') {
+        const x = +c.getAttribute('x'), y = +c.getAttribute('y'), w = +c.getAttribute('width'), h = +c.getAttribute('height');
+        items.push({ ...base, P: [[x, y], [x + w, y], [x + w, y + h], [x, y + h]], closed: true });
+      } else if (tag === 'text') items.push({ ...base, text: c.textContent, P: [[+c.getAttribute('x'), +c.getAttribute('y')]], closed: false });
+    }
+  };
+  walk(root);
+  return { w: root.getAttribute('width'), h: root.getAttribute('height'), vb, items, desc: (doc.querySelector('desc') || {}).textContent || '' };
+}
+const COLORS = { cut: ['#ff0000', 'red'], score: ['#0000ff', 'blue'] };
+function check(text) {
+  const f = parseSVG(text), shapes = f.items.filter(i => i.tag !== 'text');
+  const isCut = i => !COLORS.score.includes(i.stroke), cutItems = shapes.filter(isCut), out = [];
+  const mm = s => /mm$/.test(s || ''), num = s => parseFloat(s);
+  const add = (key, name, bad, where, rule) => out.push({ key, name, bad, where, rule });
+  add('unit', '单位写明毫米，坐标 1 单位 = 1 毫米', mm(f.w) && mm(f.h) && num(f.w) === f.vb[2] && num(f.h) === f.vb[3] ? [] : [`width="${f.w}"`], [], '根元素 width/height 带 mm，且与 viewBox 一致');
+  add('fill', '只有线条，没有填充', shapes.filter(i => i.fill !== 'none').map(i => i.idx), shapes.filter(i => i.fill !== 'none'), '填充会被当成扫描雕刻，整块烧一遍');
+  add('color', '颜色符合约定（红切、蓝刻）', shapes.filter(i => ![...COLORS.cut, ...COLORS.score].includes(i.stroke)).map(i => i.idx), shapes.filter(i => ![...COLORS.cut, ...COLORS.score].includes(i.stroke)), '以本工坊约定为例，各地规定不同');
+  add('width', '线宽 ≤ 0.1 毫米', shapes.filter(i => i.sw > 0.1).map(i => i.idx), shapes.filter(i => i.sw > 0.1), '粗线可能被识别为雕刻或切两遍');
+  const segs = cutItems.flatMap(i => segsOf(i.P, i.closed).map(s => ({ s, i: i.idx }))), dups = [];
+  for (let a = 0; a < segs.length; a++) for (let b = a + 1; b < segs.length; b++) {
+    const [p, q] = segs[a].s, [u, v] = segs[b].s, r = [q[0] - p[0], q[1] - p[1]];
+    if (segs[a].i === segs[b].i || Math.abs(cross(r, [u[0] - p[0], u[1] - p[1]])) > 1e-6 || Math.abs(cross(r, [v[0] - p[0], v[1] - p[1]])) > 1e-6) continue;
+    const L = Math.hypot(...r), t = x => ((x[0] - p[0]) * r[0] + (x[1] - p[1]) * r[1]) / L, lo = Math.max(0, Math.min(t(u), t(v))), hi = Math.min(L, Math.max(t(u), t(v)));
+    if (hi - lo > 0.01) dups.push({ a: segs[a].i, b: segs[b].i, len: hi - lo, at: [p[0] + r[0] * (lo + hi) / 2 / L, p[1] + r[1] * (lo + hi) / 2 / L] });
+  }
+  add('dup', '没有重复线', dups.map(d => `${fmt(d.len, 1)} 毫米`), dups.map(d => ({ P: [d.at] })), '两条线重合会切两遍，边缘烧焦');
+  add('open', '切割路径全部闭合', cutItems.filter(i => !i.closed).map(i => i.idx), cutItems.filter(i => !i.closed), '不闭合的轮廓切不下零件');
+  const texts = f.items.filter(i => i.tag === 'text');
+  add('text', '没有未转换的文字', texts.map(t => `“${t.text}”`), texts.map(t => ({ P: [[t.P[0][0] - 7, t.P[0][1] - 2]] })), '机器那台电脑可能没有这个字体；转成路径或用单线字体');
+  const outB = shapes.filter(i => i.P.some(([x, y]) => x < 0 || y < 0 || x > SHEET.w || y > SHEET.h));
+  add('bounds', `全部在材料范围内（${SHEET.w} × ${SHEET.h} 毫米）`, outB.map(i => i.idx), outB, '超出部分切不到，或切到夹具');
+  const closedCut = cutItems.filter(i => i.closed), webs = [];
+  for (const a of closedCut) for (const b of closedCut) {
+    if (a.idx >= b.idx) continue;
+    const d = polyDist(a.P, b.P);
+    if (d <= 1e-6 || d >= MIN_WEB) continue;
+    let best = null;
+    for (const p of a.P) { const e = Math.min(...segsOf(b.P).map(([u, v]) => ptSeg(p, u, v))); if (!best || e < best.e) best = { e, p }; }
+    webs.push({ d, P: [best.p] });
+  }
+  add('web', `最窄处 ≥ ${MIN_WEB} 毫米（孔到边、零件之间）`, webs.map(w => `${fmt(w.d, 2)} 毫米`), webs, '太窄会烧断、变形；本例取 1.5 毫米，以材料实测为准');
+  const order = [];
+  for (const h of closedCut) for (const o of closedCut) if (h !== o && inside(h.P[0], o.P) && h.P.every(p => inside(p, o.P)) && h.idx > o.idx) order.push(h);
+  add('order', '先切内孔，再切外轮廓', order.map(i => i.idx), order, '外轮廓先切下来，零件会移动，内孔就切歪了');
+  add('meta', '文件里记录了参数（切缝、材料、版本）', /切缝/.test(f.desc) && /材料/.test(f.desc) ? [] : ['缺少'], [], '以后能从成品追回生成它的参数');
+  return { f, out };
+}
+function preview(text, res, el) {
+  const MARKED = ['dup', 'open', 'text', 'bounds', 'web', 'order'], marks = [];
+  res.out.forEach((c, ci) => { if (MARKED.includes(c.key)) for (const w of c.where) {
+    const p = w.P.reduce((a, q) => [a[0] + q[0] / w.P.length, a[1] + q[1] / w.P.length], [0, 0]);
+    while (marks.some(m => Math.hypot(m.p[0] - p[0], m.p[1] - p[1]) < 8.5)) p[1] += 9;
+    marks.push({ ci, p });
+  } });
+  const inner = text.replace(/^<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
+  el.innerHTML = `<svg class="sheet" viewBox="-6 -6 ${SHEET.w + 22} ${SHEET.h + 12}"><rect x="0" y="0" width="${SHEET.w}" height="${SHEET.h}" fill="#f7f1e6" stroke="#c9b997" stroke-dasharray="2 2" stroke-width="0.4"/>${inner.replace(/stroke-width="(0\.05)"/g, 'stroke-width="0.5"')}` +
+    marks.map(m => `<g><circle cx="${m.p[0]}" cy="${m.p[1]}" r="4.2" fill="#fff" stroke="#c77700" stroke-width="0.7" opacity="0.92"/><text x="${m.p[0]}" y="${m.p[1] + 1.8}" font-size="5" text-anchor="middle" fill="#7a4a00" font-family="Noto Sans SC">${m.ci + 1}</text></g>`).join('') + '</svg>';
+}
+function checks() {
+  const fixed = fixedSVG(), A = check(draft), B = check(fixed);
+  preview(draft, A, $('prevA')); preview(fixed, B, $('prevB'));
+  $('checks').innerHTML = '<tr><th>#</th><th>检查</th><th>初稿</th><th>修正后</th><th>为什么</th></tr>' + A.out.map((c, i) => {
+    const b = B.out[i], cell = x => x.bad.length ? `<span class="poor">${x.bad.length} 处</span>${typeof x.bad[0] === 'string' ? '：' + x.bad.join('、') : ''}` : '<span class="good">通过</span>';
+    return `<tr><td>${i + 1}</td><td>${c.name}</td><td>${cell(c)}</td><td>${cell(b)}</td><td class="sub">${c.rule}</td></tr>`;
+  }).join('');
+  const nA = A.out.filter(c => c.bad.length).length, nB = B.out.filter(c => c.bad.length).length;
+  $('mchecks').innerHTML = `初稿 ${A.out.length} 项检查有 ${nA} 项不通过，修正后 ${nB} 项。初稿在屏幕上看起来“没问题”：黑色填充的方块、两个零件共用的一条边、没闭合的矩形、超出板材的零件，只有读文件本身才查得出来。修正后：零件间留 3 毫米、孔离边 4 毫米、槽宽按实测厚度、已做切缝补偿、文字改为单线刻线、先内后外。初稿图上的橙色编号对应下表的检查项。`;
+  R.checks = { draft: A.out.map(c => [c.key, c.bad.length]), fixed: B.out.map(c => [c.key, c.bad.length]) };
+}
+
+// ---------- 5 G 代码 ----------
+const FEED = { cut: 600, score: 1500, travel: 3000 };
+function gcode() {
+  const H = 44, paths = [...CUT.labels.map(P => ({ P, closed: false, op: 'score' })), { P: CUT.comb, closed: true, op: 'cut' }, ...CUT.squares.map(P => ({ P, closed: true, op: 'cut' }))];
+  const travel = seq => { let at = [0, 0], d = 0; for (const s of seq) { d += Math.hypot(s.P[0][0] - at[0], s.P[0][1] - at[1]); at = s.closed ? s.P[0] : s.P[s.P.length - 1]; } return d + Math.hypot(at[0], at[1]); };
+  // 先刻后切（零件切下来后可能移动）；同一组里每次走到最近的下一条，开放线可以反着走，闭合轮廓可以从任意顶点开始
+  const order = [];
+  for (const op of ['score', 'cut']) {
+    const rest = paths.filter(p => p.op === op);
+    let at = order.length ? order[order.length - 1].end : [0, 0];
+    while (rest.length) {
+      let best = null;
+      rest.forEach((p, ri) => {
+        const cands = p.closed ? p.P.map((_, vi) => ({ P: [...p.P.slice(vi), ...p.P.slice(0, vi)] })) : [{ P: p.P }, { P: [...p.P].reverse() }];
+        for (const c of cands) { const d = Math.hypot(c.P[0][0] - at[0], c.P[0][1] - at[1]); if (!best || d < best.d) best = { d, ri, P: c.P }; }
+      });
+      const p = rest.splice(best.ri, 1)[0], P = best.P;
+      order.push({ ...p, P, end: p.closed ? P[0] : P[P.length - 1] }); at = order[order.length - 1].end;
+    }
+  }
+  const naive = travel(paths), opt = travel(order);
+  const fy = y => r3(H - y), lines = ['; 16-11 校准件 · GRBL 激光模式 · 单位毫米 · 坐标原点在板材左下角', 'G21 G90', 'M5'];
+  for (const p of order) {
+    lines.push(`G0 X${r3(p.P[0][0])} Y${fy(p.P[0][1])}`, `M4 S${p.op === 'cut' ? 1000 : 300}`);
+    const pts = p.closed ? [...p.P.slice(1), p.P[0]] : p.P.slice(1);
+    pts.forEach((q, i) => lines.push(`G1 X${r3(q[0])} Y${fy(q[1])}${i === 0 ? ` F${FEED[p.op]}` : ''}`));
+    lines.push('M5');
+  }
+  lines.push('G0 X0 Y0', 'M2');
+  const cutL = order.filter(p => p.op === 'cut').reduce((s, p) => s + plen(p.P, true), 0), scoreL = order.filter(p => p.op === 'score').reduce((s, p) => s + plen(p.P, false), 0);
+  const tMin = cutL / FEED.cut + scoreL / FEED.score + opt / FEED.travel, tNaive = cutL / FEED.cut + scoreL / FEED.score + naive / FEED.travel;
+  $('gstat').innerHTML = '<tr><th></th><th>按文件里的顺序</th><th>先刻后切，每次走到最近的下一条</th></tr>' +
+    `<tr><th>空走距离</th><td class="num">${fmt(naive, 0)} 毫米</td><td class="num">${fmt(opt, 0)} 毫米</td></tr>` +
+    `<tr><th>估计时间</th><td class="num">${fmt(tNaive * 60, 0)} 秒</td><td class="num">${fmt(tMin * 60, 0)} 秒</td></tr>`;
+  const head = lines.slice(0, 12);
+  $('gcode').textContent = head.join('\n') + `\n……（共 ${lines.length} 行）`;
+  $('mg').innerHTML = `空走从 ${fmt(naive, 0)} 减到 ${fmt(opt, 0)} 毫米（少 ${fmt((1 - opt / naive) * 100, 0)}%），这一小件总时间只差 ${fmt((tNaive - tMin) * 60, 0)} 秒，因为切割本身占了大头；零件越多、越分散，顺序的影响越大。每段刻线都单独开关一次激光，把首尾相接的线段连成一条能减少开关次数。坐标方向：SVG 的 y 向下、多数机器的 y 向上，导出时换算为 Y = ${H} − y，否则零件上下颠倒。切割 ${fmt(cutL, 0)} 毫米、刻线 ${fmt(scoreL, 0)} 毫米；速度按 切割 ${FEED.cut}、刻线 ${FEED.score}、空走 ${FEED.travel} 毫米/分钟 估算（<b>假设值</b>，实际速度与功率由设备和材料测试决定，加减速还会让时间更长）。很多激光机由厂商软件读 SVG 或 DXF，不直接收 G 代码；用 GRBL 控制器（激光模式 $32=1）的设备可以经 Web Serial 一行一行发送，每行等到“ok”再发下一行。`;
+  $('dlgcode').onclick = () => download('16-11-校准件.gcode', lines.join('\n'), 'text/plain');
+  R.g = { lines: lines.length, naive, opt, cutL, scoreL, tMin, tNaive, first: lines[3] };
+}
+$('devices').innerHTML = '<tr><th>设备</th><th>常用文件</th><th>要注意</th></tr>' + [
+  ['激光切割机', 'SVG、DXF、PDF（矢量）', '切缝补偿、颜色分层、先内后外、材料是否允许'],
+  ['笔式绘图仪', 'SVG；或 G 代码、HPGL', '单线字体、笔宽、抬笔次数与空走'],
+  ['刻字机（乙烯基）', 'SVG、DXF', '刀尖偏移、最小字号、除废难度'],
+  ['数控雕刻机（CNC）', 'CAM 软件生成的 G 代码', '刀具半径补偿；内角无法比刀具半径更尖；夹具'],
+  ['3D 打印机', 'STL、3MF → 切片软件 → G 代码', '层高、悬垂、收缩；打出来的孔通常偏小'],
+  ['传感与执行（实体计算）', '微控制器程序；页面经 Web Serial／WebHID 通信', '电压与电流、接线、校准与对时']
+].map(r => `<tr><th>${r[0]}</th><td>${r[1]}</td><td class="sub">${r[2]}</td></tr>`).join('');
+
+function all() { kerf(); comb(); checks(); gcode(); window.__fab = R; }
+$('L').addEventListener('input', all); $('T').addEventListener('input', all);
+document.fonts.ready.then(all);
+Promise.all([document.fonts.ready, ...[...document.images].map(i => i.decode ? i.decode().catch(() => {}) : null)]).then(() => { units(); if (!R.g) all(); window.__fab = R; window.__fabReady = true; });
+</script>
+</body>
+</html>
