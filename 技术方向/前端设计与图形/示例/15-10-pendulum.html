@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>交互解释：单摆的小角度近似什么时候失效</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --real: #2f6fdb; --approx: #c0392b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { max-width: 1140px; display: grid; grid-template-columns: 380px minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: grid; gap: 6px; align-content: start; }
+  h2 { font-size: 13.5px; margin: 0; } h3 { font-size: 12.5px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .q { background: #eef3ff; border-radius: 8px; padding: 6px 10px; font-size: 13px; } .q b { color: #2456b0; }
+  label.s { display: grid; grid-template-columns: 70px 1fr 64px; align-items: center; gap: 6px; font-size: 12px; } label.s input { width: 100%; } label.s output { font-variant-numeric: tabular-nums; text-align: right; }
+  canvas { width: 100%; height: auto; display: block; border-radius: 6px; background: #fbfbfa; }
+  svg { display: block; width: 100%; height: auto; font: 10px "Noto Sans SC", sans-serif; } .axis text { fill: #5b6475; } .axis path, .axis line { stroke: #c3c9d3; }
+  .tag { display: inline-block; font-size: 10.5px; padding: 0 5px; border-radius: 3px; margin-right: 3px; white-space: nowrap; }
+  .tag.real { background: #eef3ff; color: #2456b0; } .tag.approx { background: #fbe4dd; color: #8a1c14; } .tag.ill { background: #f1f2f4; color: #5b6475; }
+  button { font: inherit; font-size: 12px; border: 1px solid var(--line); background: #fff; border-radius: 4px; padding: 0 10px; cursor: pointer; } button.pick { background: var(--ink); color: #fff; }
+  .opts { display: flex; gap: 6px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="q"><b>学习问题</b>：课本上的周期公式 T₀ = 2π√(L／g) 假设摆角很小。摆角多大时，它的误差会超过 1%？</div>
+    <label class="s">摆长 L <input id="L" type="range" min="0.2" max="2" step="0.1" value="1"><output id="Lo"></output></label>
+    <label class="s">初始摆角 θ₀ <input id="A" type="range" min="1" max="170" step="1" value="60"><output id="Ao"></output></label>
+    <label class="s">重力 g <select id="g"><option value="9.81">地球 9.81</option><option value="1.62">月球 1.62</option></select><output>m／s²</output></label>
+    <canvas id="anim" width="720" height="440"></canvas>
+    <div class="opts"><button id="play">暂停</button><span class="sub" id="clock"></span></div>
+    <p class="sub"><span class="tag real">真实计算</span>蓝色摆：数值积分 θ″ = −(g／L) sin θ　<span class="tag approx">近似模型</span>红色虚线摆：θ″ = −(g／L) θ　<span class="tag ill">仅用于示意</span>摆球大小、轨迹淡出效果</p>
+  </div>
+  <div class="card">
+    <h3>周期比 T ／ T₀ 随摆角的变化 <span class="tag real">真实计算</span></h3><svg id="ratio" viewBox="0 0 360 200"></svg><p class="m" id="mratio"></p>
+    <h3>摆角随时间（θ₀ 与 L 按左侧设置）</h3><svg id="ts" viewBox="0 0 360 170"></svg><p class="m" id="mts"></p>
+  </div>
+  <div class="card">
+    <h3>数值核验：两种独立的算法应当一致</h3><table id="ver"></table><table id="conv"></table>
+    <h3>坐标、单位与假设</h3><table id="meta"></table>
+    <h3>先预测，再看结果</h3><p class="m">摆长不变，摆角从 10° 加到 60°，周期会怎样？</p><div class="opts" id="pred"></div><p class="m" id="predOut"></p>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const deg = Math.PI / 180;
+// ---------- 三种算法 ----------
+function agm(a, b) { for (let i = 0; i < 30 && Math.abs(a - b) > 1e-15; i++) [a, b] = [(a + b) / 2, Math.sqrt(a * b)]; return a; }
+const K = k => Math.PI / (2 * agm(1, Math.sqrt(1 - k * k)));   // 第一类完全椭圆积分（算术—几何平均法）
+const Texact = (L, g, a) => 4 * Math.sqrt(L / g) * K(Math.sin(a / 2));
+const T0 = (L, g) => 2 * Math.PI * Math.sqrt(L / g);
+function rk4(f, y, h) { const k1 = f(y), k2 = f(y.map((v, i) => v + h / 2 * k1[i])), k3 = f(y.map((v, i) => v + h / 2 * k2[i])), k4 = f(y.map((v, i) => v + h * k3[i])); return y.map((v, i) => v + h / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i])); }
+function Tnumeric(L, g, a, h) {   // 从最大摆角释放，找第一次经过最低点（θ = 0）的时刻，即四分之一周期
+  const f = ([th, w]) => [w, -g / L * Math.sin(th)]; let y = [a, 0], t = 0;
+  for (let n = 0; n < 1e7; n++) {
+    const ny = rk4(f, y, h);
+    if (y[0] > 0 && ny[0] <= 0) {   // 用三次 Hermite 插值（同时用到 θ 与 ω）求过零时刻，误差与 RK4 同阶
+      const p = u => (2 * u ** 3 - 3 * u ** 2 + 1) * y[0] + (u ** 3 - 2 * u ** 2 + u) * h * y[1] + (-2 * u ** 3 + 3 * u ** 2) * ny[0] + (u ** 3 - u ** 2) * h * ny[1];
+      const dp = u => (6 * u ** 2 - 6 * u) * y[0] + (3 * u ** 2 - 4 * u + 1) * h * y[1] + (-6 * u ** 2 + 6 * u) * ny[0] + (3 * u ** 2 - 2 * u) * h * ny[1];
+      let u = y[0] / (y[0] - ny[0]); for (let k = 0; k < 20; k++) u -= p(u) / dp(u);
+      return 4 * (t + u * h);
+    }
+    y = ny; t += h;
+  }
+}
+// ---------- 状态 ----------
+const S = { L: 1, a: 60 * deg, g: 9.81, t: 0, play: true };
+const read = () => { S.L = +$('L').value; S.a = +$('A').value * deg; S.g = +$('g').value; $('Lo').textContent = S.L.toFixed(1) + ' m'; $('Ao').textContent = $('A').value + '°'; };
+// 1% 的界限：二分法求 T／T₀ = 1.01 的摆角（与 L、g 无关）
+let lo = 1 * deg, hi = 90 * deg; for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; (1 - T0(1, 9.81) / Texact(1, 9.81, m) > 0.01 ? hi = m : lo = m); }   // 误差按真实周期计：(T − T₀) ／ T
+const LIMIT = lo / deg;
+// ---------- 周期比曲线 ----------
+const RW = 360, RH = 200, RM = { t: 8, r: 10, b: 22, l: 36 }, rx = d3.scaleLinear([0, 170], [RM.l, RW - RM.r]), ry = d3.scaleLinear([1, 2.2], [RH - RM.b, RM.t]);
+const rs = d3.select('#ratio');
+rs.append('path').attr('d', d3.line().x(d => rx(d)).y(d => ry(Texact(1, 9.81, d * deg) / T0(1, 9.81)))(d3.range(0, 171, 1))).attr('fill', 'none').attr('stroke', 'var(--real)').attr('stroke-width', 2);
+rs.append('line').attr('x1', RM.l).attr('x2', RW - RM.r).attr('y1', ry(1 / 0.99)).attr('y2', ry(1 / 0.99)).attr('stroke', '#a15c00').attr('stroke-dasharray', '4 3');
+rs.append('line').attr('x1', rx(LIMIT)).attr('x2', rx(LIMIT)).attr('y1', ry(1)).attr('y2', ry(1.2)).attr('stroke', '#a15c00');
+rs.append('text').attr('x', rx(LIMIT) + 6).attr('y', ry(1.16)).attr('fill', '#a15c00').text(`误差 1%：${LIMIT.toFixed(1)}°`);
+rs.append('g').attr('class', 'axis').attr('transform', `translate(0,${RH - RM.b})`).call(d3.axisBottom(rx).ticks(6).tickFormat(d => d + '°'));
+rs.append('g').attr('class', 'axis').attr('transform', `translate(${RM.l},0)`).call(d3.axisLeft(ry).ticks(5));
+const cur = rs.append('circle').attr('r', 4.5).attr('fill', 'var(--real)').attr('stroke', '#fff');
+// ---------- 时间序列 ----------
+const TW = 360, TH = 170, TM = { t: 8, r: 10, b: 22, l: 36 }, tx = d3.scaleLinear([0, 10], [TM.l, TW - TM.r]);
+const tsv = d3.select('#ts'), tyAxis = tsv.append('g').attr('class', 'axis').attr('transform', `translate(${TM.l},0)`), pReal = tsv.append('path').attr('fill', 'none').attr('stroke', 'var(--real)').attr('stroke-width', 1.8), pLin = tsv.append('path').attr('fill', 'none').attr('stroke', 'var(--approx)').attr('stroke-width', 1.4).attr('stroke-dasharray', '4 3');
+tsv.append('g').attr('class', 'axis').attr('transform', `translate(0,${TH - TM.b})`).call(d3.axisBottom(tx).ticks(5).tickFormat(d => d + ' s'));
+let series = null;
+function simulate() {
+  const h = 0.002, n = Math.round(10 / h), f = ([th, w]) => [w, -S.g / S.L * Math.sin(th)], om = Math.sqrt(S.g / S.L);
+  let y = [S.a, 0]; const out = [];
+  for (let i = 0; i <= n; i++) { if (i % 5 === 0) out.push([i * h, y[0], S.a * Math.cos(om * i * h)]); y = rk4(f, y, h); }
+  return out;
+}
+function update() {
+  read(); series = simulate();
+  const ty = d3.scaleLinear([-S.a, S.a].map(v => v / deg * 1.05), [TH - TM.b, TM.t]);
+  tyAxis.call(d3.axisLeft(ty).ticks(5).tickFormat(d => d + '°'));
+  pReal.attr('d', d3.line().x(d => tx(d[0])).y(d => ty(d[1] / deg))(series)); pLin.attr('d', d3.line().x(d => tx(d[0])).y(d => ty(d[2] / deg))(series));
+  const Te = Texact(S.L, S.g, S.a), T0v = T0(S.L, S.g), err = 1 - T0v / Te;
+  cur.attr('cx', rx(S.a / deg)).attr('cy', ry(Te / T0v));
+  $('mratio').innerHTML = `当前 θ₀ = ${(S.a / deg).toFixed(0)}°：精确周期 ${Te.toFixed(3)} s，近似公式 ${T0v.toFixed(3)} s，近似公式<b class="${err > 0.01 ? 'poor' : 'good'}">偏小 ${(100 * err).toFixed(2)}%</b>。曲线与 L、g 无关；摆角超过 <b>${LIMIT.toFixed(1)}°</b> 后误差超过 1%。`;
+  const lag = series.at(-1), drift = 10 / T0v - 10 / Te;
+  $('mts').innerHTML = `蓝：数值积分；红色虚线：线性近似 θ₀ cos(√(g／L) t)。10 秒内近似模型多摆了 <b>${drift.toFixed(2)}</b> 个周期，两条线越走越错开。`;
+  S.t = 0; return { Te, T0v, err, drift };
+}
+// ---------- 动画 ----------
+const cv = $('anim'), g2 = cv.getContext('2d'), trail = [];
+function stateAt(t) { const i = Math.min(series.length - 1, Math.round(t / 0.01)); return series[i]; }
+function drawPendulum(t) {
+  const [, th, thl] = stateAt(t), W = cv.width, H = cv.height, ox = W / 2, oy = 40, len = (H - 80) * S.L / 2;
+  g2.clearRect(0, 0, W, H);
+  g2.strokeStyle = '#c3c9d3'; g2.lineWidth = 2; g2.beginPath(); g2.moveTo(ox - 80, oy); g2.lineTo(ox + 80, oy); g2.stroke();
+  g2.setLineDash([4, 6]); g2.strokeStyle = '#dde1e7'; g2.beginPath(); g2.moveTo(ox, oy); g2.lineTo(ox, oy + len + 30); g2.stroke(); g2.setLineDash([]);
+  const pos = a => [ox + len * Math.sin(a), oy + len * Math.cos(a)];
+  trail.push(pos(th)); if (trail.length > 40) trail.shift();
+  trail.forEach((p, i) => { g2.fillStyle = `rgba(47,111,219,${i / 120})`; g2.beginPath(); g2.arc(p[0], p[1], 6, 0, 7); g2.fill(); });
+  const [lx, ly] = pos(thl); g2.setLineDash([6, 4]); g2.strokeStyle = '#c0392b'; g2.lineWidth = 2; g2.beginPath(); g2.moveTo(ox, oy); g2.lineTo(lx, ly); g2.stroke(); g2.setLineDash([]); g2.beginPath(); g2.arc(lx, ly, 14, 0, 7); g2.stroke();
+  const [bx, by] = pos(th); g2.strokeStyle = '#1d2330'; g2.lineWidth = 2; g2.beginPath(); g2.moveTo(ox, oy); g2.lineTo(bx, by); g2.stroke(); g2.fillStyle = '#2f6fdb'; g2.beginPath(); g2.arc(bx, by, 14, 0, 7); g2.fill();
+  g2.font = '24px "Noto Sans SC"'; g2.fillStyle = '#2f6fdb'; g2.fillText(`数值积分 θ = ${(th / deg).toFixed(1)}°`, 16, H - 46); g2.fillStyle = '#c0392b'; g2.fillText(`线性近似 θ = ${(thl / deg).toFixed(1)}°`, 16, H - 16);
+  $('clock').textContent = `t = ${t.toFixed(2)} s（按真实时间播放；画面中摆长按 L 等比缩放）`;
+}
+let last = null;
+function loop(now) { if (S.play && last !== null) S.t = (S.t + (now - last) / 1000) % 10; last = now; drawPendulum(S.t); requestAnimationFrame(loop); }
+$('play').onclick = () => { S.play = !S.play; $('play').textContent = S.play ? '暂停' : '继续'; };
+['L', 'A', 'g'].forEach(id => $(id).oninput = () => { trail.length = 0; update(); });
+// ---------- 核验 ----------
+const VER = [10, 30, 60, 90, 120, 160].map(a => { const te = Texact(1, 9.81, a * deg), tn = Tnumeric(1, 9.81, a * deg, 1e-3); return { a, te, tn, rel: Math.abs(tn - te) / te, approx: 1 - T0(1, 9.81) / te }; });
+$('ver').innerHTML = '<tr><th>θ₀</th><th>椭圆积分公式</th><th>RK4 积分（步长 0.001 s）</th><th>相对差</th><th>近似公式偏小</th></tr>' + VER.map(v => `<tr><td class="num">${v.a}°</td><td class="num">${v.te.toFixed(6)} s</td><td class="num">${v.tn.toFixed(6)} s</td><td class="num good">${v.rel.toExponential(1)}</td><td class="num ${Math.abs(v.approx) > 0.01 ? 'poor' : 'good'}">${(100 * v.approx).toFixed(2)}%</td></tr>`).join('');
+const CONV = [0.04, 0.02, 0.01].map(h => ({ h, e: Math.abs(Tnumeric(1, 9.81, 120 * deg, h) - Texact(1, 9.81, 120 * deg)) }));
+$('conv').innerHTML = '<tr><th>步长（θ₀ = 120°）</th><th>误差</th><th>步长减半，误差缩小</th></tr>' + CONV.map((c, i) => `<tr><td class="num">${c.h} s</td><td class="num">${c.e.toExponential(2)} s</td><td class="num">${i ? (CONV[i - 1].e / c.e).toFixed(1) + ' 倍' : '—'}</td></tr>`).join('') + '<tr><td colspan="3" class="sub">RK4 是四阶方法，步长减半误差应缩小约 2⁴ = 16 倍；过零时刻用同样是四阶精度的三次 Hermite 插值求出。两种独立算法一致、误差随步长按预期缩小，才能相信图上的曲线。</td></tr>';
+$('meta').innerHTML = [['坐标', 'θ 从竖直向下量起，向右为正'], ['单位', '长度 m，时间 s，角度在界面上用度、计算用弧度'], ['假设', '质点、细绳不可伸长、无空气阻力与摩擦、g 为常数'], ['模型', '<span class="tag real">真实计算</span>非线性方程的数值解与椭圆积分　<span class="tag approx">近似模型</span>sin θ ≈ θ']].map(r => `<tr><th style="width:42px">${r[0]}</th><td>${r[1]}</td></tr>`).join('');
+// 预测题
+const OPTS = [['几乎不变', 0], ['变长约 7%', 1], ['变长约 50%', 2]], ANS = Texact(1, 9.81, 60 * deg) / Texact(1, 9.81, 10 * deg) - 1, PRED = [];
+$('pred').innerHTML = OPTS.map(([t, k]) => `<button data-k="${k}">${t}</button>`).join('');
+$('pred').onclick = e => { const k = e.target.dataset.k; if (k === undefined) return; $('pred').querySelectorAll('button').forEach(b => b.classList.toggle('pick', b === e.target)); PRED.push(+k); $('predOut').innerHTML = `实际：变长 <b>${(100 * ANS).toFixed(1)}%</b>（${Texact(1, 9.81, 10 * deg).toFixed(3)} → ${Texact(1, 9.81, 60 * deg).toFixed(3)} s）。${+k === 1 ? '<span class="good">预测正确。</span>' : '<span class="poor">和预测不同：</span>想一想 sin θ 与 θ 在 60° 时差多少（0.866 对 1.047）。'}请用一句话说明为什么摆角大时周期变长。`; };
+const first = update();
+window.__pd = { limit: +LIMIT.toFixed(2), ver: VER.map(v => [v.a, +v.te.toFixed(6), +v.tn.toFixed(6), +v.rel.toExponential(1), +(100 * v.approx).toFixed(2)]), conv: CONV.map(c => [c.h, +c.e.toExponential(2)]), first: { Te: +first.Te.toFixed(4), T0: +first.T0v.toFixed(4), err: +(100 * first.err).toFixed(2), drift: +first.drift.toFixed(3) }, ans: +(100 * ANS).toFixed(2), pause: t => { S.play = false; $('play').textContent = '继续'; S.t = t; trail.length = 0; for (let i = 40; i > 0; i--) drawPendulum(Math.max(0, t - i * 0.02)); drawPendulum(t); }, preds: PRED };
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
