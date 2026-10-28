@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>信任与权限：界面说的与系统做的是否一致</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 4px 0 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .col { display: grid; gap: 6px; align-content: start; }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 12px; display: grid; gap: 4px; }
+  .card.bad { border-color: #e7b7b2; } .card.okc { border-color: #a9d3b8; }
+  .card .t { font-weight: 700; font-size: 12.5px; }
+  .warnbox { background: #fdf6e7; border: 1px solid #ecd9b0; border-radius: 6px; padding: 3px 8px; }
+  .row { display: flex; gap: 6px; align-items: baseline; } .row .src { margin-left: auto; color: var(--muted); font-size: 11px; }
+  svg { width: 100%; height: auto; display: block; }
+  .sw { display: inline-block; width: 26px; height: 14px; border-radius: 7px; background: #b9c3d3; position: relative; vertical-align: -2px; } .sw.on { background: #2f6fdb; } .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: #fff; } .sw.on::after { left: 14px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div class="col"><h2>1 谁能访问“期中报告”：界面说的与权限系统算出的</h2>
+      <p class="sub">文件放在林晓的文件夹“第 3 组项目”里；文件夹共享给群组“第 3 组”（可编辑）和李老师（可评论）；上周周舟打开了“校内知道链接的人可查看”。人与设置都为演示而虚构。</p>
+      <div class="two"><div class="card bad" id="uiA"></div><div class="card okc" id="uiB"></div></div>
+      <table id="who"></table><p class="m" id="mwho"></p></div>
+    <div class="col"><h2>2 数据用途：说明里写的与功能实际做的</h2>
+      <p class="sub">“学习报告”功能的数据流清单来自它的代码与配置（为演示而虚构）。程序把说明里列出的用途与清单逐条对照。</p>
+      <div class="two"><div class="card bad" id="duA"></div><div class="card okc" id="duB"></div></div>
+      <table id="flows"></table><p class="m" id="mflows"></p></div>
+  </div>
+</section>
+<section class="panel">
+  <h2>3 操作范围与可逆性：什么时候直接做并给撤销，什么时候先预览、再确认</h2>
+  <div class="two">
+    <div class="col"><svg id="matrix" viewBox="0 0 540 300"></svg></div>
+    <div class="col"><table id="acts"></table><p class="m" id="macts"></p></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ok = (b, y = '✓', n = '✗') => b ? `<span class="good">${y}</span>` : `<span class="poor">${n}</span>`;
+const R = {};
+
+// ---------- 1 权限：文件夹继承、群组、链接 ----------
+const ROLE_RANK = { 查看: 1, 评论: 2, 编辑: 3, 所有者: 4 };
+const GROUPS = { 第3组: ['林晓', '周舟', '陈雨', '王可'] };
+const PEOPLE = { 林晓: { school: true }, 周舟: { school: true }, 陈雨: { school: true }, 王可: { school: true }, 李老师: { school: true }, 赵六: { school: true, note: '同校，不在组里，拿到了链接' }, 张三: { school: false, note: '外校，拿到了链接' } };
+const FOLDER = { name: '第 3 组项目', owner: '林晓', shares: [{ to: 'group:第3组', role: '编辑' }, { to: '李老师', role: '评论' }], link: { scope: 'school', role: '查看', by: '周舟' } };
+const FILE = { name: '期中报告', parent: FOLDER, owner: '林晓', shares: [{ to: '周舟', role: '编辑' }], inherit: true };
+// 权限系统：对一个人，取所有来源中最高的角色，并记下来源
+function effective(file, person) {
+  const srcs = [];
+  const push = (role, via) => srcs.push({ role, via });
+  if (file.owner === person) push('所有者', '文件所有者');
+  for (const s of file.shares) if (s.to === person) push(s.role, '直接共享');
+  if (file.inherit && file.parent) {
+    const f = file.parent;
+    if (f.owner === person) push('所有者', `文件夹“${f.name}”的所有者`);
+    for (const s of f.shares) { if (s.to === person) push(s.role, `文件夹“${f.name}”`); if (s.to.startsWith('group:') && GROUPS[s.to.slice(6)].includes(person)) push(s.role, `文件夹“${f.name}”→ 群组“${s.to.slice(6)}”`); }
+    if (f.link && (f.link.scope === 'anyone' || (f.link.scope === 'school' && PEOPLE[person].school))) push(f.link.role, '知道链接（校内）');
+  }
+  if (!srcs.length) return null;
+  srcs.sort((a, b) => ROLE_RANK[b.role] - ROLE_RANK[a.role]);
+  return { role: srcs[0].role, via: srcs.map(s => s.via) };
+}
+// 初稿界面：只看文件自己的共享设置
+const draftSays = (file, person) => person === file.owner ? '所有者' : (file.shares.find(s => s.to === person) || {}).role || null;
+const rows = Object.keys(PEOPLE).map(p => ({ p, ui: draftSays(FILE, p), real: effective(FILE, p) }));
+const mism = rows.filter(r => (r.ui || null) !== (r.real ? r.real.role : null));
+$('uiA').innerHTML = `<div class="t">初稿：共享设置</div><div class="row">林晓<span class="src">所有者</span></div><div class="row">周舟<span class="src">可编辑</span></div><div class="sub">“仅限指定的人：2 人可以访问”</div>`;
+const real = rows.filter(r => r.real), viaLink = rows.filter(r => r.real && r.real.via.every(v => v.startsWith('知道链接')));
+$('uiB').innerHTML = `<div class="t">修改后：按权限系统显示</div>${real.filter(r => !viaLink.includes(r)).map(r => `<div class="row">${r.p}<span class="src">${r.real.role}·${esc(r.real.via[0].replace(/^文件夹“第 3 组项目”→ /, '').replace(/^文件夹“第 3 组项目”$/, '来自文件夹'))}</span></div>`).join('')}<div class="warnbox">还有：<b>学校里任何拿到链接的人</b>都能查看（周舟上周打开）。<br>停止从文件夹继承：陈雨、王可、李老师将失去访问。</div>`;
+$('who').innerHTML = '<tr><th>这个人</th><th style="white-space:nowrap">初稿界面说</th><th style="white-space:nowrap">实际</th><th>来源</th></tr>' + rows.map(r => { const bad = (r.ui || null) !== (r.real ? r.real.role : null); return `<tr><th>${r.p}${PEOPLE[r.p].note ? `<span class="sub">（${PEOPLE[r.p].note}）</span>` : ''}</th><td class="num">${r.ui || '不能访问'}</td><td class="num ${bad ? 'poor' : ''}">${r.real ? r.real.role : '不能访问'}</td><td class="sub">${r.real ? esc(r.real.via.join('；')) : '—'}</td></tr>`; }).join('');
+$('mwho').innerHTML = `7 个人里，初稿界面对 ${mism.length} 个人说错了（${mism.map(r => r.p).join('、')}）——都是“说能访问的人少了”，这正是最危险的方向。界面不能自己另算一遍权限，而要调用权限系统同一个函数，并显示每个人的来源；共享范围扩大到“链接”时要特别标出。`;
+R.access = { mismatches: mism.map(r => r.p), realCount: real.length };
+
+// ---------- 2 数据用途 ----------
+let OPT = { 推荐: true, 排行: true };
+const FLOWS = () => [
+  { data: '学习记录（看了什么、做了什么题）', use: '生成每周报告', who: '你自己', keep: '2 年', optional: false, on: true },
+  { data: '学习记录', use: '推荐课程', who: '系统', keep: '2 年', optional: true, on: OPT.推荐, key: '推荐' },
+  { data: '每周学习时长', use: '班级排行', who: '同班同学与老师', keep: '本学期', optional: true, on: OPT.排行, key: '排行' },
+  { data: '设备型号与浏览器', use: '统计分析（第三方分析服务，去掉身份）', who: '分析服务商', keep: '14 个月', optional: false, on: true }
+].filter(f => f.on);
+const DRAFT_DISCLOSE = [{ use: '生成每周报告' }];
+const discloseFixed = () => FLOWS().map(f => ({ use: f.use, data: f.data, who: f.who, keep: f.keep, optional: f.optional, key: f.key }));
+const missing = (disc) => FLOWS().filter(f => !disc.some(d => d.use === f.use));
+const mA = missing(DRAFT_DISCLOSE);
+$('duA').innerHTML = `<div class="t">初稿说明</div><div>“我们只用你的学习记录生成每周报告。”</div>`;
+function drawFixed() {
+  const d = discloseFixed();
+  $('duB').innerHTML = `<div class="t">修改后：逐条列出</div>${[{ use: '生成每周报告', who: '你自己', keep: '2 年' }, { use: '推荐课程', who: '系统', keep: '2 年', key: '推荐' }, { use: '班级排行', who: '同班同学与老师', keep: '本学期', key: '排行' }, { use: '统计分析（去掉身份）', who: '第三方分析服务', keep: '14 个月' }].map(x => `<div class="row">${x.use}<span class="src">${x.who}·保存 ${x.keep}${x.key ? ` <span class="sw ${OPT[x.key] ? 'on' : ''}" role="switch" aria-checked="${OPT[x.key]}" aria-label="${x.use}"></span>` : ''}</span></div>`).join('')}`;
+  return d;
+}
+drawFixed();
+// 检查开关是否真的生效：关掉“班级排行”后，数据流里不应再有它
+const before = FLOWS().length; OPT.排行 = false; const afterOff = FLOWS(), stillRank = afterOff.some(f => f.use === '班级排行'); const mB = missing(discloseFixed()); OPT.排行 = true; drawFixed();
+$('flows').innerHTML = '<tr><th>实际的数据流</th><th>给谁看</th><th>初稿说明里有</th><th>修改后有</th></tr>' + FLOWS().map(f => `<tr><td>${esc(f.data)} → ${esc(f.use)}</td><td>${f.who}</td><td>${ok(DRAFT_DISCLOSE.some(d => d.use === f.use), '有', '没有')}</td><td>${ok(true, '有')}</td></tr>`).join('');
+$('mflows').innerHTML = `实际有 ${before} 条数据流，初稿说明只写了 1 条，漏了 ${mA.length} 条：其中“班级排行”会让同班同学看到你的学习时长，影响的不只是你自己。修改后逐条列出用途、谁能看到、保存多久；可选的用途有开关，并且检查了开关真的生效：关掉“班级排行”后数据流剩 ${afterOff.length} 条，排行 ${stillRank ? '<span class="poor">仍在</span>' : '<span class="good">不再出现</span>'}，说明与实际仍然一致（漏 ${mB.length} 条）。`;
+R.data = { flows: before, draftMissing: mA.map(f => f.use), afterOff: afterOff.length, stillRank, fixedMissing: mB.length };
+
+// ---------- 3 范围 × 可逆 ----------
+const SCOPE = ['只影响自己', '影响其他人', '公开或影响全体'], REV = ['可以撤销', '能恢复但费事', '不可逆'];
+const PATTERN = (s, r) => r === 2 ? '预览＋确认＋输入名称或延迟发送' : s === 0 ? (r === 0 ? '直接执行＋撤销' : '直接执行＋说明怎么恢复') : r === 0 ? '预览＋撤销' : '预览＋确认（写清对象与数量）';
+const ACTS = [
+  { n: 1, name: '把消息标为已读', s: 0, r: 0, draft: '确认对话框' },
+  { n: 2, name: '删除自己的草稿（回收站保留 30 天）', s: 0, r: 1, draft: '直接执行＋说明怎么恢复' },
+  { n: 3, name: '把文件移到另一个文件夹（继承的权限会变）', s: 1, r: 0, draft: '直接执行，不提示' },
+  { n: 4, name: '批量修改 120 个文件的共享设置', s: 1, r: 1, draft: '直接执行，不提示' },
+  { n: 5, name: '删除共享文件夹（24 个文件，4 人在用）', s: 1, r: 1, draft: '“确定删除吗？”' },
+  { n: 6, name: '打开“知道链接的人可查看”', s: 2, r: 1, draft: '开关一拨即生效' },
+  { n: 7, name: '永久清空回收站', s: 0, r: 2, draft: '“确定吗？”' },
+  { n: 8, name: '把成绩通知发给全班', s: 2, r: 2, draft: '直接发送' }
+];
+// 初稿的做法是否与建议一致：过度（打扰）、不足（风险）、一致
+const level = p => p.startsWith('直接执行') ? (p.includes('不提示') ? 0 : 1) : p.startsWith('预览＋撤销') ? 2 : p.includes('输入名称') ? 4 : 3;
+const draftLevel = d => d === '确认对话框' ? 3 : d === '直接执行＋说明怎么恢复' ? 1 : d.startsWith('直接') || d.startsWith('开关') ? 0 : d.startsWith('“确定') ? 2 : 1;
+const verdict = a => { const rec = level(PATTERN(a.s, a.r)), dr = draftLevel(a.draft); return Math.abs(rec - dr) < 0.6 ? '一致' : dr > rec ? '过度：打扰' : '不足：有风险'; };
+$('acts').innerHTML = '<tr><th>#</th><th>操作</th><th>初稿</th><th>建议</th><th>判断</th></tr>' + ACTS.map(a => { const v = verdict(a); return `<tr><td>${a.n}</td><td>${a.name}</td><td class="sub">${a.draft}</td><td>${PATTERN(a.s, a.r)}</td><td class="${v === '一致' ? 'good' : v.startsWith('过度') ? 'mid' : 'poor'}">${v}</td></tr>`; }).join('');
+const V = ACTS.map(verdict);
+$('macts').innerHTML = `8 个操作里，初稿 ${V.filter(v => v.startsWith('不足')).length} 个保护不足、${V.filter(v => v.startsWith('过度')).length} 个打扰过度、${V.filter(v => v === '一致').length} 个合适。确认对话框不是越多越好：“标为已读”也要确认，用户很快就会不看就点“确定”，真正危险的那一次也一样。能撤销的操作直接做、给撤销；影响别人或难以恢复的，先预览“会改变什么、影响谁”，确认按钮写出具体的对象和数量；不可逆的，再加一道输入名称或几秒的反悔时间。`;
+R.acts = V;
+(() => {
+  const X = r => 120 + r * 140, Y = s => 232 - s * 85;
+  let s = '';
+  SCOPE.forEach((t, i) => { s += `<text x="110" y="${Y(i) + 4}" text-anchor="end" font-size="11" fill="#5b6475" font-family="Noto Sans SC">${t}</text>`; });
+  REV.forEach((t, i) => { s += `<text x="${X(i) + 70}" y="292" text-anchor="middle" font-size="11" fill="#5b6475" font-family="Noto Sans SC">${t}</text>`; });
+  const col = p => p.startsWith('直接执行') ? '#e3f1e8' : p.startsWith('预览＋撤销') ? '#e8eefb' : p.includes('输入名称') ? '#fbe1de' : '#fff3d6';
+  for (let si = 0; si < 3; si++) for (let ri = 0; ri < 3; ri++) { const p = PATTERN(si, ri); s += `<rect x="${X(ri)}" y="${Y(si) - 40}" width="138" height="83" fill="${col(p)}" stroke="#fff" stroke-width="2"/><text x="${X(ri) + 69}" y="${Y(si) + 32}" text-anchor="middle" font-size="9.5" fill="#5b6475" font-family="Noto Sans SC">${p.length > 14 ? p.slice(0, 13) + '…' : p}</text>`; }
+  const cnt = {};
+  for (const a of ACTS) { const k = a.s + ',' + a.r, j = cnt[k] = (cnt[k] || 0) + 1, v = verdict(a); const cx = X(a.r) + 26 + (j - 1) * 34, cy = Y(a.s) - 8; s += `<circle cx="${cx}" cy="${cy}" r="12" fill="#fff" stroke="${v === '一致' ? '#1f7a4d' : v.startsWith('过度') ? '#c77700' : '#b3261e'}" stroke-width="2.5"/><text x="${cx}" y="${cy + 4}" text-anchor="middle" font-size="11" font-weight="700">${a.n}</text>`; }
+  s += `<text x="0" y="14" font-size="11" fill="#5b6475" font-family="Noto Sans SC">每格是建议的做法；圆圈是表中的操作，边框颜色：绿 一致、橙 过度、红 不足</text>`;
+  $('matrix').innerHTML = s;
+})();
+document.fonts.ready.then(() => { window.__tb = R; });
+</script>
+</body>
+</html>
