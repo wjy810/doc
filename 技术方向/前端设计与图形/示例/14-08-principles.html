@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>设计原则与价值取舍：原则要能解释具体的选择</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: center; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .pr { display: grid; gap: 4px; } .pr div { border-left: 4px solid #2f6fdb; background: #f6f9ff; padding: 4px 8px; border-radius: 4px; }
+  .pr b { margin-right: 6px; }
+  .pick { font-weight: 700; } .flip { background: #fff4e0; }
+  select { font: inherit; font-size: 12px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px">
+      <h2>学习计划应用的设计原则（按优先顺序）</h2>
+      <div class="pr" id="pr"></div>
+      <p class="sub">原则的作用是在冲突时帮助做决定。所以要写清楚优先顺序，并且每条都要能落到具体的选择上——例如“为何保留这段说明”“为何减少这一步”。</p>
+    </div>
+    <div style="display:grid;gap:6px">
+      <h2>四个决策：每个方案对各条原则的影响（−2 到 ＋2，团队评审打分）</h2>
+      <table id="dec"></table>
+    </div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>按原则得出的选择与理由</h2><table id="why"><tr><th>决策</th><th>选择</th><th>理由（由原则生成）</th></tr></table></div>
+    <div style="display:grid;gap:6px"><h2>换一种优先顺序，哪些选择会改变</h2><table id="flip"></table><table id="used"><tr><th>原则</th><th>在当前顺序下决定过几次选择</th></tr></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const P = [
+  ['可信', '可信优先于快速', '用户把学习计划和简历交给我们；任何可能让人不放心的地方，宁可多一步也要说清楚。'],
+  ['安静', '安静优先于醒目', '学习需要专注；提醒少而准，不用红点和弹窗催促。'],
+  ['效率', '去掉不必要的步骤', '每一步都要回答“没有它会怎样”；能撤销的操作不再二次确认。'],
+  ['探索', '鼓励尝试', '允许试错：每个改动都能撤销，新功能可以先看再决定。']
+];
+const PROFILES = { '当前：可信 > 安静 > 效率 > 探索': [0.4, 0.3, 0.2, 0.1], '效率优先': [0.15, 0.15, 0.55, 0.15], '探索优先': [0.15, 0.15, 0.2, 0.5] };
+// 每个决策的两个方案，在四条原则上的影响
+const D = [
+  ['注册流程', [['三步，含“数据怎样使用”的说明', [2, 0, -1, 0]], ['一步，说明折叠在链接里', [-1, 0, 2, 0]]]],
+  ['学习提醒', [['每周一次汇总', [0, 2, 1, -1]], ['每天推送，带红点', [0, -2, -1, 1]]]],
+  ['删除计划', [['删除后 10 秒内可以撤销', [1, 1, 2, 1]], ['弹出二次确认对话框', [1, 0, -1, -1]]]],
+  ['首页', [['只显示本周任务，其余收起', [0, 2, 1, -1]], ['展示全部功能入口', [0, -1, 0, 2]]]]
+];
+$('pr').innerHTML = P.map(([k, t, d], i) => `<div><b>${i + 1}. ${t}</b><span class="sub">${d}</span></div>`).join('');
+$('dec').innerHTML = `<tr><th>决策</th><th>方案</th>${P.map(p => `<th>${p[0]}</th>`).join('')}</tr>` + D.map(([n, opts]) => opts.map(([o, s], j) => `<tr>${j === 0 ? `<td rowspan="2">${n}</td>` : ''}<td>${o}</td>${s.map(v => `<td class="num ${v > 0 ? 'good' : v < 0 ? 'poor' : ''}">${v > 0 ? '+' : ''}${v}</td>`).join('')}</tr>`).join('')).join('');
+function decide(w) { return D.map(([n, opts]) => { const sc = opts.map(([, s]) => s.reduce((a, v, i) => a + v * w[i], 0)); const k = sc[0] >= sc[1] ? 0 : 1; const diff = opts[k][1].map((v, i) => (v - opts[1 - k][1][i]) * w[i]); const decisive = diff.indexOf(Math.max(...diff)); return { n, k, sc, decisive }; }); }
+const names = Object.keys(PROFILES), res = Object.fromEntries(names.map(p => [p, decide(PROFILES[p])]));
+const cur = res[names[0]];
+for (const r of cur) {
+  const [n, opts] = D.find(d => d[0] === r.n), win = opts[r.k], lose = opts[1 - r.k];
+  const gains = win[1].map((v, i) => [v - lose[1][i], i]).filter(([d]) => d > 0).sort((a, b) => PROFILES[names[0]][b[1]] - PROFILES[names[0]][a[1]]);
+  const costs = win[1].map((v, i) => [v - lose[1][i], i]).filter(([d]) => d < 0).map(([, i]) => P[i][0]);
+  const also = gains.filter(([, i]) => i !== r.decisive);
+  const why = `因为“${P[r.decisive][1]}”${also.length ? `，同时有利于${also.map(([, i]) => `“${P[i][0]}”`).join('、')}` : ''}${costs.length ? `；代价是${costs.map(c => `“${c}”`).join('、')}，在当前顺序中排在后面` : ''}。`;
+  $('why').insertAdjacentHTML('beforeend', `<tr><td>${n}</td><td class="pick">${win[0]}</td><td>${why}<br><span class="sub">得分 ${r.sc[r.k].toFixed(2)} 对 ${r.sc[1 - r.k].toFixed(2)}</span></td></tr>`);
+}
+$('flip').innerHTML = `<tr><th>决策</th>${names.map(n => `<th>${n}</th>`).join('')}</tr>` + D.map(([n, opts], i) => `<tr><td>${n}</td>${names.map(p => { const k = res[p][i].k; return `<td class="${k !== cur[i].k ? 'flip' : ''}">${opts[k][0]}</td>`; }).join('')}</tr>`).join('') + `<tr><td colspan="${names.length + 1}" class="sub">橙色底表示与当前选择不同。“删除计划”和“学习提醒”在三种顺序下都不变——“可以撤销”同时满足了几条原则，“每周汇总”既安静又省时间，是最稳的决定；“注册流程”和“首页”则取决于团队真正把什么放在前面。</td></tr>`;
+const count = P.map((_, i) => cur.filter(r => r.decisive === i).length);
+P.forEach(([k, t], i) => $('used').insertAdjacentHTML('beforeend', `<tr><td>${t}</td><td class="num ${count[i] ? '' : 'mid'}">${count[i]} 次${count[i] ? '' : '（检查它是否还需要，或者是否太空泛）'}</td></tr>`));
+window.__pr = { picks: Object.fromEntries(names.map(p => [p, res[p].map(r => D.find(d => d[0] === r.n)[1][r.k][0])])), decisive: cur.map(r => P[r.decisive][0]), scores: cur.map(r => r.sc.map(v => +v.toFixed(2))), count };
+</script>
+</body>
+</html>

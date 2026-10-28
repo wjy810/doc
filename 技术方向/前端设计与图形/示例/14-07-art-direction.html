@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>艺术指导：把抽象目标变成可以执行和检查的规则</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-serif-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .card { border: 1px solid #e3d9c6; background: #faf6ee; border-radius: 8px; padding: 10px 12px; display: grid; gap: 4px; }
+  .card h3 { font-family: "Noto Serif SC", serif; font-size: 18px; }
+  .card dl { display: grid; grid-template-columns: 76px 1fr; gap: 2px 8px; margin: 0; font-size: 12px; } .card dt { color: var(--muted); }
+  .imgs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+  .imgs figure { margin: 0; display: grid; gap: 3px; font-size: 11px; }
+  canvas { display: block; width: 100%; height: auto; border-radius: 4px; }
+  .crops { display: grid; grid-template-columns: 130px repeat(3, minmax(0, 1fr)) 130px repeat(3, minmax(0, 1fr)); gap: 6px; align-items: center; font-size: 11px; }
+  .crops .h { color: var(--muted); }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -2px; margin-right: 3px; border: 1px solid #0002; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div class="card" id="card"></div>
+    <div style="display:grid;gap:6px"><h2>从形容词到规则</h2>
+      <p class="sub">“安静、可信、有温度”只是方向。艺术指导要把它翻译成每个人都能执行、并且能检查的规则：用什么字体、图片怎样选和裁、颜色的范围、材质与灯光、声音、动作的节奏。下面对一组素材逐条检查。</p>
+      <table id="sum"><tr><th>规则</th><th>检查结果</th></tr></table></div>
+  </div>
+</section>
+<section class="panel">
+  <h2>素材主题与色调：6 张候选图片（程序绘制，代替真实照片）</h2>
+  <div class="imgs" id="imgs"></div>
+  <table id="tone"><tr><th>图片</th><th>平均色</th><th>平均色度</th><th>与方向主色的色相差</th><th>判断</th></tr></table>
+</section>
+<section class="panel">
+  <h2>图片裁切：按主体位置裁切 与 居中裁切</h2>
+  <p class="sub">同一张图要出三种比例：横幅 16∶9、卡片 1∶1、手机竖图 4∶5。规则：主体必须完整保留，并尽量落在三分线附近。红色十字是标注的主体位置。</p>
+  <div class="crops" id="crops"></div>
+  <table id="cropT"><tr><th>裁切方式</th><th>主体被保留的裁切</th><th>主体离最近三分点的平均距离（占短边）</th></tr></table>
+</section>
+<section class="panel">
+  <h2>动作的节奏：组件库里的动画是否遵守规定的时长</h2>
+  <table id="motion"><tr><th>组件</th><th>动画</th><th>时长</th><th>缓动</th><th>是否符合</th></tr></table>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const DIRECTION = {
+  name: '安静、可信、有温度',
+  type: '标题用宋体（衬线），正文用黑体；字号比例 1.25',
+  palette: [['纸白', '#faf6ee'], ['墨', '#2b2a28'], ['陶土', '#b8643f'], ['灰绿', '#7d8b74']],
+  image: '真实的人与工作场景，自然光，暖色调，低饱和；不用摆拍和霓虹色',
+  crop: '主体完整，落在三分线附近，四周留出呼吸空间',
+  material: '纸、木、亚麻等哑光材质；避免玻璃与金属的强反光',
+  light: '侧光或窗光，阴影柔和',
+  sound: '默认静音；提示音短而低',
+  motion: '时长只取 150／300／600 毫秒；缓动统一用 ease-out；不弹跳'
+};
+$('card').innerHTML = `<b class="sub">艺术方向</b><h3>${DIRECTION.name}</h3><dl>
+  <dt>字体</dt><dd>${DIRECTION.type}</dd><dt>颜色</dt><dd>${DIRECTION.palette.map(([n, c]) => `<span class="swatch" style="background:${c}"></span>${n} ${c}`).join('　')}</dd>
+  <dt>图像</dt><dd>${DIRECTION.image}</dd><dt>裁切</dt><dd>${DIRECTION.crop}</dd><dt>材质</dt><dd>${DIRECTION.material}</dd><dt>灯光</dt><dd>${DIRECTION.light}</dd><dt>声音</dt><dd>${DIRECTION.sound}</dd><dt>运动</dt><dd>${DIRECTION.motion}</dd></dl>`;
+
+// ---------- 程序绘制的“照片”：天空、地面、人物剪影，主体位置已标注 ----------
+const IW = 480, IH = 320;
+const PHOTOS = [
+  { name: '窗边工作', sky: ['#f3d9b5', '#e9b98f'], ground: '#8a6a52', fig: '#3b2e26', fx: 0.72, fy: 0.55, sun: [0.85, 0.2] },
+  { name: '讨论', sky: ['#efe2cc', '#d9b48f'], ground: '#9a8466', fig: '#2b2a28', fx: 0.30, fy: 0.58, sun: [0.15, 0.18] },
+  { name: '霓虹夜景', sky: ['#1b0b3a', '#ff2bd6'], ground: '#00f0ff', fig: '#0b0b0b', fx: 0.5, fy: 0.6, sun: [0.5, 0.25] },
+  { name: '工作台', sky: ['#f5e8d3', '#e2c49e'], ground: '#a0785a', fig: '#2b2a28', fx: 0.86, fy: 0.62, sun: [0.1, 0.15] },
+  { name: '冷色办公室', sky: ['#cfe3ff', '#6aa2ff'], ground: '#3d5f9e', fig: '#1d2b4a', fx: 0.45, fy: 0.5, sun: [0.8, 0.2] },
+  { name: '阅读', sky: ['#f6ead6', '#dcbf98'], ground: '#9b7b5f', fig: '#3a2f27', fx: 0.14, fy: 0.52, sun: [0.9, 0.22] }
+];
+function paint(p) {
+  const c = document.createElement('canvas'); c.width = IW; c.height = IH; const g = c.getContext('2d');
+  const sky = g.createLinearGradient(0, 0, 0, IH * 0.7); sky.addColorStop(0, p.sky[0]); sky.addColorStop(1, p.sky[1]); g.fillStyle = sky; g.fillRect(0, 0, IW, IH);
+  g.fillStyle = '#ffffff88'; g.beginPath(); g.arc(p.sun[0] * IW, p.sun[1] * IH, 26, 0, 7); g.fill();
+  g.fillStyle = p.ground; g.beginPath(); g.moveTo(0, IH * 0.72); for (let x = 0; x <= IW; x += 20) g.lineTo(x, IH * 0.72 + Math.sin(x / 50) * 6); g.lineTo(IW, IH); g.lineTo(0, IH); g.fill();
+  const x = p.fx * IW, y = p.fy * IH; g.fillStyle = p.fig; g.beginPath(); g.arc(x, y - 34, 14, 0, 7); g.fill(); g.beginPath(); g.roundRect(x - 20, y - 18, 40, 62, 14); g.fill();
+  return c;
+}
+// ---------- 色调检查 ----------
+const lin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+function oklab([r, g, b]) { [r, g, b] = [r, g, b].map(lin); const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b), m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b), s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b); return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s, 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s]; }
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const ACCENT = oklab(hex('#b8643f')), accentHue = Math.atan2(ACCENT[2], ACCENT[1]) * 180 / Math.PI;
+function tone(c) {
+  const d = c.getContext('2d').getImageData(0, 0, IW, IH).data; let sr = 0, sg = 0, sb = 0, ch = 0, n = 0;
+  for (let i = 0; i < d.length; i += 16) { sr += d[i]; sg += d[i + 1]; sb += d[i + 2]; const L = oklab([d[i], d[i + 1], d[i + 2]]); ch += Math.hypot(L[1], L[2]); n++; }
+  const avg = [sr / n, sg / n, sb / n], L = oklab(avg), hue = Math.atan2(L[2], L[1]) * 180 / Math.PI;
+  let dh = Math.abs(hue - accentHue); if (dh > 180) dh = 360 - dh;
+  return { avg: avg.map(Math.round), chroma: ch / n, dh };
+}
+// ---------- 裁切 ----------
+const ASPECTS = [['16∶9', 16 / 9], ['1∶1', 1], ['4∶5', 4 / 5]];
+function cropRect(p, a, smart) {
+  let w = IW, h = IW / a; if (h > IH) { h = IH; w = IH * a; }
+  let x, y;
+  if (!smart) { x = (IW - w) / 2; y = (IH - h) / 2; }
+  else {   // 让主体落在离它最近的三分线上，再限制在图片范围内
+    const fx = p.fx * IW, fy = p.fy * IH;
+    const tx = [w / 3, w / 2, 2 * w / 3].map(t => fx - t), ty = [h / 3, h / 2, 2 * h / 3].map(t => fy - t);
+    const clampX = v => Math.min(IW - w, Math.max(0, v)), clampY = v => Math.min(IH - h, Math.max(0, v));
+    x = tx.map(clampX).reduce((best, v) => { const q = (fx - v) / w; const d = Math.min(Math.abs(q - 1 / 3), Math.abs(q - 2 / 3)); return d < best.d ? { v, d } : best; }, { v: clampX(tx[1]), d: 9 }).v;
+    y = ty.map(clampY).reduce((best, v) => { const q = (fy - v) / h; const d = Math.min(Math.abs(q - 1 / 3), Math.abs(q - 2 / 3)); return d < best.d ? { v, d } : best; }, { v: clampY(ty[1]), d: 9 }).v;
+  }
+  const fx = p.fx * IW, fy = p.fy * IH;   // 主体（人物连头部约 48 × 96 像素）需要完整保留
+  const kept = fx - 24 >= x && fx + 24 <= x + w && fy - 50 >= y && fy + 46 <= y + h;
+  const qx = (fx - x) / w, qy = (fy - y) / h, thirds = [[1 / 3, 1 / 3], [2 / 3, 1 / 3], [1 / 3, 2 / 3], [2 / 3, 2 / 3]];
+  const dist = Math.min(...thirds.map(([a, b]) => Math.hypot((qx - a) * w, (qy - b) * h))) / Math.min(w, h);
+  return { x, y, w, h, kept, dist };
+}
+function drawCrop(src, r, maxW) {
+  const c = document.createElement('canvas'), s = maxW / r.w; c.width = maxW; c.height = Math.round(r.h * s);
+  const g = c.getContext('2d'); g.drawImage(src, r.x, r.y, r.w, r.h, 0, 0, c.width, c.height);
+  g.strokeStyle = '#ffffff99'; g.lineWidth = 1; for (const t of [1 / 3, 2 / 3]) { g.beginPath(); g.moveTo(c.width * t, 0); g.lineTo(c.width * t, c.height); g.moveTo(0, c.height * t); g.lineTo(c.width, c.height * t); g.stroke(); }
+  return c;
+}
+// ---------- 动作 ----------
+const MOTION = [['按钮', '按下反馈', 150, 'ease-out'], ['卡片', '展开', 300, 'ease-out'], ['对话框', '出现', 300, 'ease-out'], ['页面', '切换', 600, 'ease-out'], ['提示条', '滑入', 250, 'ease-out'], ['点赞', '弹跳', 400, 'cubic-bezier(.34,1.56,.64,1)'], ['抽屉', '打开', 300, 'ease-in-out']];
+const results = {};
+document.fonts.ready.then(() => {
+  const srcs = PHOTOS.map(paint);
+  // 色调
+  let toneBad = 0;
+  PHOTOS.forEach((p, i) => {
+    const f = document.createElement('figure'); const thumb = drawCrop(srcs[i], { x: 0, y: 0, w: IW, h: IH }, 160); const g = thumb.getContext('2d'); g.strokeStyle = '#e11d48'; g.lineWidth = 2; const X = p.fx * 160, Y = p.fy * IH * 160 / IW; g.beginPath(); g.moveTo(X - 6, Y); g.lineTo(X + 6, Y); g.moveTo(X, Y - 6); g.lineTo(X, Y + 6); g.stroke();
+    f.appendChild(thumb); f.insertAdjacentHTML('beforeend', `<span>${p.name}</span>`); $('imgs').appendChild(f);
+    const t = tone(srcs[i]), ok = t.chroma <= 0.09 && t.dh <= 40; if (!ok) toneBad++;
+    $('tone').insertAdjacentHTML('beforeend', `<tr><td>${p.name}</td><td><span class="swatch" style="background:rgb(${t.avg})"></span>rgb(${t.avg.join(', ')})</td><td class="num ${t.chroma <= 0.09 ? 'good' : 'poor'}">${t.chroma.toFixed(3)}</td><td class="num ${t.dh <= 40 ? 'good' : 'poor'}">${t.dh.toFixed(0)}°</td><td class="${ok ? 'good' : 'poor'}">${ok ? '符合' : [t.chroma > 0.09 ? '饱和度过高（不是“低饱和”）' : '', t.dh > 40 ? '色相偏离暖色（不是“暖色调”）' : ''].filter(Boolean).join('；')}</td></tr>`);
+    results[p.name] = { chroma: +t.chroma.toFixed(3), dh: Math.round(t.dh) };
+  });
+  $('tone').insertAdjacentHTML('beforeend', '<tr><td colspan="5" class="sub">规则的数字化：平均色度 ≤ 0.09 视为“低饱和”；平均色相与主色“陶土”相差 ≤ 40° 视为“暖色调”。阈值是本例为方向写下的约定，应当用一批已认可的素材校准。</td></tr>');
+  // 裁切
+  $('crops').innerHTML = '<span class="h">按主体位置裁切</span>' + ASPECTS.map(a => `<span class="h">${a[0]}</span>`).join('') + '<span class="h">居中裁切</span>' + ASPECTS.map(a => `<span class="h">${a[0]}</span>`).join('');
+  const stat = { smart: { kept: 0, dist: [] }, center: { kept: 0, dist: [] } };
+  for (const [i, p] of PHOTOS.entries()) {
+    if (![0, 3, 5].includes(i)) continue;   // 版面所限，只显示三张；统计包括全部六张
+    const row = document.createElement('div'); row.style.display = 'contents';
+    for (const smart of [true, false]) { const lab = document.createElement('span'); lab.textContent = p.name; row.appendChild(lab); for (const [, a] of ASPECTS) { const r = cropRect(p, a, smart), c = drawCrop(srcs[i], r, 110); c.style.outline = r.kept ? 'none' : '3px solid #b3261e'; row.appendChild(c); } }
+    $('crops').appendChild(row);
+  }
+  for (const p of PHOTOS) for (const [, a] of ASPECTS) for (const smart of [true, false]) { const r = cropRect(p, a, smart), s = smart ? stat.smart : stat.center; if (r.kept) s.kept++; s.dist.push(r.dist); }
+  const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+  for (const [k, n] of [['smart', '按主体位置裁切'], ['center', '居中裁切']]) $('cropT').insertAdjacentHTML('beforeend', `<tr><td>${n}</td><td class="num ${stat[k].kept === 18 ? 'good' : 'poor'}">${stat[k].kept}／18</td><td class="num">${mean(stat[k].dist).toFixed(3)}</td></tr>`);
+  $('cropT').insertAdjacentHTML('beforeend', '<tr><td colspan="3" class="sub">红框表示主体被裁掉了一部分。实际项目中，主体位置可以由编辑在后台标注，也可以用人脸或显著性检测给出初值再人工确认；网页上可以用 CSS 的 object-position 或 picture 元素为不同尺寸提供不同的裁切。</td></tr>');
+  // 动作
+  let motionBad = 0;
+  for (const [comp, what, ms, ease] of MOTION) { const okD = [150, 300, 600].includes(ms), okE = ease === 'ease-out', ok = okD && okE; if (!ok) motionBad++; $('motion').insertAdjacentHTML('beforeend', `<tr><td>${comp}</td><td>${what}</td><td class="num ${okD ? '' : 'poor'}">${ms} 毫秒</td><td class="${okE ? '' : 'poor'}">${ease}</td><td class="${ok ? 'good' : 'poor'}">${ok ? '符合' : [!okD ? '时长不在 150／300／600 中' : '', ease.includes('1.56') ? '弹跳，不符合“安静”' : !okE ? '缓动不统一' : ''].filter(Boolean).join('；')}</td></tr>`); }
+  // 汇总
+  const rows = [['图像：暖色调、低饱和', `${PHOTOS.length - toneBad}／${PHOTOS.length} 张符合`, toneBad === 0], ['裁切：主体完整', `按主体裁切 ${stat.smart.kept}／18，居中裁切 ${stat.center.kept}／18`, stat.smart.kept === 18], ['运动：时长与缓动', `${MOTION.length - motionBad}／${MOTION.length} 个动画符合`, motionBad === 0], ['字体、材质、灯光、声音', '需要人工评审（下一章的批评方法）', null]];
+  for (const [a, b, ok] of rows) $('sum').insertAdjacentHTML('beforeend', `<tr><td>${a}</td><td class="${ok === null ? '' : ok ? 'good' : 'poor'}">${b}</td></tr>`);
+  window.__ad = { tone: results, crop: { smart: stat.smart.kept, center: stat.center.kept, dSmart: +mean(stat.smart.dist).toFixed(3), dCenter: +mean(stat.center.dist).toFixed(3) }, motionBad, toneBad };
+});
+</script>
+</body>
+</html>
