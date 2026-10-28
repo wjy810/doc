@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>协作编辑：光标、评论、各自撤销、权限、冲突与离线恢复</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": {
+  "yjs": "https://cdn.jsdelivr.net/npm/yjs@13.6.33/dist/yjs.mjs",
+  "lib0/array": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/array.js", "lib0/binary": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/binary.js",
+  "lib0/buffer": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/buffer.js", "lib0/decoding": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/decoding.js",
+  "lib0/encoding": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/encoding.js", "lib0/environment": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/environment.js",
+  "lib0/error": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/error.js", "lib0/function": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/function.js",
+  "lib0/iterator": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/iterator.js", "lib0/logging": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/logging.js",
+  "lib0/map": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/map.js", "lib0/math": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/math.js",
+  "lib0/object": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/object.js", "lib0/observable": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/observable.js",
+  "lib0/promise": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/promise.js", "lib0/random": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/random.js",
+  "lib0/set": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/set.js", "lib0/string": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/string.js",
+  "lib0/time": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/time.js", "lib0/webcrypto": "https://cdn.jsdelivr.net/npm/lib0@0.2.119/webcrypto.js"
+} }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 4px 0 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .clients { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .client { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; display: grid; gap: 4px; align-content: start; }
+  .client header { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .role { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 0 6px; }
+  .net { margin-left: auto; font-size: 11px; } .net.off { color: var(--bad); }
+  .doc { font-size: 14px; line-height: 2; background: #fbfbfa; border-radius: 6px; padding: 4px 8px; min-height: 64px; word-break: break-all; }
+  .caret { display: inline-block; width: 0; border-left: 2px solid; height: 1.1em; vertical-align: -0.15em; position: relative; }
+  .caret b { position: absolute; top: -1.15em; left: -2px; font-size: 9px; color: #fff; padding: 0 3px; border-radius: 3px; white-space: nowrap; line-height: 1.3; font-weight: 400; }
+  .cm { border-bottom: 2px solid #c77700; background: #fff3d6; }
+  .note { font-size: 11.5px; color: var(--muted); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>三个客户端：两位编辑者、一位评论者，经过同一台中转服务器</h2>
+  <p class="sub">真实的 Yjs 13.6.33 文档；“网络”和“服务器”在页面里模拟，测试脚本依次执行下方的 6 个步骤。文字为演示而写。</p>
+  <div class="clients" id="clients"></div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>步骤</h2><table id="steps"></table></div>
+    <div><h2>检查：协作数据结构的做法与朴素做法</h2><table id="checks"></table><p class="m" id="mchecks"></p></div>
+  </div>
+</section>
+<script type="module">
+import * as Y from 'yjs';
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ok = (b, y = '是', n = '否') => b ? `<span class="good">${y}</span>` : `<span class="poor">${n}</span>`;
+const R = { steps: [] };
+
+// ---------- 服务器：保存权威状态，按角色检查每一条更新 ----------
+const server = { content: new Y.Doc(), meta: new Y.Doc(), roles: { 林晓: 'editor', 周舟: 'editor', 陈老师: 'commenter' }, rejected: [], clients: [] };
+server.accept = (from, kind, update) => {
+  if (kind === 'content' && server.roles[from.name] !== 'editor') { server.rejected.push(from.name); from.resync(); return false; }
+  Y.applyUpdate(server[kind], update, 'client');
+  for (const c of server.clients) if (c !== from && c.online) Y.applyUpdate(c[kind], update, 'remote');
+  return true;
+};
+
+// ---------- 客户端 ----------
+const COLORS = { 林晓: '#2f6fdb', 周舟: '#1f7a4d', 陈老师: '#a15c00' };
+class Client {
+  constructor(name) {
+    this.name = name; this.online = true; this.cursor = null; this.sel = null; this.naive = {};
+    this.bind(new Y.Doc(), new Y.Doc());
+    server.clients.push(this);
+  }
+  bind(content, meta) {
+    this.content = content; this.meta = meta; this.text = content.getText('t'); this.comments = meta.getArray('comments');
+    for (const kind of ['content', 'meta']) this[kind].on('update', (u, origin) => { if ((origin === this.name || origin instanceof Y.UndoManager) && this.online) server.accept(this, kind, u); });
+    this.undo = new Y.UndoManager(this.text, { trackedOrigins: new Set([this.name]), captureTimeout: 0 });
+  }
+  edit(fn) { this.content.transact(() => fn(this.text), this.name); }
+  comment(from, to, body) { this.meta.transact(() => this.comments.push([{ by: this.name, body, a: Y.relativePositionToJSON(Y.createRelativePositionFromTypeIndex(this.text, from)), b: Y.relativePositionToJSON(Y.createRelativePositionFromTypeIndex(this.text, to, -1)) }]), this.name); }
+  setCursor(i) { this.cursor = Y.createRelativePositionFromTypeIndex(this.text, i); this.naive.cursor = i; }
+  setSel(a, b) { this.sel = [Y.createRelativePositionFromTypeIndex(this.text, a), Y.createRelativePositionFromTypeIndex(this.text, b, -1)]; this.naive.sel = [a, b]; }
+  abs(rel) { const p = Y.createAbsolutePositionFromRelativePosition(rel, this.content); return p ? p.index : null; }
+  // 被服务器拒绝：丢掉本地的状态，从服务器的权威状态重新加载
+  resync() { const c = new Y.Doc(), m = new Y.Doc(); Y.applyUpdate(c, Y.encodeStateAsUpdate(server.content)); Y.applyUpdate(m, Y.encodeStateAsUpdate(server.meta)); this.bind(c, m); }
+  goOffline() { this.online = false; }
+  // 重新上线：双方交换状态向量，只补对方缺的部分
+  reconnect() {
+    this.online = true; let bytes = 0;
+    for (const kind of ['content', 'meta']) {
+      const toServer = Y.encodeStateAsUpdate(this[kind], Y.encodeStateVector(server[kind]));
+      const toClient = Y.encodeStateAsUpdate(server[kind], Y.encodeStateVector(this[kind]));
+      bytes += toServer.length + toClient.length;
+      Y.applyUpdate(this[kind], toClient, 'remote');
+      server.accept(this, kind, toServer);
+    }
+    return bytes;
+  }
+}
+const A = new Client('林晓'), B = new Client('周舟'), C = new Client('陈老师');
+const all = [A, B, C];
+
+function view(c) {
+  const t = c.text.toString(), marks = [];
+  for (const o of all) {
+    if (!o.cursor) continue;
+    const i = c.abs(o.cursor); if (i != null) marks.push({ i, html: `<span class="caret" style="border-color:${COLORS[o.name]}"><b style="background:${COLORS[o.name]}">${o.name}</b></span>`, ord: 2 });
+  }
+  const ranges = [];
+  for (const cm of c.comments.toArray()) { const a = c.abs(Y.createRelativePositionFromJSON(cm.a)), b = c.abs(Y.createRelativePositionFromJSON(cm.b)); if (a != null && b != null) ranges.push([a, b, 'cm']); }
+  for (const o of all) if (o.sel) { const a = c.abs(o.sel[0]), b = c.abs(o.sel[1]); if (a != null && b != null) ranges.push([a, b, `sel-${o.name}`]); }
+  let out = '';
+  for (let i = 0; i <= t.length; i++) {
+    for (const m of marks.filter(m => m.i === i)) out += m.html;
+    if (i === t.length) break;
+    const inCm = ranges.some(r => r[2] === 'cm' && i >= r[0] && i < r[1]), sel = ranges.find(r => r[2].startsWith('sel') && i >= r[0] && i < r[1]);
+    const style = sel ? `background:${COLORS[sel[2].slice(4)]}33` : '';
+    out += `<span class="${inCm ? 'cm' : ''}" style="${style}">${esc(t[i])}</span>`;
+  }
+  return out;
+}
+function draw() {
+  $('clients').innerHTML = all.map(c => `<div class="client"><header><span class="dot" style="background:${COLORS[c.name]}"></span><b>${c.name}</b><span class="role">${server.roles[c.name] === 'editor' ? '编辑者' : '评论者：可以评论，不能改正文'}</span><span class="net ${c.online ? '' : 'off'}">${c.online ? '在线' : '离线'}</span></header>
+    <div class="doc">${view(c)}</div>
+    <div class="note">评论：${c.comments.toArray().map(cm => { const a = c.abs(Y.createRelativePositionFromJSON(cm.a)), b = c.abs(Y.createRelativePositionFromJSON(cm.b)); return `${cm.by}在“${esc(c.text.toString().slice(a, b))}”上：${esc(cm.body)}`; }).join('；') || '无'}　可撤销 ${c.undo.undoStack.length} 步</div></div>`).join('');
+}
+const step = (what, result) => { R.steps.push([what, result]); };
+
+// ---------- 0 初始 ----------
+A.edit(t => t.insert(0, '第 3 周计划：周一读第 4 章，周三做练习，周五交作业。'));
+const txt = () => A.text.toString();
+step('林晓写下计划', `“${txt()}”，三个客户端都收到`);
+
+// ---------- 1 光标、选区与评论锚点 ----------
+const iAfter周三 = txt().indexOf('周三') + 2, iSel = txt().indexOf('周五交作业'), iCm = txt().indexOf('做练习');
+A.setCursor(iAfter周三); B.setSel(iSel, iSel + 5); C.comment(iCm, iCm + 3, '练习在哪里？');
+const naiveCm = [iCm, iCm + 3];
+A.edit(t => t.insert(0, '【已更新】'));
+B.edit(t => { const i = t.toString().indexOf('做练习') + 3; t.insert(i, '（第 1—3 题）'); });
+const caretOk = txt().slice(0, A.abs(A.cursor)).endsWith('周三'), caretNaive = txt().slice(A.naive.cursor - 2, A.naive.cursor);
+const cmNow = (() => { const cm = C.comments.get(0); return C.text.toString().slice(C.abs(Y.createRelativePositionFromJSON(cm.a)), C.abs(Y.createRelativePositionFromJSON(cm.b))); })();
+const cmNaive = txt().slice(naiveCm[0], naiveCm[1]);
+const selNow = txt().slice(A.abs(B.sel[0]), A.abs(B.sel[1])), selNaive = txt().slice(B.naive.sel[0], B.naive.sel[1]);
+step('林晓的光标在“周三”后；周舟选中“周五交作业”；陈老师在“做练习”上评论。然后林晓在开头加“【已更新】”，周舟在“做练习”后加“（第 1—3 题）”', `光标前两个字：“周三”${ok(caretOk, '✓', '✗')}；选区：“${selNow}”；评论仍在“${cmNow}”上`);
+R.anchor = { caretOk, caretNaive, cmNow, cmNaive, selNow, selNaive };
+
+// ---------- 2 冲突：两人同时在同一处输入 ----------
+A.goOffline(); B.goOffline();
+const pos = c => c.text.toString().indexOf('周五');
+A.edit(t => t.insert(pos(A), '周四复习，')); B.edit(t => t.insert(pos(B), '周四答疑，'));
+const beforeLww = txt();
+const bytesA = A.reconnect(), bytesB = B.reconnect();
+const merged = txt(), conv2 = all.every(c => c.text.toString() === merged);
+const lwwLost = '周四复习，'.length;
+step('两人都离线，同时在“周五”前输入：林晓“周四复习，”、周舟“周四答疑，”；再上线', `两句都保留，三端一致 ${ok(conv2, '✓', '✗')}：“…${merged.slice(merged.indexOf('周三'), merged.indexOf('周五') + 5)}…”`);
+R.conflict = { merged, conv2, bothKept: merged.includes('周四复习') && merged.includes('周四答疑'), lwwLost, bytesA, bytesB };
+
+// ---------- 3 各自撤销 ----------
+const lastRemote = '周四答疑，';
+A.undo.undo();
+const afterUndo = txt(), undoOk = !afterUndo.includes('周四复习') && afterUndo.includes('周四答疑') && all.every(c => c.text.toString() === afterUndo);
+step('林晓按“撤销”', `只撤掉自己的“周四复习，”；周舟的“${lastRemote}”还在 ${ok(undoOk, '✓', '✗')}`);
+R.undo = { undoOk, naiveRemoves: lastRemote };
+
+// ---------- 4 权限：评论者绕过界面直接改正文 ----------
+C.edit(t => t.insert(t.length, '作业不用交了。'));
+const cHas = C.text.toString().includes('不用交'), othersHave = [A, B].some(c => c.text.toString().includes('不用交')), srvHas = server.content.getText('t').toString().includes('不用交');
+C.comment(C.text.toString().indexOf('周五'), C.text.toString().indexOf('周五') + 5, '周五我出差，改到周六？');
+const metaOk = A.comments.length === 2;
+step('陈老师的客户端被改过，绕过只读界面直接往正文加“作业不用交了。”；随后正常地加一条评论', `服务器拒绝正文更新 ${server.rejected.length} 次，陈老师的客户端回到服务器状态；评论照常送达 ${ok(metaOk, '✓', '✗')}`);
+R.perm = { rejected: server.rejected.length, cHas, othersHave, srvHas, metaOk };
+
+// ---------- 5 离线恢复 ----------
+B.goOffline();
+B.edit(t => t.insert(t.length, '周日休息。')); B.edit(t => t.insert(t.toString().indexOf('读第 4 章') + '读第 4 章'.length, '（约 40 页）')); B.edit(t => t.delete(0, 5));
+A.edit(t => t.insert(t.toString().indexOf('做练习'), '上午'));
+const fullB = Y.encodeStateAsUpdate(B.content).length + Y.encodeStateAsUpdate(B.meta).length;
+const syncBytes = B.reconnect();
+const final = txt(), conv5 = all.every(c => c.text.toString() === final) && server.content.getText('t').toString() === final;
+step('周舟离线时改了 3 处（加“周日休息。”、加“（约 40 页）”、删掉“【已更新】”）；同时林晓在自己的光标处（“做练习”前）输入“上午”；周舟重新上线', `交换 ${syncBytes} 字节（整份状态 ${fullB} 字节），四方一致 ${ok(conv5, '✓', '✗')}`);
+R.offline = { syncBytes, fullB, conv5, final };
+
+draw();
+$('steps').innerHTML = '<tr><th>#</th><th>做了什么</th><th>结果</th></tr>' + R.steps.map((s, i) => `<tr><td>${i}</td><td>${s[0]}</td><td>${s[1]}</td></tr>`).join('');
+$('checks').innerHTML = '<tr><th>检查</th><th>Yjs（相对位置、CRDT、按来源撤销、服务器检查）</th><th>朴素做法</th></tr>' + [
+  ['别人在前面插字后，林晓的光标', `仍在“周三”后 ${ok(caretOk, '✓', '✗')}`, `记的是第几个字：停在“${esc(caretNaive)}”后`],
+  ['周舟的选区', `“${esc(selNow)}”`, `“${esc(selNaive)}”`],
+  ['评论锚定的文字', `“${esc(cmNow)}”`, `“${esc(cmNaive)}”`],
+  ['同时在同一处输入', `两句都保留（${R.conflict.bothKept ? '“周四复习，”“周四答疑，”' : ''}）`, `后保存的覆盖先保存的：丢 ${lwwLost} 个字`],
+  ['林晓撤销', `只撤自己的 ${ok(undoOk, '✓', '✗')}`, `撤掉最后一次改动——周舟的“${lastRemote}”`],
+  ['评论者改正文', `服务器拒绝 ${R.perm.rejected} 次，其他人看不到 ${ok(!othersHave && !srvHas, '✓', '✗')}`, '只靠界面禁用：改过的客户端照样能写'],
+  ['离线 3 处修改后重新上线', `只交换缺的部分 ${syncBytes} 字节，一致 ${ok(conv5, '✓', '✗')}`, `重发整份 ${fullB} 字节，或者整份覆盖`]
+].map(r => `<tr><th>${r[0]}</th><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('');
+$('mchecks').innerHTML = '光标、选区和评论都用“相对位置”记在某个字上，而不是记“第几个字”，所以别人插入或删除文字后仍然指向原来的地方。撤销只跟踪自己发起的修改（UndoManager 的 trackedOrigins）。权限必须由服务器再检查一遍：界面上的“只读”只是方便，改过的客户端可以绕过。合并在数据上是一致的，但两句“周四……”语义上是否冲突，只有人能判断——界面要让人看到谁在什么时候改了什么。';
+window.__collab = R;
+</script>
+</body>
+</html>
