@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>校园报修服务：状态、责任与每一步的通知</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 4px 0 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .three { display: grid; grid-template-columns: 1.15fr 1fr 1fr; gap: 10px; align-items: start; }
+  .col { display: grid; gap: 6px; align-content: start; }
+  svg { width: 100%; height: auto; display: block; }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 12px; display: grid; gap: 4px; }
+  .card h3 { margin: 0; }
+  .pill { display: inline-block; border-radius: 10px; padding: 0 8px; font-size: 11.5px; }
+  .wait { background: #e8eefb; color: #1f4fae; } .act { background: #fde9d9; color: #8a3b00; }
+  .steps { display: flex; gap: 2px; font-size: 10.5px; } .steps span { flex: 1; text-align: center; padding: 1px 0; border-radius: 3px; background: #eef0f3; color: #8a93a3; } .steps span.done { background: #dff1e5; color: #1f5f3d; } .steps span.cur { background: #2f6fdb; color: #fff; }
+  button { font: inherit; font-size: 11.5px; padding: 0 8px; border: 1px solid #b9c3d3; background: #f3f6fb; border-radius: 6px; }
+  .tag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 9px; background: #fff3d6; color: #7a4a00; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div class="col"><h2>1 状态机：发起、受理、处理、反馈、关闭</h2><svg id="diagram" viewBox="0 0 560 330"></svg><p class="sub">箭头上的文字是事件；颜色表示这一步由谁负责。只有定义过的事件能发生，其他一律拒绝。图中省略了“已关闭 7 天内可以重新打开、回到已提交”这条线。</p></div>
+    <div class="col"><h2>2 每个状态：谁负责、用户等待还是行动、要多久、找谁</h2><table id="states"></table></div>
+  </div>
+</section>
+<section class="panel">
+  <h2>3 同一张工单在“等配件”时，三个人各自看到什么</h2>
+  <p class="sub">工单与联系方式为演示而写（分机号是虚构的）。</p>
+  <div class="three" id="views"></div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div class="col"><h2>4 规则检查：这套流程本身有没有漏洞</h2><table id="checks"></table><p class="m" id="mchecks"></p></div>
+    <div class="col"><h2>5 随机操作 500 张工单：不该发生的事有没有被挡住</h2><p class="sub"><span class="tag">脚本生成</span> 用种子 7 随机生成事件与操作者（学生、前台、派单员、维修师傅、维修班、系统），每张最多 20 步；时间随机前进 0—30 小时。</p><table id="fuzz"></table><p class="m" id="mfuzz"></p></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ok = (b, y = '✓', n = '✗') => b ? `<span class="good">${y}</span>` : `<span class="poor">${n}</span>`;
+const R = {};
+
+// ---------- 流程定义 ----------
+const STATES = {
+  已提交: { owner: '前台', user: 'wait', eta: '工作时间 2 小时内受理', contact: '后勤服务台（分机 8123）', stage: '发起' },
+  需要补充: { owner: '学生', user: 'act', eta: '补充后重新排队；7 天不补充自动取消', contact: '后勤服务台（分机 8123）', stage: '受理' },
+  已受理: { owner: '派单员', user: 'wait', eta: '当天派单', contact: '后勤服务台（分机 8123）', stage: '受理' },
+  已派单: { owner: '维修师傅', user: 'wait', eta: '按约定的上门时间', contact: '师傅（工单页留言）', stage: '处理' },
+  处理中: { owner: '维修师傅', user: 'wait', eta: '当次处理', contact: '师傅（工单页留言）', stage: '处理' },
+  等配件: { owner: '维修班', user: 'wait', eta: '配件到货日期', contact: '维修班（分机 8125）', stage: '处理' },
+  待确认: { owner: '学生', user: 'act', eta: '3 天内确认，否则自动关闭', contact: '后勤服务台（分机 8123）', stage: '反馈' },
+  已关闭: { final: true, stage: '关闭', note: '7 天内可以重新打开' },
+  已取消: { final: true, stage: '关闭' }
+};
+// [从, 事件, 到, 谁可以做, 通知谁]
+const T = [
+  ['已提交', '受理', '已受理', '前台', ['学生']], ['已提交', '退回补充', '需要补充', '前台', ['学生']], ['需要补充', '补充', '已提交', '学生', ['前台']],
+  ['已受理', '派单', '已派单', '派单员', ['学生', '维修师傅']], ['已派单', '上门', '处理中', '维修师傅', ['学生']], ['处理中', '等配件', '等配件', '维修师傅', ['学生', '维修班']],
+  ['等配件', '配件到货', '处理中', '维修班', ['学生', '维修师傅']], ['处理中', '修好', '待确认', '维修师傅', ['学生']], ['待确认', '确认修好', '已关闭', '学生', ['前台', '维修师傅']],
+  ['待确认', '没修好', '处理中', '学生', ['维修师傅', '前台']], ['待确认', '超时', '已关闭', '系统', ['学生']], ['需要补充', '超时', '已取消', '系统', ['学生']],
+  ['已关闭', '重新打开', '已提交', '学生', ['前台']],
+  ['已提交', '取消', '已取消', '学生', ['前台']], ['需要补充', '取消', '已取消', '学生', ['前台']], ['已受理', '取消', '已取消', '学生', ['前台']], ['已派单', '取消', '已取消', '学生', ['前台', '维修师傅']]
+];
+const TIME_RULES = { 重新打开: { from: '已关闭', within: 7 * 24 }, 超时: { 待确认: 3 * 24, 需要补充: 7 * 24 } };
+const OWNER_COLOR = { 前台: '#2f6fdb', 学生: '#c77700', 派单员: '#7b5ea7', 维修师傅: '#1f7a4d', 维修班: '#0f766e' };
+
+// 一个简单的“只有 3 个状态”的版本，用同样的规则检查
+const NAIVE_STATES = { 已提交: { owner: '', user: 'wait', eta: '', contact: '' }, 处理中: { owner: '维修师傅', user: 'wait', eta: '', contact: '' }, 已完成: { final: true } };
+const NAIVE_T = [['已提交', '开始处理', '处理中', '维修师傅', []], ['处理中', '完成', '已完成', '维修师傅', []]];
+
+// ---------- 1 状态图 ----------
+(() => {
+  const P = { 已提交: [70, 60], 已受理: [200, 60], 已派单: [350, 60], 需要补充: [70, 170], 已取消: [218, 170], 处理中: [350, 170], 等配件: [500, 170], 待确认: [350, 280], 已关闭: [505, 280] };
+  let s = `<defs><marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L8 4L0 8z" fill="#5b6475"/></marker></defs>`;
+  const edge = (a, b, label, bend = 0, at = 0.5) => {
+    const [x1, y1] = P[a], [x2, y2] = P[b], dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L;
+    const sx = x1 + ux * 44, sy = y1 + uy * 18, ex = x2 - ux * 46, ey = y2 - uy * 19, mx = (sx + ex) / 2 - uy * bend, my = (sy + ey) / 2 + ux * bend;
+    const q = (p0, p1, p2) => (1 - at) ** 2 * p0 + 2 * (1 - at) * at * p1 + at * at * p2, lx = q(sx, mx, ex) - uy * Math.sign(bend) * 10, ly = q(sy, my, ey) + ux * Math.sign(bend) * 10;
+    s += `<path d="M${sx} ${sy} Q${mx} ${my} ${ex} ${ey}" fill="none" stroke="#9aa2b1" marker-end="url(#a)"/><text x="${lx}" y="${ly - 3}" text-anchor="middle" font-size="9.5" fill="#5b6475" font-family="Noto Sans SC">${label}</text>`;
+  };
+  // 图中的边（同一对状态之间的多个事件合并成一条；“重新打开”省略）
+  [['已提交', '已受理', '受理'], ['已提交', '需要补充', '退回补充', 16], ['需要补充', '已提交', '补充', 16], ['已受理', '已派单', '派单'], ['已派单', '处理中', '上门'],
+   ['处理中', '等配件', '等配件', 14], ['等配件', '处理中', '配件到货', 14], ['处理中', '待确认', '修好', 16], ['待确认', '处理中', '没修好', 16],
+   ['待确认', '已关闭', '确认修好／超时'], ['需要补充', '已取消', '取消／超时'], ['已提交', '已取消', '取消（上门前都可以）', 0, 0.78]].forEach(e => edge(...e));
+  for (const [n, [x, y]] of Object.entries(P)) { const st = STATES[n], c = st.final ? '#8a93a3' : OWNER_COLOR[st.owner]; s += `<rect x="${x - 44}" y="${y - 17}" width="88" height="34" rx="17" fill="#fff" stroke="${c}" stroke-width="2"/><text x="${x}" y="${y - 1}" text-anchor="middle" font-size="12" font-weight="700" font-family="Noto Sans SC">${n}</text><text x="${x}" y="${y + 12}" text-anchor="middle" font-size="9.5" fill="${c}" font-family="Noto Sans SC">${st.final ? '结束' : st.owner}</text>`; }
+  $('diagram').innerHTML = s;
+})();
+
+// ---------- 2 状态表 ----------
+$('states').innerHTML = '<tr><th>状态（阶段）</th><th>谁负责</th><th>用户</th><th>要多久</th><th>出问题找谁</th></tr>' + Object.entries(STATES).map(([n, s]) => `<tr><th>${n}（${s.stage}）</th><td>${s.owner || '—'}</td><td>${s.final ? (s.note || '—') : `<span class="pill ${s.user}">${s.user === 'wait' ? '等待' : '需要行动'}</span>`}</td><td>${s.eta || '—'}</td><td>${s.contact || '—'}</td></tr>`).join('');
+
+// ---------- 3 三个视图 ----------
+const TIMELINE = [
+  ['周一 9:12', '学生', '提交', '宿舍 5 号楼 312：洗手池水龙头漏水，附 2 张照片', '已提交'],
+  ['周一 10:05', '前台', '受理', '确认地址与照片清楚', '已受理'],
+  ['周一 11:30', '派单员', '派单', '派给王师傅，约周二 14:00—16:00 上门', '已派单'],
+  ['周二 14:40', '维修师傅', '上门', '检查：阀芯损坏', '处理中'],
+  ['周二 15:10', '维修师傅', '等配件', '阀芯缺货，预计周四到货；已临时关闭进水阀', '等配件']
+];
+const notifyOf = ev => (T.find(t => t[1] === ev) || [])[4] || [];
+(() => {
+  const order = ['已提交', '已受理', '已派单', '处理中', '待确认', '已关闭'], cur = '等配件', curIdx = order.indexOf('处理中');
+  const myActions = T.filter(t => t[0] === cur && t[3] === '学生').map(t => t[1]);
+  const st = STATES[cur];
+  const student = `<div class="card"><h3>学生看到的（手机）</h3><div class="steps">${order.map((o, i) => `<span class="${i < curIdx ? 'done' : i === curIdx ? 'cur' : ''}">${o === '处理中' ? '处理中·等配件' : o}</span>`).join('')}</div>
+    <div><b>洗手池水龙头漏水</b>　<span class="pill ${st.user}">你现在：等待</span></div>
+    <div>阀芯缺货，<b>预计周四到货</b>，到货后王师傅会先联系你约时间。进水阀已临时关闭。</div>
+    <div>你可以：${myActions.length ? myActions.join('、') : '在工单里留言、补充照片'}（这一步不能取消：师傅已经上门）</div>
+    <div>有问题找：${st.contact}，或在工单里留言</div>
+    <div class="sub">已通知你 ${TIMELINE.filter(t => notifyOf(t[2]).includes('学生')).length} 次：${TIMELINE.filter(t => notifyOf(t[2]).includes('学生')).map(t => t[2]).join('、')}</div></div>`;
+  const desk = `<div class="card"><h3>前台看到的（工单队列）</h3><table><tr><th>状态</th><th>张数</th><th>超时</th></tr>${[['已提交', 3, 0], ['需要补充', 1, 0], ['已受理', 2, 1], ['已派单', 5, 0], ['处理中', 4, 0], ['等配件', 2, 0], ['待确认', 6, 2]].map(r => `<tr><td>${r[0]}</td><td class="num">${r[1]}</td><td class="num ${r[2] ? 'poor' : ''}">${r[2] || ''}</td></tr>`).join('')}</table><div class="sub">“超时”= 停留时间超过这个状态承诺的时间；“待确认”超过 3 天会自动关闭并通知学生。</div></div>`;
+  const worker = `<div class="card"><h3>维修班看到的（配件单）</h3><div>工单：宿舍 5 号楼 312　水龙头阀芯 ×1</div><div>状态：<b>等配件</b>（由维修班负责），承诺到货：周四</div><div>到货后点 <button type="button">配件到货</button>，系统会同时通知学生和王师傅</div><div class="sub">时间线：${TIMELINE.map(t => `${t[0]} ${t[2]}`).join(' → ')}</div></div>`;
+  $('views').innerHTML = student + desk + worker;
+})();
+
+// ---------- 4 规则检查 ----------
+function audit(states, trans, start) {
+  const names = Object.keys(states), nonFinal = names.filter(n => !states[n].final), out = [];
+  const add = (name, bad) => out.push({ name, bad });
+  add('每个未结束的状态都写明谁负责', nonFinal.filter(n => !states[n].owner));
+  add('每个未结束的状态都写明要多久', nonFinal.filter(n => !states[n].eta));
+  add('每个未结束的状态都写明出问题找谁', nonFinal.filter(n => !states[n].contact));
+  add('需要用户行动的状态，用户确实有可做的事件', nonFinal.filter(n => states[n].user === 'act' && !trans.some(t => t[0] === n && t[3] === '学生')));
+  add('不是学生自己做的转变，都会通知学生', trans.filter(t => t[3] !== '学生' && !t[4].includes('学生')).map(t => `${t[0]}→${t[2]}`));
+  add('每个未结束的状态都有出路（没有死胡同）', nonFinal.filter(n => !trans.some(t => t[0] === n)));
+  const reach = new Set([start]); let grew = true; while (grew) { grew = false; for (const t of trans) if (reach.has(t[0]) && !reach.has(t[2])) { reach.add(t[2]); grew = true; } }
+  add('每个状态都能从提交走到', names.filter(n => !reach.has(n)));
+  add('关闭前由学生确认（或超时自动关闭并通知）', trans.filter(t => states[t[2]] && states[t[2]].final && t[2] !== '已取消' && !(t[3] === '学生' || (t[3] === '系统' && t[4].includes('学生')))).map(t => `${t[0]}→${t[2]}（${t[3]}）`));
+  add('需要等待时，有超时或负责人推进', nonFinal.filter(n => states[n].user === 'wait' && !states[n].owner));
+  return out;
+}
+const A = audit(STATES, T, '已提交'), N = audit(NAIVE_STATES, NAIVE_T, '已提交');
+$('checks').innerHTML = '<tr><th>规则</th><th>只有 3 个状态的版本</th><th>本流程</th></tr>' + A.map((a, i) => `<tr><td>${a.name}</td><td>${N[i].bad.length ? `<span class="poor">${N[i].bad.length} 处</span>：${esc(N[i].bad.join('、'))}` : '<span class="good">通过</span>'}</td><td>${a.bad.length ? `<span class="poor">${a.bad.length} 处</span>：${esc(a.bad.join('、'))}` : '<span class="good">通过</span>'}</td></tr>`).join('');
+$('mchecks').innerHTML = `只有“已提交、处理中、已完成”三个状态时，${N.filter(x => x.bad.length).length} 条规则不通过：学生看到“处理中”三天，却不知道是在等配件、等上门还是被忘了；师傅一个人就能把工单标成“已完成”。本流程的 ${A.length} 条规则全部通过。这些检查读的是流程定义本身，改了流程就要重新跑一遍。`;
+R.audit = { ours: A.map(a => a.bad.length), naive: N.map(a => a.bad.length) };
+
+// ---------- 5 随机操作 ----------
+const mulberry32 = a => () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+function fire(ticket, ev, who) {
+  const t = T.find(t => t[0] === ticket.state && t[1] === ev);
+  if (!t) return { ok: false, why: '当前状态不允许这个事件' };
+  if (t[3] !== who) return { ok: false, why: `${who}没有权限做“${ev}”` };
+  const age = ticket.clock - ticket.since;
+  if (ev === '重新打开' && age > TIME_RULES.重新打开.within) return { ok: false, why: '关闭超过 7 天，不能重新打开' };
+  if (ev === '超时' && age < TIME_RULES.超时[ticket.state]) return { ok: false, why: '还没到超时时间' };
+  ticket.history.push([ticket.state, ev, t[2], who]); ticket.state = t[2]; ticket.since = ticket.clock; ticket.notes += t[4].length;
+  return { ok: true };
+}
+(() => {
+  const rnd = mulberry32(7), EVENTS = [...new Set(T.map(t => t[1]))], WHO = ['学生', '前台', '派单员', '维修师傅', '维修班', '系统'];
+  const why = {}, visits = {}; let accepted = 0, tried = 0, notes = 0, finals = 0, invariant = 0, closedByStudentOrTimeout = 0, closes = 0;
+  for (let k = 0; k < 500; k++) {
+    const tk = { state: '已提交', since: 0, clock: 0, history: [], notes: 0 };
+    for (let step = 0; step < 20; step++) {
+      tk.clock += rnd() * 30;
+      // 一半时间选“当前状态下定义过的事件”，一半时间完全随机，这样既能走完流程，也能试到大量非法操作
+      const defined = T.filter(t => t[0] === tk.state);
+      const pool = rnd() < 0.85 && defined.some(t => t[1] !== '取消') ? defined.filter(t => t[1] !== '取消') : defined;
+      const ev = rnd() < 0.5 && pool.length ? pool[Math.floor(rnd() * pool.length)][1] : EVENTS[Math.floor(rnd() * EVENTS.length)];
+      const who = rnd() < 0.6 && defined.length ? (defined.find(t => t[1] === ev) || defined[0])[3] : WHO[Math.floor(rnd() * WHO.length)];
+      tried++; const r = fire(tk, ev, who);
+      if (r.ok) { accepted++; visits[tk.state] = (visits[tk.state] || 0) + 1; const last = tk.history[tk.history.length - 1]; if (last[2] === '已关闭') { closes++; if (last[3] === '学生' || last[3] === '系统') closedByStudentOrTimeout++; } }
+      else why[r.why.replace(/^.*没有权限.*$/, '操作者没有权限')] = (why[r.why.replace(/^.*没有权限.*$/, '操作者没有权限')] || 0) + 1;
+      if (!STATES[tk.state] || (!STATES[tk.state].final && !STATES[tk.state].owner)) invariant++;
+    }
+    notes += tk.notes; if (STATES[tk.state].final) finals++;
+  }
+  $('fuzz').innerHTML = '<tr><th>统计</th><th>结果</th></tr>' +
+    `<tr><td>尝试的操作</td><td class="num">${tried}</td></tr><tr><td>被接受</td><td class="num">${accepted}</td></tr>` +
+    Object.entries(why).sort((a, b) => b[1] - a[1]).map(([w, n]) => `<tr><td>被拒绝：${w}</td><td class="num">${n}</td></tr>`).join('') +
+    `<tr><td>进入“已关闭”的次数／其中由学生确认或超时自动关闭</td><td class="num">${closes}／${closedByStudentOrTimeout} ${ok(closes === closedByStudentOrTimeout)}</td></tr>` +
+    `<tr><td>任何时刻出现“未结束却没有负责人”的状态</td><td class="num">${invariant} ${ok(invariant === 0)}</td></tr>` +
+    `<tr><td>发出的通知</td><td class="num">${notes}</td></tr><tr><td>20 步内走到结束（已关闭／已取消）的工单</td><td class="num">${finals}／500</td></tr>`;
+  $('mfuzz').innerHTML = `随机操作专门试“不该发生的事”：师傅替学生确认修好、关闭两周后又重新打开、还没到 3 天就超时关闭……这些都被状态机拒绝，并且拒绝的理由可以直接显示给操作的人。界面上把按钮藏起来不够，服务端的状态机必须同样拒绝。`;
+  R.fuzz = { tried, accepted, why, closes, closedByStudentOrTimeout, invariant, notes, finals };
+})();
+document.fonts.ready.then(() => { window.__rs = R; });
+</script>
+</body>
+</html>
