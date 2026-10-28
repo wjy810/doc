@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>触觉与身体：振动模式、设备能力与拇指可达范围</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .phones { display: grid; grid-template-columns: 210px 210px; gap: 12px; justify-content: center; }
+  canvas { width: 100%; height: auto; display: block; border-radius: 6px; background: #fbfbfa; }
+  .key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 3px 0 8px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>1 振动模式：能不能靠“摸”分出来</h2><canvas id="vib" width="1000" height="330"></canvas>
+      <table id="vt"></table><p class="m" id="mvib"></p></div>
+    <div style="display:grid;gap:6px"><h2>2 设备能力：先检测，再决定反馈的分工</h2><table id="cap"></table><p class="sub">这张表是本次打开页面的浏览器实际检测到的结果。没有振动时，同样的状态改用声音、颜色与文字表达；需要力反馈或特殊触感时，可以先用游戏手柄或简单的硬件（经 Web Serial 连接的振动马达）验证。</p></div>
+  </div>
+</section>
+<section class="panel">
+  <h2>3 拇指可达范围：单手握持时，哪些按钮够得着</h2>
+  <p class="sub">几何近似模型：手机画面 390 × 844 像素；拇指根部在右下边缘外侧（左手时在左侧）；<span class="key" style="background:#cfe8d6"></span>容易<span class="key" style="background:#fbe8b8"></span>费力<span class="key" style="background:#f6c9c2"></span>够不到。半径按中等手型取 110—300 像素为容易、300—380 为费力，小手 × 0.85、大手 × 1.15——<b>这些参数是假设值</b>，只用来比较两种布局，不能代替真人在真实设备上的测试。</p>
+  <div class="two">
+    <div class="phones" id="phones"></div>
+    <div style="display:grid;gap:6px"><table id="reach"></table><h3>4 一次常见任务中拇指移动的距离（右手、中等手型）</h3><table id="travel"></table><p class="m" id="mtravel"></p></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const R = {};
+// ---------- 1 振动模式 ----------
+const SETS = {
+  '初稿': { 提示: [15], 成功: [30], 进行中: [10], 警告: [60, 80, 60], 错误: [80, 60, 80, 60, 80] },
+  '修改后': { 提示: [15], 成功: [20, 60, 60], 警告: [60, 80, 60], 错误: [80, 60, 80, 60, 80] }
+};
+// 启发式：脉冲个数不同，或长短节奏（≥ 50 毫秒算长）不同，才算“摸得出来”；需要在真实设备上请人验证
+const pulses = p => p.filter((_, i) => i % 2 === 0), rhythm = p => pulses(p).map(v => v >= 50 ? '长' : '短').join('');
+const distinct = (a, b) => pulses(a).length !== pulses(b).length || rhythm(a) !== rhythm(b);
+const g = $('vib').getContext('2d'); g.font = '18px "Noto Sans SC"';
+let y = 10; const rows = [];
+for (const [setName, set] of Object.entries(SETS)) {
+  g.fillStyle = '#1d2330'; g.fillText(setName, 6, y + 18); y += 28;
+  const names = Object.keys(set), bad = [];
+  for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) if (!distinct(set[names[i]], set[names[j]])) bad.push(`${names[i]}／${names[j]}`);
+  for (const n of names) { const p = set[n]; g.fillStyle = '#5b6475'; g.fillText(n, 20, y + 15); let t = 0; p.forEach((d, i) => { if (i % 2 === 0) { g.fillStyle = bad.some(b => b.split('／').includes(n)) ? '#c0392b' : '#2f6fdb'; g.fillRect(110 + t * 1.6, y + 2, d * 1.6, 16); } t += d; }); g.fillStyle = '#8a93a3'; g.fillText(`${p.join('／')} 毫秒`, 110 + t * 1.6 + 10, y + 15); y += 24; }
+  rows.push({ setName, n: names.length, bad }); y += 8;
+}
+R.vib = rows;
+$('vt').innerHTML = '<tr><th>方案</th><th>模式数</th><th>难以区分的组合</th></tr>' + rows.map(r => `<tr><td>${r.setName}</td><td class="num">${r.n}</td><td class="${r.bad.length ? 'poor' : 'good'}">${r.bad.length ? r.bad.join('、') : '无'}</td></tr>`).join('');
+$('mvib').innerHTML = '初稿的“提示、成功、进行中”都是一下短振，只差 5—15 毫秒，手指几乎分不出来，红色标出。修改后按“节奏”区分：成功是“短—长”两下，警告是两下等长，错误是三下；“进行中”不再振动，交给进度条。振动的强弱和细微的时长差别在不同手机上差异很大，节奏最可靠。';
+// ---------- 2 设备能力 ----------
+const mq = q => matchMedia(q).matches;
+const pads = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [];
+const CAP = [
+  ['振动 API（navigator.vibrate）', 'vibrate' in navigator ? '有' : '无', '简单的振动模式；部分浏览器与系统不支持'],
+  ['游戏手柄振动', pads.some(p => p.vibrationActuator) ? '有' : `无（已连接手柄 ${pads.length} 个）`, '双马达振动，可用来原型力反馈的强弱'],
+  ['触摸点数（maxTouchPoints）', String(navigator.maxTouchPoints), '0 表示没有触摸屏'],
+  ['主要指针是否粗略（触摸）', mq('(pointer: coarse)') ? '是' : '否', '决定点击目标的大小与间距'],
+  ['能否悬停', mq('(hover: hover)') ? '能' : '不能', '不能悬停时，提示不能只放在悬停里'],
+  ['设备方向（DeviceOrientationEvent）', 'DeviceOrientationEvent' in window ? '有接口' : '无', '倾斜控制；iOS 需要用户授权'],
+  ['Web Serial', 'serial' in navigator ? '有' : '无', '连接自制的振动、力传感器等硬件'],
+  ['WebHID', 'hid' in navigator ? '有' : '无', '连接专用的触觉设备']
+];
+R.cap = CAP.map(c => [c[0], c[1]]);
+$('cap').innerHTML = '<tr><th>能力</th><th>本次检测</th><th>用途</th></tr>' + CAP.map(c => `<tr><td>${c[0]}</td><td class="num">${c[1]}</td><td>${c[2]}</td></tr>`).join('');
+// ---------- 3 拇指可达 ----------
+const W = 390, H = 844;
+const CTRL = {   // 名称、使用频率（每次使用的次数，假设）
+  A: [['返回', 24, 40, 8], ['搜索', 360, 40, 5], ['筛选', 70, 120, 3], ['开始学习', 195, 300, 10], ['首页', 49, 810, 2], ['课程', 146, 810, 3], ['计划', 244, 810, 3], ['我的', 341, 810, 1]],
+  B: [['返回', 40, 760, 8], ['搜索', 350, 700, 5], ['筛选', 195, 640, 3], ['开始学习', 195, 700, 10], ['首页', 49, 810, 2], ['课程', 146, 810, 3], ['计划', 244, 810, 3], ['我的', 341, 810, 1]]
+};
+const zone = (x, y, hand, scale) => { const px = hand === '右手' ? W + 15 : -15, py = H - 90, d = Math.hypot(x - px, y - py) / scale; return d < 80 ? 'hard' : d < 110 ? 'reach' : d <= 300 ? 'easy' : d <= 380 ? 'reach' : 'hard'; };
+const COL = { easy: '#cfe8d6', reach: '#fbe8b8', hard: '#f6c9c2' }, CTRL_COL = { easy: '#1f7a4d', reach: '#a15c00', hard: '#b3261e' };
+for (const L of ['A', 'B']) {
+  const fig = document.createElement('figure'); fig.style.margin = '0'; const c = document.createElement('canvas'); c.width = W; c.height = H; fig.appendChild(c);
+  const cap = document.createElement('figcaption'); cap.className = 'sub'; cap.textContent = L === 'A' ? 'A：常用操作在顶部' : 'B：常用操作移到下半屏'; fig.appendChild(cap); $('phones').appendChild(fig);
+  const g2 = c.getContext('2d'), img = g2.createImageData(W, H);
+  for (let yy = 0; yy < H; yy++) for (let xx = 0; xx < W; xx++) { const z = zone(xx, yy, '右手', 1), col = { easy: [207, 232, 214], reach: [251, 232, 184], hard: [246, 201, 194] }[z], k = 4 * (yy * W + xx); img.data[k] = col[0]; img.data[k + 1] = col[1]; img.data[k + 2] = col[2]; img.data[k + 3] = 255; }
+  g2.putImageData(img, 0, 0); g2.strokeStyle = '#1d2330'; g2.lineWidth = 6; g2.strokeRect(3, 3, W - 6, H - 6);
+  g2.font = '22px "Noto Sans SC"';
+  for (const [n, x, yy] of CTRL[L]) { const z = zone(x, yy, '右手', 1); g2.fillStyle = '#fff'; g2.strokeStyle = CTRL_COL[z]; g2.lineWidth = 4; g2.beginPath(); g2.roundRect(x - 40, yy - 20, 80, 40, 10); g2.fill(); g2.stroke(); g2.fillStyle = CTRL_COL[z]; g2.textAlign = 'center'; g2.fillText(n, x, yy + 8); }
+}
+const VARIANTS = []; for (const hand of ['右手', '左手']) for (const [hs, sc] of [['小手', 0.85], ['中等', 1], ['大手', 1.15]]) VARIANTS.push([hand, hs, sc]);
+const share = (L, hand, sc) => { const tot = CTRL[L].reduce((s, c) => s + c[3], 0); return CTRL[L].filter(([, x, y]) => zone(x, y, hand, sc) === 'easy').reduce((s, c) => s + c[3], 0) / tot; };
+const hardList = (L, hand, sc) => CTRL[L].filter(([, x, y]) => zone(x, y, hand, sc) === 'hard').map(c => c[0]);
+R.reach = VARIANTS.map(([h, s, sc]) => ({ v: h + s, A: +(100 * share('A', h, sc)).toFixed(0), B: +(100 * share('B', h, sc)).toFixed(0), hardA: hardList('A', h, sc), hardB: hardList('B', h, sc) }));
+$('reach').innerHTML = '<tr><th>握持</th><th>A：按使用频率加权，在“容易”区的比例</th><th>B</th><th>够不到的（A → B）</th></tr>' + R.reach.map(r => `<tr><td>${r.v}</td><td class="num ${r.A < 50 ? 'poor' : ''}">${r.A}%</td><td class="num ${r.B < 50 ? 'poor' : 'good'}">${r.B}%</td><td>${r.hardA.join('、') || '无'} → ${r.hardB.join('、') || '无'}</td></tr>`).join('');
+// ---------- 4 拇指移动距离 ----------
+const TASK = ['开始学习', '返回', '搜索', '返回', '筛选', '开始学习', '课程', '返回', '开始学习', '计划'];
+function travel(L) { const pos = Object.fromEntries(CTRL[L].map(c => [c[0], [c[1], c[2]]])); let d = 0, strain = 0, hard = 0, prev = [W - 60, H - 200]; for (const t of TASK) { const p = pos[t]; d += Math.hypot(p[0] - prev[0], p[1] - prev[1]); const z = zone(p[0], p[1], '右手', 1); if (z === 'reach') strain++; if (z === 'hard') hard++; prev = p; } return { d, strain, hard }; }
+const tA = travel('A'), tB = travel('B'); R.travel = { A: tA, B: tB };
+$('travel').innerHTML = '<tr><th>测量（10 次操作：' + TASK.join('→') + '）</th><th>A</th><th>B</th></tr>' + `<tr><td>拇指移动的总距离</td><td class="num">${Math.round(tA.d)} 像素</td><td class="num">${Math.round(tB.d)} 像素</td></tr><tr><td>需要伸展的次数（费力区）</td><td class="num">${tA.strain}</td><td class="num">${tB.strain}</td></tr><tr><td>单手够不到、要换手或用另一只手的次数</td><td class="num ${tA.hard ? 'poor' : ''}">${tA.hard}</td><td class="num ${tB.hard ? 'poor' : 'good'}">${tB.hard}</td></tr>`;
+$('mtravel').innerHTML = '一次两次不明显，一天几十次就会累。B 把最常用的“开始学习”“返回”“搜索”放到下半屏，单手够不到的操作明显减少；但没有一种布局对所有人都好：左手握持时，左下角的“返回”离拇指根部太近反而难按，小手时右侧的“搜索”“我的”又够不到——个体差异要用多种握持方式检查，不能只看自己的习惯。';
+window.__hp = R;
+</script>
+</body>
+</html>
