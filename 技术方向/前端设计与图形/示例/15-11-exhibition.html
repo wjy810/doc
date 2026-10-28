@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>空间计算与数字展览：一个小型虚拟展览</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .wrap { max-width: 1140px; display: grid; grid-template-columns: 760px minmax(0, 1fr); gap: 12px; align-items: start; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: grid; gap: 6px; align-content: start; }
+  h2 { font-size: 13.5px; margin: 0; } h3 { font-size: 12.5px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .stage { position: relative; border-radius: 10px; overflow: hidden; background: #000; }
+  .stage canvas { display: block; width: 100%; height: auto; }
+  .hud { position: absolute; left: 0; right: 0; top: 0; display: flex; gap: 6px; padding: 8px; align-items: center; pointer-events: none; }
+  .hud > * { pointer-events: auto; }
+  .hud .title { color: #fff; font-weight: 700; background: rgba(20,24,32,.6); border-radius: 12px; padding: 2px 10px; margin-right: auto; }
+  .hud button, .ctrl button { font: inherit; font-size: 12px; border: 0; border-radius: 16px; padding: 3px 12px; background: rgba(255,255,255,.92); color: #1d2330; cursor: pointer; min-height: 32px; }
+  .hud button.exit { background: #1d2330; color: #fff; }
+  .caption { position: absolute; left: 50%; bottom: 52px; transform: translateX(-50%); width: 86%; background: rgba(20,24,32,.82); color: #fff; padding: 6px 12px; border-radius: 8px; font-size: 14px; line-height: 1.6; text-align: center; }
+  .ctrl { position: absolute; left: 0; right: 0; bottom: 0; display: flex; gap: 6px; padding: 8px; justify-content: center; }
+  .ctrl button[aria-pressed="true"] { background: #ffd400; }
+  .detail { position: absolute; right: 10px; top: 52px; width: 270px; background: rgba(255,255,255,.96); border-radius: 8px; padding: 8px 10px; font-size: 12px; display: none; }
+  .detail.open { display: block; }
+  ol.text { margin: 0; padding-left: 18px; font-size: 12px; } ol.text li { margin-bottom: 4px; }
+  .people { color: #fff; font-size: 12px; background: rgba(20,24,32,.6); border-radius: 12px; padding: 2px 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div style="display:grid;gap:12px">
+    <div class="stage" id="stage">
+      <div class="hud"><span class="title" id="hudTitle">数据可视化的六个时刻 · 第 1／6 件</span><span class="people" id="people"></span><button id="textBtn">文字版</button><button class="exit" id="exit">退出展览</button></div>
+      <div class="detail" id="detail" role="dialog" aria-label="展品详情"></div>
+      <div class="caption" id="caption" aria-live="polite"></div>
+      <div class="ctrl"><button id="prev">上一件</button><button id="next">下一件</button><button id="detailBtn">详情</button><button id="free" aria-pressed="false">自由探索（方向键行走、拖动转向、点地面圆圈瞬移）</button></div>
+    </div>
+    <div class="card"><h2>检查：距离、视线、路线与舒适度</h2><table id="chk"></table></div>
+  </div>
+  <div style="display:grid;gap:12px">
+    <div class="card"><h2>文字版展览（替代阅读入口）</h2><p class="sub">不进入三维空间也能读到全部内容；每件展品都有对画面的文字描述。展品画面是程序绘制的示意性再创作，不是原作的复制。</p><ol class="text" id="textList"></ol></div>
+    <div class="card"><h2>平面图与路线</h2><canvas id="plan" width="560" height="300" style="width:100%;height:auto;border-radius:6px;background:#fbfbfa"></canvas><p class="sub" id="planNote"></p></div>
+  </div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+const $ = id => document.getElementById(id);
+const EX = [
+  { y: '1786', who: 'William Playfair', t: '《商业与政治地图集》中的折线图', cap: '1786 年，Playfair 用两条折线画出英国的进口与出口随年份的变化，两条线之间的面积就是贸易差额。这是最早的时间序列折线图之一。', alt: '两条起伏的折线，一条在前半段较高、后半段较低，交叉处之后两线之间涂了颜色。', art: 'line' },
+  { y: '1854', who: 'John Snow', t: '伦敦霍乱死亡地图', cap: '1854 年伦敦苏活区暴发霍乱，Snow 把每一例死亡标在街道图上：病例集中在布罗德街的公共水泵周围。', alt: '浅色街道网格上有许多小黑条，密集地聚在中间一个水泵符号周围。', art: 'map' },
+  { y: '1858', who: 'Florence Nightingale', t: '克里米亚战争死因的极区面积图', cap: 'Nightingale 用扇形的面积比较每个月士兵的死因，说明可以预防的疾病造成的死亡，远多于战伤。', alt: '一圈从中心向外的扇形，每个扇形由大块的蓝灰色和小块的红色、黑色组成。', art: 'rose' },
+  { y: '1869', who: 'Charles Joseph Minard', t: '拿破仑 1812 年远征俄国图', cap: 'Minard 用一条带子同时表示军队的路线、方向和人数：向东进军的米色带子越来越窄，撤退的黑色带子更细，下方还有撤退时的气温。', alt: '一条从左向右变窄的米色宽带，下方一条从右回到左的细黑带，最下面是一条折线。', art: 'flow' },
+  { y: '1900', who: 'W. E. B. Du Bois', t: '巴黎世博会的数据画像', cap: '1900 年巴黎世博会上，Du Bois 和学生们用大胆的色块与不寻常的形式，呈现美国非裔群体的人口、教育与经济状况。', alt: '红、黄、绿、黑几种色块组成的螺旋形条带，从外向内盘绕。', art: 'spiral' },
+  { y: '1920—1930 年代', who: 'Otto Neurath 等', t: 'Isotype 图形统计', cap: 'Isotype 用重复的标准小图形表示数量，每个图形代表一个固定的数目，让不熟悉图表的人也能比较多少。', alt: '几行排列整齐的小人图形，每行的人数不同。', art: 'iso' }
+];
+const W = 760, H = 460;
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); renderer.setSize(W, H, false); renderer.setPixelRatio(1);
+$('stage').prepend(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color('#d9d6cf'); scene.fog = new THREE.Fog('#d9d6cf', 18, 40);
+const camera = new THREE.PerspectiveCamera(60, W / H, 0.1, 100); camera.rotation.order = 'YXZ';
+scene.add(new THREE.HemisphereLight('#ffffff', '#8a8378', 1.6));
+const sun = new THREE.DirectionalLight('#ffffff', 1.2); sun.position.set(-4, 10, 6); scene.add(sun);
+// 展厅：24 × 12 米，北墙与南墙各三件展品
+const room = { x: 12, z: 6, h: 4 };
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(24, 12), new THREE.MeshStandardMaterial({ color: '#b9b2a6' })); floor.rotation.x = -Math.PI / 2; scene.add(floor);
+const wallMat = new THREE.MeshStandardMaterial({ color: '#efece6' });
+for (const [w, x, z, ry] of [[24, 0, -6, 0], [24, 0, 6, Math.PI], [12, -12, 0, Math.PI / 2], [12, 12, 0, -Math.PI / 2]]) { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, room.h), wallMat); m.position.set(x, room.h / 2, z); m.rotation.y = ry; scene.add(m); }
+// 展品画面：程序绘制的示意性再创作
+function art(kind) {
+  const c = document.createElement('canvas'); c.width = 768; c.height = 512; const g = c.getContext('2d');
+  g.fillStyle = '#f4ecd8'; g.fillRect(0, 0, 768, 512); g.strokeStyle = '#3a3226'; g.fillStyle = '#3a3226'; g.lineWidth = 4;
+  if (kind === 'line') { const a = x => 300 - 120 * Math.sin(x / 140) - x * 0.12, b = x => 360 - 80 * Math.sin(x / 200 + 1) - x * 0.25; g.fillStyle = 'rgba(190,80,60,.35)'; g.beginPath(); for (let x = 60; x <= 720; x += 6) g.lineTo(x, a(x)); for (let x = 720; x >= 60; x -= 6) g.lineTo(x, b(x)); g.fill(); for (const f of [a, b]) { g.beginPath(); for (let x = 60; x <= 720; x += 6) g.lineTo(x, f(x)); g.stroke(); } }
+  if (kind === 'map') { g.strokeStyle = '#c9bea6'; g.lineWidth = 10; for (let i = 0; i < 7; i++) { g.beginPath(); g.moveTo(0, 60 + i * 70 + (i % 2) * 20); g.lineTo(768, 40 + i * 72); g.stroke(); g.beginPath(); g.moveTo(80 + i * 110, 0); g.lineTo(60 + i * 115, 512); g.stroke(); } let s = 7; const r = () => (s = (s * 16807) % 2147483647) / 2147483647; g.fillStyle = '#1d1a14'; for (let i = 0; i < 160; i++) { const d = Math.abs(r() + r() + r() - 1.5) * 260; const a = r() * 7; g.fillRect(384 + d * Math.cos(a), 256 + d * 0.7 * Math.sin(a), 10, 4); } g.fillStyle = '#b3261e'; g.beginPath(); g.arc(384, 256, 12, 0, 7); g.fill(); }
+  if (kind === 'rose') { const cx = 384, cy = 256; for (let i = 0; i < 12; i++) { const a0 = i / 12 * Math.PI * 2, a1 = (i + 1) / 12 * Math.PI * 2; for (const [r, col] of [[60 + 160 * Math.abs(Math.sin(i * 0.7)), '#8fa7b8'], [40 + 40 * Math.abs(Math.cos(i)), '#c0504d'], [30, '#2b2b2b']]) { g.fillStyle = col; g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, r, a0, a1); g.fill(); } } }
+  if (kind === 'flow') { g.fillStyle = '#d8b88a'; g.beginPath(); g.moveTo(40, 120); g.lineTo(700, 200); g.lineTo(700, 212); g.lineTo(40, 240); g.fill(); g.fillStyle = '#1d1a14'; g.beginPath(); g.moveTo(700, 214); g.lineTo(40, 268); g.lineTo(40, 276); g.lineTo(700, 220); g.fill(); g.lineWidth = 3; g.beginPath(); for (let x = 60; x <= 700; x += 40) g.lineTo(x, 420 + 40 * Math.sin(x / 90)); g.stroke(); }
+  if (kind === 'spiral') { const cols = ['#c0392b', '#e8b923', '#2e7d32', '#1d1a14', '#3b6fb6']; g.lineWidth = 34; for (let k = 0; k < 5; k++) { g.strokeStyle = cols[k]; g.beginPath(); for (let a = 0; a < Math.PI * (2.2 + k * 0.5); a += 0.05) { const r = 220 - k * 40 - a * 6; g.lineTo(384 + r * Math.cos(a), 256 + r * Math.sin(a)); } g.stroke(); } }
+  if (kind === 'iso') { const counts = [9, 6, 12, 4]; counts.forEach((n, row) => { for (let i = 0; i < n; i++) { const x = 70 + i * 52, y = 90 + row * 100; g.fillStyle = row % 2 ? '#c0392b' : '#3a3226'; g.beginPath(); g.arc(x, y, 12, 0, 7); g.fill(); g.fillRect(x - 13, y + 14, 26, 40); } }); }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function labelTex(lines, w = 512, h = 192, size = 40) { const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); g.fillStyle = '#ffffff'; g.fillRect(0, 0, w, h); g.fillStyle = '#1d2330'; lines.forEach((l, i) => { g.font = `${i ? 400 : 700} ${i ? size * 0.7 : size}px "Noto Sans SC"`; g.fillText(l, 20, 20 + size + i * size * 1.25); }); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; }
+const PW = 2.4, PH = 1.6, EYE = 1.6, VIEW = 3.0;
+const slots = [[-8, -1], [0, -1], [8, -1], [8, 1], [0, 1], [-8, 1]];   // [x, 北墙 −1／南墙 +1]
+const stops = [], frames = [], labels = [];
+EX.forEach((e, i) => {
+  const [x, side] = slots[i], z = side * (room.z - 0.06), ry = side < 0 ? 0 : Math.PI;
+  const frame = new THREE.Mesh(new THREE.PlaneGeometry(PW + 0.16, PH + 0.16), new THREE.MeshStandardMaterial({ color: '#3a3226' })); frame.position.set(x, EYE, z - side * 0.01); frame.rotation.y = ry; scene.add(frame);
+  const pic = new THREE.Mesh(new THREE.PlaneGeometry(PW, PH), new THREE.MeshStandardMaterial({ map: art(e.art) })); pic.position.set(x, EYE, z - side * 0.02); pic.rotation.y = ry; pic.userData.i = i; scene.add(pic); frames.push(pic);
+  const lab = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.225), new THREE.MeshBasicMaterial({ map: labelTex([`${i + 1}. ${e.y}`, e.who]) })); lab.position.set(x + side * -(PW / 2 + 0.5), 1.35, z - side * 0.02); lab.rotation.y = ry; scene.add(lab); labels.push(lab);
+  stops.push({ pos: new THREE.Vector3(x, EYE, z - side * VIEW), yaw: side < 0 ? 0 : Math.PI });
+  // 地面编号（空间标注）与瞬移点
+  const pad = new THREE.Mesh(new THREE.CircleGeometry(0.35, 32), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.7 })); pad.rotation.x = -Math.PI / 2; pad.position.set(x, 0.01, z - side * VIEW); pad.userData.stop = i; scene.add(pad);
+});
+// 视线引导：通往下一件的地面箭头
+const arrows = new THREE.Group(); scene.add(arrows);
+function showArrow(i) {
+  arrows.clear(); if (i >= EX.length - 1) return;
+  const a = stops[i].pos, b = stops[i + 1].pos, d = new THREE.Vector3().subVectors(b, a); d.y = 0; const n = Math.max(2, Math.floor(d.length() / 1.2));
+  for (let k = 1; k < n; k++) { const p = a.clone().addScaledVector(d, k / n); const m = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.4, 3), new THREE.MeshBasicMaterial({ color: '#e0a100' })); m.position.set(p.x, 0.03, p.z); m.rotation.x = -Math.PI / 2; m.rotation.z = Math.atan2(-d.x, -d.z); arrows.add(m); }   // 圆锥尖端指向下一件
+}
+// 其他参观者（模拟）
+const others = [0, 1].map(k => { const m = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 1.0, 4, 12), new THREE.MeshStandardMaterial({ color: k ? '#7fa7e6' : '#9fc59a', transparent: true, opacity: 0.85 })); scene.add(m); return m; });
+// ---------- 导览：按计划的曲线移动相机 ----------
+const SPEED = 1.2, YAW_RATE = 45 * Math.PI / 180;   // 米／秒；弧度／秒
+const S = { i: 0, yaw: 0, pitch: 0, mode: 'tour', anim: null };
+camera.position.copy(stops[0].pos); S.yaw = stops[0].yaw;
+const angDiff = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
+function plan(fromPos, fromYaw, to) {   // 先原地转向路线方向，再直线行走，最后转向展品；三段都限制速度
+  const d = new THREE.Vector3().subVectors(to.pos, fromPos); d.y = 0; const dist = d.length(), heading = dist > 0.01 ? Math.atan2(-d.x, -d.z) : fromYaw;
+  const t1 = Math.abs(angDiff(fromYaw, heading)) / YAW_RATE, t2 = dist / SPEED, t3 = Math.abs(angDiff(heading, to.yaw)) / YAW_RATE;
+  const ease = u => u < 0 ? 0 : u > 1 ? 1 : u;   // 匀速（不加速度曲线，便于测量最大速度）
+  return { T: t1 + t2 + t3, dist, at(t) {
+    if (t < t1) return { p: fromPos.clone(), yaw: fromYaw + angDiff(fromYaw, heading) * ease(t / t1) };
+    if (t < t1 + t2) return { p: fromPos.clone().addScaledVector(d, ease((t - t1) / t2)), yaw: heading };
+    return { p: to.pos.clone(), yaw: heading + angDiff(heading, to.yaw) * ease(t3 ? (t - t1 - t2) / t3 : 1) };
+  } };
+}
+function go(i) {
+  if (i < 0 || i >= EX.length) return; const pl = plan(camera.position.clone(), S.yaw, stops[i]); S.anim = { pl, t0: performance.now() }; S.i = i; S.mode = 'tour';
+  $('free').setAttribute('aria-pressed', 'false'); closeDetail(); updateHud(); showArrow(i);
+}
+function updateHud() { const e = EX[S.i]; $('hudTitle').textContent = `数据可视化的六个时刻 · 第 ${S.i + 1}／6 件`; $('caption').textContent = `${e.y} · ${e.who}：${e.cap}`; $('prev').disabled = S.i === 0; $('next').textContent = S.i === EX.length - 1 ? '看完了：去出口' : '下一件'; }
+function openDetail() { const e = EX[S.i]; $('detail').innerHTML = `<b>${S.i + 1}. ${e.t}</b><br><span class="sub">${e.y} · ${e.who}</span><p style="margin:4px 0">${e.cap}</p><p class="sub" style="margin:0">画面描述：${e.alt}</p><p class="sub" style="margin:4px 0 0">按 Esc 或再点“详情”关闭</p>`; $('detail').classList.add('open'); }
+function closeDetail() { $('detail').classList.remove('open'); }
+$('prev').onclick = () => go(S.i - 1);
+$('next').onclick = () => S.i === EX.length - 1 ? exit() : go(S.i + 1);
+$('detailBtn').onclick = () => $('detail').classList.contains('open') ? closeDetail() : openDetail();
+$('free').onclick = () => { S.mode = S.mode === 'free' ? 'tour' : 'free'; $('free').setAttribute('aria-pressed', S.mode === 'free'); };
+function exit() { closeDetail(); $('caption').textContent = '已退出展览。可以在右侧的文字版继续阅读，或点“上一件”回到展厅。'; S.exited = true; }
+$('exit').onclick = exit; $('textBtn').onclick = () => $('textList').scrollIntoView({ block: 'nearest' });
+addEventListener('keydown', e => { if (e.key === 'Escape') { closeDetail(); } });
+// 自由探索：方向键行走（限速 1.2 米／秒），拖动转向（限速），点击地面圆圈瞬移，点击展品看详情
+const keys = new Set(); addEventListener('keydown', e => keys.add(e.key)); addEventListener('keyup', e => keys.delete(e.key));
+let drag = null; renderer.domElement.addEventListener('pointerdown', e => drag = { x: e.clientX, y: e.clientY, moved: false });
+addEventListener('pointerup', e => { if (drag && !drag.moved) pick(e); drag = null; });
+addEventListener('pointermove', e => { if (!drag || S.mode !== 'free') return; const dx = e.clientX - drag.x; if (Math.abs(dx) > 3) drag.moved = true; S.yaw -= Math.max(-0.06, Math.min(0.06, dx * 0.004)); drag.x = e.clientX; });
+const ray = new THREE.Raycaster();
+function pick(e) {
+  const r = renderer.domElement.getBoundingClientRect(); ray.setFromCamera(new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+  const hit = ray.intersectObjects(scene.children, false).find(h => h.object.userData.i !== undefined || h.object.userData.stop !== undefined);
+  if (!hit) return; if (hit.object.userData.stop !== undefined) go(hit.object.userData.stop); else { S.i = hit.object.userData.i; updateHud(); openDetail(); }
+}
+let last = performance.now();
+function tick(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (S.anim) { const t = (now - S.anim.t0) / 1000, s = S.anim.pl.at(Math.min(t, S.anim.pl.T)); camera.position.copy(s.p); S.yaw = s.yaw; if (t >= S.anim.pl.T) S.anim = null; }
+  if (S.mode === 'free' && !S.anim) { const f = (keys.has('ArrowUp') ? 1 : 0) - (keys.has('ArrowDown') ? 1 : 0), turn = (keys.has('ArrowLeft') ? 1 : 0) - (keys.has('ArrowRight') ? 1 : 0); S.yaw += turn * YAW_RATE * dt; camera.position.x -= Math.sin(S.yaw) * f * SPEED * dt; camera.position.z -= Math.cos(S.yaw) * f * SPEED * dt; camera.position.x = Math.max(-11.5, Math.min(11.5, camera.position.x)); camera.position.z = Math.max(-5.5, Math.min(5.5, camera.position.z)); }
+  camera.rotation.set(0, S.yaw, 0);   // 不滚转、不俯仰：地平线始终水平
+  const tt = now / 1000; others.forEach((m, k) => { const u = ((tt * 0.03 + k * 0.45) % 1) * 5, j = Math.floor(u), f = u - j, a = stops[j].pos, b = stops[j + 1].pos; m.position.set(a.x + (b.x - a.x) * f + (k ? 0.8 : -0.8), 0.72, a.z + (b.z - a.z) * f); });
+  $('people').textContent = `展厅中还有 ${others.length} 位参观者（模拟）`;
+  renderer.render(scene, camera); requestAnimationFrame(tick);
+}
+updateHud(); showArrow(0); requestAnimationFrame(tick);
+$('textList').innerHTML = EX.map(e => `<li><b>${e.t}</b>（${e.y}，${e.who}）<br>${e.cap}<br><span class="sub">画面描述：${e.alt}</span></li>`).join('');
+// ---------- 平面图 ----------
+function drawPlan(route) {
+  const c = $('plan'), g = c.getContext('2d'), sx = c.width / 24, P = (x, z) => [(x + 12) * sx, (z + 6) * sx];
+  g.clearRect(0, 0, c.width, c.height); g.strokeStyle = '#9aa6b5'; g.lineWidth = 3; g.strokeRect(...P(-12, -6), 24 * sx, 12 * sx);
+  g.fillStyle = '#ffffff'; g.fillRect(...P(-12.1, 3), 8, 2.4 * sx); g.fillStyle = '#1f7a4d'; g.font = '14px "Noto Sans SC"'; g.fillText('入口／出口', ...P(-11.6, 3.6));
+  slots.forEach(([x, side], i) => { const [px, pz] = P(x - PW / 2, side * 5.94); g.fillStyle = '#3a3226'; g.fillRect(px, pz - 3, PW * sx, 6); g.fillStyle = '#1d2330'; g.fillText(`${i + 1}`, ...P(x - 0.15, side * 4.9)); });
+  g.strokeStyle = '#e0a100'; g.lineWidth = 2.5; g.setLineDash([8, 6]); g.beginPath(); route.forEach((p, k) => g[k ? 'lineTo' : 'moveTo'](...P(p.x, p.z))); g.stroke(); g.setLineDash([]);
+  const v = stops[2].pos, f = 60 * Math.PI / 180 * W / H / 2;   // 第 3 站的水平视野
+  g.fillStyle = 'rgba(47,111,219,.15)'; g.beginPath(); g.moveTo(...P(v.x, v.z)); g.lineTo(...P(v.x - 8 * Math.tan(Math.atan(Math.tan(30 * Math.PI / 180) * W / H)), v.z - 8)); g.lineTo(...P(v.x + 8 * Math.tan(Math.atan(Math.tan(30 * Math.PI / 180) * W / H)), v.z - 8)); g.fill();
+}
+// ---------- 检查 ----------
+function measure() {
+  const hfov = 2 * Math.atan(Math.tan(30 * Math.PI / 180) * W / H);
+  const angW = 2 * Math.atan(PW / 2 / VIEW) * 180 / Math.PI, angH = 2 * Math.atan(PH / 2 / VIEW) * 180 / Math.PI;
+  // 标签文字在屏幕上的高度：第 1 行字高 40／192 × 0.225 米，站在第 1 站时投影到画面
+  camera.position.copy(stops[0].pos); camera.rotation.set(0, stops[0].yaw, 0); camera.updateMatrixWorld();
+  const lab = labels[0], top = lab.position.clone().add(new THREE.Vector3(0, 0.1125 - 0.0234, 0)), bot = top.clone().add(new THREE.Vector3(0, -0.047, 0));
+  const px = v => v.clone().project(camera).y * H / 2, labelPx = px(top) - px(bot);
+  // 路线：入口 → 6 站 → 出口
+  const entry = new THREE.Vector3(-11, EYE, 4.2), route = [entry, ...stops.map(s => s.pos), entry];
+  let len = 0, turns = 0; for (let k = 1; k < route.length; k++) len += route[k].distanceTo(route[k - 1]);
+  for (let k = 1; k < route.length - 1; k++) { const a = new THREE.Vector3().subVectors(route[k], route[k - 1]), b = new THREE.Vector3().subVectors(route[k + 1], route[k]); if (a.length() > 0.01 && b.length() > 0.01 && a.angleTo(b) >= Math.PI / 2 - 1e-6) turns++; }   // 90° 及以上的转弯
+  // 运动：按计划采样，求最大线速度与转向角速度
+  let vmax = 0, wmax = 0, Tsum = 0;
+  for (let k = 0; k < EX.length - 1; k++) { const pl = plan(stops[k].pos, stops[k].yaw, stops[k + 1]); Tsum += pl.T; let prev = pl.at(0); for (let t = 1 / 60; t <= pl.T; t += 1 / 60) { const s = pl.at(t); vmax = Math.max(vmax, s.p.distanceTo(prev.p) * 60); wmax = Math.max(wmax, Math.abs(angDiff(prev.yaw, s.yaw)) * 60); prev = s; } }
+  // 视线：站在第 i 站朝向展品时，下一件是否在水平视野内
+  let inView = 0; for (let k = 0; k < EX.length - 1; k++) { const d = new THREE.Vector3().subVectors(new THREE.Vector3(slots[k + 1][0], EYE, slots[k + 1][1] * 6), stops[k].pos); const ang = Math.abs(angDiff(stops[k].yaw, Math.atan2(-d.x, -d.z))); if (ang < hfov / 2) inView++; }
+  camera.position.copy(stops[S.i].pos); camera.rotation.set(0, S.yaw, 0);
+  drawPlan(route);
+  $('planNote').textContent = `虚线是导览路线：入口 → 1 至 3（北墙）→ 转到南墙 → 4 至 6 → 出口，共 ${len.toFixed(1)} 米。浅蓝色是站在第 3 件前的视野：下一件在身后。`;
+  return { hfov: hfov * 180 / Math.PI, angW, angH, labelPx, len, turns, vmax, wmax: wmax * 180 / Math.PI, Tsum, inView, walk: len / SPEED };
+}
+window.__ex = { go, openDetail, exit, measure, stops,
+  view(x, z, yawDeg, i) { S.anim = null; S.mode = 'free'; $('free').setAttribute('aria-pressed', 'true'); camera.position.set(x, EYE, z); S.yaw = yawDeg * Math.PI / 180; S.i = i; updateHud(); showArrow(i); }, state: () => ({ i: S.i, mode: S.mode, exited: !!S.exited, detail: $('detail').classList.contains('open'), cam: camera.position.toArray().map(v => +v.toFixed(2)), yaw: +(S.yaw * 180 / Math.PI).toFixed(1) }),
+  report(m, flow) {
+    $('chk').innerHTML = '<tr><th>检查</th><th>结果</th><th>依据</th></tr>' + [
+      ['展品距离与视角', `站在展品前 ${VIEW} 米；画面 ${PW} × ${PH} 米占水平视角 ${m.angW.toFixed(1)}°、垂直 ${m.angH.toFixed(1)}°（画面的水平视野 ${m.hfov.toFixed(0)}°）`, '观看距离约为画面宽度的 1—1.5 倍，整幅作品一眼看全', true],
+      ['标签的可读性', `第 1 站看墙上标签，第一行字在画面上约 ${m.labelPx.toFixed(1)} 像素高`, '小于 16 像素难以阅读；所以同样的文字同时放在底部字幕和详情里', m.labelPx >= 16],
+      ['路线', `6 件展品，${m.len.toFixed(1)} 米；90° 及以上的转弯 ${m.turns} 次（北墙走完后转到南墙）；按 1.2 米／秒走完约 ${(m.walk / 60).toFixed(1)} 分钟（不含停留）`, '路线单向、不走回头路；入口与出口在同一侧', m.turns <= 2],
+      ['视线引导', `站在一件展品前，下一件在视野内的有 ${m.inView}／5 次`, '不在视野内时，地面箭头指向下一件，底部按钮也可以直接前往', true],
+      ['移动舒适度', `导览中最大移动速度 ${m.vmax.toFixed(2)} 米／秒，最大转向 ${m.wmax.toFixed(1)}°／秒；不滚转、不俯仰；全程 ${m.Tsum.toFixed(1)} 秒`, '先转向再直走，速度恒定、没有突然的加速；也可以点地面圆圈直接到达', m.vmax <= 1.21 && m.wmax <= 45.1],
+      ['详情与退出', `${flow.detail ? '详情能打开，Esc 能关闭' : '详情没有打开'}；退出按钮在所有模式下都在右上角；退出后提示文字版`, '随时可以离开，不必走完', flow.detail && flow.closed && flow.exited],
+      ['替代阅读', `文字版列出 ${EX.length}／6 件，每件都有画面描述`, '不能或不想进入三维空间的人也能读到全部内容', true]
+    ].map(([a, b, c, ok]) => `<tr><td>${a}</td><td class="${ok ? 'good' : 'poor'}">${b}</td><td class="sub">${c}</td></tr>`).join('');
+  } };
+</script>
+</body>
+</html>

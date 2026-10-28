@@ -1,13 +1,19 @@
-// 12-08：拖动阻尼滑块、回答两道预测题（第一题故意答错）、点击参数地图，最后把方块定格在 0.35 秒
+// 15-11：测量；检查详情、Esc 与退出；走一段真实的导览动画；最后站到能看见第 2、3 件和地面箭头的位置
 module.exports = async page => {
-  const setRange = async (id, v) => { await page.evaluate(([id, v]) => { const e = document.getElementById(id); e.value = v; e.dispatchEvent(new Event('input')); }, [id, v]); await page.waitForTimeout(150); };
-  await setRange('c', 4); await setRange('c', 8);
-  await page.click('#quiz button[data-i="1"]'); await page.waitForTimeout(200);
-  await page.click('#quiz button[data-i="1"]'); await page.waitForTimeout(200);
-  const box = await page.locator('#map').boundingBox(), S = box.width / 520;
-  const kx = k => 50 + (k - 20) / 380 * 400, cy = c => 10 + (50 - c) / 49 * 210;
-  await page.mouse.click(box.x + kx(300) * S, box.y + cy(12) * S); await page.waitForTimeout(200);
-  await page.evaluate(() => window.__ex.freeze(0.35));
-  const r = await page.evaluate(() => ({ q: window.__ex.qlog, i: window.__ex.ilog, ver: window.__ex.ver, k: document.getElementById('k').value, c: document.getElementById('c').value, zeta: document.getElementById('zeta').innerText }));
-  console.log(JSON.stringify(r, null, 1));
+  await page.waitForFunction(() => window.__ex, null, { timeout: 30000 });
+  await page.waitForTimeout(800);
+  const m = await page.evaluate(() => window.__ex.measure());
+  console.log(JSON.stringify(m));
+  await page.click('#detailBtn'); const detail = await page.evaluate(() => window.__ex.state().detail);
+  await page.keyboard.press('Escape'); const closed = !(await page.evaluate(() => window.__ex.state().detail));
+  await page.click('#exit'); const exited = await page.evaluate(() => window.__ex.state().exited);
+  // 真实的导览：从第 1 件走到第 2 件，记录过程中的相机位置
+  await page.evaluate(() => { window.__ex.view(...window.__ex.stops[0].pos.toArray().filter((_, i) => i !== 1), 0, 0); });
+  await page.click('#next'); const samples = [];
+  for (let k = 0; k < 12; k++) { await page.waitForTimeout(1000); samples.push(await page.evaluate(() => window.__ex.state())); }
+  console.log(JSON.stringify(samples.map(s => [s.cam[0], s.cam[2], s.yaw])));
+  await page.evaluate(() => window.__ex.view(-3.2, 2.2, -32, 1)); await page.waitForTimeout(600);
+  await page.evaluate(([m, f]) => window.__ex.report(m, f), [m, { detail, closed, exited }]);
+  console.log(JSON.stringify({ detail, closed, exited }));
+  console.log('height', await page.evaluate(() => document.documentElement.scrollHeight));
 };
