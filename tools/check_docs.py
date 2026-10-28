@@ -17,6 +17,8 @@
     E104  参考资料锚点被引用但未定义，或已定义却从未被引用。
     E105  代码块围栏没有闭合。
     E106  指向仓库内其他文件的相对链接失效（文件或锚点不存在）。
+    E107  外部链接的网址中含有未转义的圆括号（常见于 DOI），链接会在第一个“)”处被截断；
+          应写成 %28 与 %29。
 
 提示（W）影响阅读质量，应逐条确认：
     W201  参考资料的首次引用顺序与编号顺序不一致。
@@ -42,6 +44,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SKIP_DIRS = {".git", "node_modules", ".github"}
 
 HAN = "㐀-䶿一-鿿豈-﫿"
+RE_PAREN_URL = re.compile(r"\]\((https?://[^)\s]*\([^)\s]*\)[^)\s]*)\)")
 RE_HAN_SPACE_HAN = re.compile(rf"[{HAN}] +[{HAN}]")
 RE_HAN_ASCII_PUNCT = re.compile(rf"[{HAN}][,;:?!]|[,;:?!][{HAN}]")
 RE_FENCE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
@@ -281,6 +284,8 @@ def check_file(path: Path, report: Report, record_links: bool = True) -> None:
 
         visible = mask_inline(raw)
         check_emphasis(path, lineno, visible, report)
+        for match in RE_PAREN_URL.finditer(raw):
+            report.add(path, lineno, "E107", f"网址中有未转义的圆括号：{match.group(1)}")
 
         if not RE_TABLE_DELIM.match(stripped):
             for match in RE_HAN_SPACE_HAN.finditer(visible):
