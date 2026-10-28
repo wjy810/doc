@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>数据可视化：语义、尺度、聚合、缺失值与不确定性</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 1140px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: grid; gap: 6px; align-content: start; }
+  .card.wide { grid-column: span 2; }
+  h2 { font-size: 13.5px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .pair figure { margin: 0; } .pair figcaption { font-size: 11px; color: var(--muted); }
+  .pair figcaption b { color: var(--bad); font-weight: 700; } .pair figcaption b.ok { color: var(--ok); }
+  svg { display: block; width: 100%; height: auto; font: 10px "Noto Sans SC", sans-serif; }
+  svg .axis text { fill: #5b6475; } svg .axis path, svg .axis line { stroke: #c3c9d3; }
+  .m { font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="card"><h2>1 数据语义决定编码</h2><p class="sub">先判断每个字段是什么类型，再选择视觉通道。下表是一份图表方案的自动检查。</p><table id="sem"></table><table id="spec"></table></div>
+  <div class="card"><h2>2 尺度：纵轴从哪里开始</h2><div class="pair" id="c2"></div><p class="m" id="m2"></p></div>
+  <div class="card"><h2>3 尺度：跨越几个数量级</h2><div class="pair" id="c3"></div><p class="m" id="m3"></p></div>
+  <div class="card"><h2>4 聚合：合在一起，结论反了</h2><div class="pair" id="c4"></div><table id="t4"></table></div>
+  <div class="card"><h2>5 聚合：平均数、中位数与分组宽度</h2><div class="pair" id="c5"></div><p class="m" id="m5"></p></div>
+  <div class="card"><h2>6 缺失值：没有数据不是零</h2><div class="pair" id="c6"></div><p class="m" id="m6"></p></div>
+  <div class="card"><h2>7 不确定性：样本量不同的比例</h2><div class="pair" id="c7"></div><table id="t7"></table></div>
+  <div class="card wide"><h2>检查汇总（数字都从画出来的图形上测量或由同一份数据算出；数据为演示而构造）</h2><table id="sum"></table></div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const W = 170, H = 130, M = { t: 8, r: 6, b: 22, l: 34 };
+const RED = '#c0392b', BLUE = '#2f6fdb', GRAY = '#8a93a3';
+function frame(sel, title, note, ok) {
+  const fig = d3.select(sel).append('figure');
+  const svg = fig.append('svg').attr('viewBox', `0 0 ${W} ${H}`);
+  fig.append('figcaption').html(`<b class="${ok ? 'ok' : ''}">${title}</b> ${note}`);
+  return svg;
+}
+const axisL = (svg, y, f) => svg.append('g').attr('class', 'axis').attr('transform', `translate(${M.l},0)`).call(d3.axisLeft(y).ticks(4, f));
+const axisB = (svg, x, f) => svg.append('g').attr('class', 'axis').attr('transform', `translate(0,${H - M.b})`).call(d3.axisBottom(x).ticks(5, f));
+const R = {};
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+// ---------- 1 语义 ----------
+$('sem').innerHTML = '<tr><th>字段</th><th>类型</th><th>合适的通道</th></tr>' + [['课程名称', '名义（类别）', '位置分区、色相、形状'], ['难度：入门／进阶／高级', '有序', '有序的位置、亮度或饱和度'], ['报名人数', '数量', '共同坐标轴上的位置、长度'], ['月份', '时间', '横轴位置，可以连线'], ['满意比例', '数量（有抽样误差）', '位置 ＋ 区间']].map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('');
+const RANK = { 数量: ['位置', '长度', '角度', '面积', '亮度', '色相'], 有序: ['位置', '亮度', '饱和度', '色相'], 名义: ['位置', '色相', '形状'], 时间: ['位置'] };
+const SPEC = [['难度', '有序', '色相'], ['报名人数', '数量', '面积'], ['课程名称', '名义', '连线'], ['月份', '时间', '位置'], ['报名人数', '数量', '长度']];
+const specRes = SPEC.map(([f, t, ch]) => { const list = RANK[t]; const ok = list.includes(ch) && list.indexOf(ch) <= 1; /* 只接受该类型最有效的前两种通道 */ let why = ''; if (ch === '连线') why = '名义类别之间没有顺序，连线暗示了不存在的趋势'; else if (!ok) why = `${t}数据用${ch}：${ch === '色相' ? '色相没有自然的顺序' : '比较面积比比较长度更难、更不准'}`; return { f, t, ch, ok: ok && ch !== '连线', why }; });
+$('spec').innerHTML = '<tr><th>方案</th><th>检查</th></tr>' + specRes.map(s => `<tr><td>${s.f} → ${s.ch}</td><td class="${s.ok ? 'good' : 'poor'}">${s.ok ? '合适' : s.why}</td></tr>`).join('');
+R.spec = specRes.filter(s => !s.ok).length;
+
+// ---------- 2 截断的纵轴 ----------
+const ENR = [['上月', 10000], ['本月', 10500]];
+function bars2(lo, title, note, ok) {
+  const svg = frame('#c2', title, note, ok), x = d3.scaleBand(ENR.map(d => d[0]), [M.l, W - M.r]).padding(0.35), y = d3.scaleLinear([lo, 11000], [H - M.b, M.t]);
+  svg.selectAll('rect').data(ENR).join('rect').attr('x', d => x(d[0])).attr('width', x.bandwidth()).attr('y', d => y(d[1])).attr('height', d => y(lo) - y(d[1])).attr('fill', BLUE);
+  axisL(svg, y, '~s'); axisB(svg, x);
+  const hs = [...svg.selectAll('rect').nodes()].map(n => +n.getAttribute('height'));
+  const dataChange = ENR[1][1] / ENR[0][1] - 1, visChange = hs[1] / hs[0] - 1;
+  return { hs, lie: visChange / dataChange, visChange };
+}
+const r2a = bars2(9800, '从 9800 开始', '本月看起来是上月的三倍多', false), r2b = bars2(0, '从 0 开始', '长度与数值成正比', true);
+$('m2').innerHTML = `数据增加 5.0%；左图的柱高增加 ${(100 * r2a.visChange).toFixed(0)}%，<b class="poor">说谎因子 ${r2a.lie.toFixed(1)}</b>；右图 ${(100 * r2b.visChange).toFixed(1)}%，说谎因子 ${r2b.lie.toFixed(2)}。柱形用长度编码，必须从 0 开始；只看变化时改用折线或直接标出差值。`;
+R.lie = [+r2a.lie.toFixed(1), +r2b.lie.toFixed(2)];
+
+// ---------- 3 对数尺度 ----------
+const SIZE = [['A', 12], ['B', 85], ['C', 430], ['D', 2100], ['E', 9800], ['F', 52000]];
+{ const svg = frame('#c3', '线性尺度的柱形', '小课程几乎看不见', false), x = d3.scaleBand(SIZE.map(d => d[0]), [M.l, W - M.r]).padding(0.25), y = d3.scaleLinear([0, 52000], [H - M.b, M.t]);
+  svg.selectAll('rect').data(SIZE).join('rect').attr('x', d => x(d[0])).attr('width', x.bandwidth()).attr('y', d => y(d[1])).attr('height', d => y(0) - y(d[1])).attr('fill', BLUE);
+  axisL(svg, y, '~s'); axisB(svg, x);
+  R.tiny = [...svg.selectAll('rect').nodes()].filter(n => +n.getAttribute('height') < 2).length; }
+{ const svg = frame('#c3', '对数尺度的点', '每格相差 10 倍', true), x = d3.scaleBand(SIZE.map(d => d[0]), [M.l, W - M.r]).padding(0.25), y = d3.scaleLog([10, 100000], [H - M.b, M.t]);
+  svg.selectAll('line.s').data(SIZE).join('line').attr('x1', d => x(d[0]) + x.bandwidth() / 2).attr('x2', d => x(d[0]) + x.bandwidth() / 2).attr('y1', H - M.b).attr('y2', d => y(d[1])).attr('stroke', '#c3c9d3');
+  svg.selectAll('circle').data(SIZE).join('circle').attr('cx', d => x(d[0]) + x.bandwidth() / 2).attr('cy', d => y(d[1])).attr('r', 3.5).attr('fill', BLUE);
+  axisL(svg, y, '~s'); axisB(svg, x);
+  const ys = [...svg.selectAll('circle').nodes()].map(n => +n.getAttribute('cy')); R.logGap = Math.min(...ys.slice(0, -1).map((v, i) => v - ys[i + 1])); }
+$('m3').innerHTML = `报名人数从 12 到 52000。线性柱形中 <b class="poor">${R.tiny}／6</b> 根不到 2 像素；对数尺度上相邻课程至少相隔 ${R.logGap.toFixed(0)} 像素。对数尺度上柱的长度不再与数值成正比，所以改用点，并在坐标轴上写清“对数”。`;
+
+// ---------- 4 辛普森悖论 ----------
+const SIMP = { 甲: { 短课: [95, 100], 长课: [120, 400] }, 乙: { 短课: [360, 400], 长课: [25, 100] } };
+const rate = ([a, b]) => a / b, total = p => { const v = Object.values(SIMP[p]); return [d3.sum(v, d => d[0]), d3.sum(v, d => d[1])]; };
+{ const svg = frame('#c4', '只看总体', '乙的完成率高得多', false), x = d3.scaleBand(['甲', '乙'], [M.l, W - M.r]).padding(0.35), y = d3.scaleLinear([0, 1], [H - M.b, M.t]);
+  svg.selectAll('rect').data(['甲', '乙']).join('rect').attr('x', d => x(d)).attr('width', x.bandwidth()).attr('y', d => y(rate(total(d)))).attr('height', d => y(0) - y(rate(total(d)))).attr('fill', GRAY);
+  axisL(svg, y, '.0%'); axisB(svg, x); }
+{ const svg = frame('#c4', '按课程长短分开', '甲在两组中都更高', true), g = ['短课', '长课'], x = d3.scaleBand(g, [M.l, W - M.r]).padding(0.2), xi = d3.scaleBand(['甲', '乙'], [0, x.bandwidth()]).padding(0.1), y = d3.scaleLinear([0, 1], [H - M.b, M.t]);
+  for (const k of g) for (const p of ['甲', '乙']) svg.append('rect').attr('x', x(k) + xi(p)).attr('width', xi.bandwidth()).attr('y', y(rate(SIMP[p][k]))).attr('height', y(0) - y(rate(SIMP[p][k]))).attr('fill', p === '甲' ? BLUE : '#9db7e8');
+  axisL(svg, y, '.0%'); axisB(svg, x); }
+$('t4').innerHTML = '<tr><th>平台</th><th>短课</th><th>长课</th><th>总体</th></tr>' + ['甲', '乙'].map(p => `<tr><td>${p}</td>${['短课', '长课'].map(k => `<td class="num">${SIMP[p][k][0]}／${SIMP[p][k][1]} = ${(100 * rate(SIMP[p][k])).toFixed(0)}%</td>`).join('')}<td class="num">${total(p)[0]}／${total(p)[1]} = ${(100 * rate(total(p))).toFixed(0)}%</td></tr>`).join('') + '<tr><td colspan="4" class="sub">甲的学员 80% 在上更难完成的长课，总体被拉低。这叫辛普森悖论：先问“这些数能不能直接加在一起”。</td></tr>';
+R.simpson = ['甲', '乙'].map(p => [rate(SIMP[p].短课), rate(SIMP[p].长课), rate(total(p))].map(v => +(100 * v).toFixed(0)));
+
+// ---------- 5 平均数、中位数、分组宽度 ----------
+const norm = d3.randomNormal.source(rng(11))(Math.log(3.5), 0.75), HOURS = d3.range(200).map(() => +Math.exp(norm()).toFixed(1));   // 对数正态：中位数约 3.5 小时
+const mean = d3.mean(HOURS), med = d3.median(HOURS);
+function hist(step, title, note, ok) {
+  const svg = frame('#c5', title, note, ok), x = d3.scaleLinear([0, 30], [M.l, W - M.r]), bins = d3.bin().domain([0, 30]).thresholds(d3.range(0, 30, step))(HOURS.filter(h => h < 30));
+  const y = d3.scaleLinear([0, d3.max(bins, b => b.length)], [H - M.b, M.t]).nice();
+  svg.selectAll('rect').data(bins).join('rect').attr('x', b => x(b.x0) + 0.5).attr('width', b => Math.max(0, x(b.x1) - x(b.x0) - 1)).attr('y', b => y(b.length)).attr('height', b => y(0) - y(b.length)).attr('fill', '#9db7e8');
+  for (const [v, c] of [[mean, RED], [med, '#1f7a4d']]) svg.append('line').attr('x1', x(v)).attr('x2', x(v)).attr('y1', M.t).attr('y2', H - M.b).attr('stroke', c).attr('stroke-width', 1.5);
+  axisL(svg, y); axisB(svg, x);
+  return bins.length;
+}
+const nb1 = hist(5, '每组 5 小时', '形状被抹平了', false), nb2 = hist(1, '每组 1 小时', '能看出集中在 2—4 小时', true);
+$('m5').innerHTML = `200 位学员每周学习时长（右偏）：<b class="poor">平均 ${mean.toFixed(1)} 小时</b>（红线），<b class="good">中位数 ${med.toFixed(1)} 小时</b>（绿线），最多 ${d3.max(HOURS)} 小时。少数学得很多的人把平均数拉高了；描述“一般人学多久”用中位数。分组宽度 5 时只有 ${nb1} 组，1 时 ${nb2} 组：同一份数据，形状完全不同，所以要试几种宽度。`;
+R.hours = { mean: +mean.toFixed(2), median: +med.toFixed(2), max: d3.max(HOURS), over30: HOURS.filter(h => h >= 30).length };
+
+// ---------- 6 缺失值 ----------
+const r6 = rng(5), MONTHS = d3.range(24).map(i => ({ i, v: Math.round(800 + i * 25 + 120 * Math.sin(i / 1.9) + 60 * r6()) }));
+MONTHS[8].v = null; MONTHS[9].v = null;   // 系统迁移，两个月没有记录
+function series(mode, title, note, ok) {
+  const svg = frame('#c6', title, note, ok), x = d3.scaleLinear([0, 23], [M.l, W - M.r]), y = d3.scaleLinear([0, 1600], [H - M.b, M.t]);
+  const data = mode === 'zero' ? MONTHS.map(d => ({ ...d, v: d.v ?? 0 })) : MONTHS;
+  if (mode === 'gap') svg.append('rect').attr('x', x(7.5)).attr('width', x(9.5) - x(7.5)).attr('y', M.t).attr('height', H - M.b - M.t).attr('fill', '#f1f2f4');
+  if (mode === 'gap') svg.append('text').attr('x', x(8.5)).attr('y', M.t + 12).attr('text-anchor', 'middle').attr('fill', '#5b6475').text('无数据');
+  const line = d3.line().x(d => x(d.i)).y(d => y(d.v)).defined(d => d.v !== null);
+  const path = svg.append('path').attr('d', line(data)).attr('fill', 'none').attr('stroke', mode === 'zero' ? RED : BLUE).attr('stroke-width', 1.5);
+  axisL(svg, y, '~s'); axisB(svg, x);
+  return { segments: (path.attr('d').match(/M/g) || []).length, minV: d3.min(data, d => d.v) };
+}
+const z = series('zero', '缺失当作 0', '看起来像报名人数暴跌', false), g = series('gap', '留出空缺并标注', '读者知道这里没有数据', true);
+const neighbours = [MONTHS[7].v, MONTHS[10].v];
+$('m6').innerHTML = `第 9、10 个月没有记录（系统迁移）。当作 0 时，曲线在相邻月份 ${neighbours.join('、')} 之间掉到 <b class="poor">${z.minV}</b>；右图用 D3 的 <code>line.defined()</code> 把曲线断成 ${g.segments} 段，并标出“无数据”。如果用插值补上，也要在图上说明哪些点是补出来的。`;
+R.missing = { zeroMin: z.minV, segments: g.segments, neighbours };
+
+// ---------- 7 不确定性 ----------
+const SAT = [['甲', 9, 10], ['乙', 172, 200], ['丙', 45, 50], ['丁', 3, 3], ['戊', 410, 500]];
+function wilson(k, n, z = 1.96) { const p = k / n, d = 1 + z * z / n, c = (p + z * z / (2 * n)) / d, h = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d; return [c - h, c + h]; }
+const sorted = SAT.slice().sort((a, b) => b[1] / b[2] - a[1] / a[2]);
+function satChart(withCI, title, note, ok) {
+  const svg = frame('#c7', title, note, ok), L = 56, y = d3.scaleBand(sorted.map(d => d[0]), [M.t, H - M.b]).padding(0.3), x = d3.scaleLinear([0.4, 1], [L, W - 16]);
+  for (const [n, k, t] of sorted) {
+    const p = k / t, cy = y(n) + y.bandwidth() / 2;
+    if (withCI) { const [lo, hi] = wilson(k, t); svg.append('line').attr('x1', x(Math.max(0.4, lo))).attr('x2', x(hi)).attr('y1', cy).attr('y2', cy).attr('stroke', '#9db7e8').attr('stroke-width', 4); }
+    svg.append('circle').attr('cx', x(p)).attr('cy', cy).attr('r', 3).attr('fill', BLUE);
+    svg.append('text').attr('x', L - 4).attr('y', cy + 3).attr('text-anchor', 'end').text(`${n}（${t}）`);
+  }
+  svg.append('g').attr('class', 'axis').attr('transform', `translate(0,${H - M.b})`).call(d3.axisBottom(x).ticks(3, '.0%'));
+}
+satChart(false, '只有比例', '丁排第一', false); satChart(true, '加上 95% 区间', '丁的区间最宽', true);
+const ci = sorted.map(([n, k, t]) => [n, k, t, wilson(k, t)]);
+$('t7').innerHTML = '<tr><th>课程</th><th>满意／回答</th><th>比例</th><th>95% 区间（Wilson）</th></tr>' + ci.map(([n, k, t, [lo, hi]]) => `<tr><td>${n}</td><td class="num">${k}／${t}</td><td class="num">${(100 * k / t).toFixed(0)}%</td><td class="num ${hi - lo > 0.3 ? 'poor' : ''}">${(100 * lo).toFixed(1)}%—${(100 * hi).toFixed(1)}%</td></tr>`).join('');
+R.ci = ci.map(([n, k, t, [lo, hi]]) => [n, +(100 * lo).toFixed(1), +(100 * hi).toFixed(1)]);
+
+// ---------- 汇总 ----------
+$('sum').innerHTML = '<tr><th>问题</th><th>误导的做法</th><th>测得</th><th>诚实的做法</th></tr>' + [
+  ['编码与语义不符', '有序数据用色相、数量用面积、类别之间连线', `方案中 ${R.spec}／5 处不合适`, '按类型选通道：数量先用位置与长度'],
+  ['截断纵轴', '柱形从 9800 开始', `说谎因子 ${R.lie[0]}`, '柱形从 0 开始（说谎因子 ' + R.lie[1] + '）'],
+  ['尺度不当', '跨四个数量级用线性柱形', `${R.tiny}／6 根柱不到 2 像素`, '对数尺度的点，并注明“对数”'],
+  ['不当聚合', '直接比较总体完成率', `总体 ${R.simpson[0][2]}% 对 ${R.simpson[1][2]}%，分组后甲两组都更高`, '按影响结果的变量分组'],
+  ['用平均数描述偏态', '“学员平均每周学 ' + R.hours.mean.toFixed(1) + ' 小时”', `中位数只有 ${R.hours.median.toFixed(1)} 小时`, '用中位数，并画分布'],
+  ['缺失当作 0', '两个月没有记录画成 0', `曲线掉到 ${R.missing.zeroMin}`, '断开曲线并标注“无数据”'],
+  ['忽略不确定性', '按比例排名', `丁只有 3 人回答，区间 ${R.ci.find(c => c[0] === '丁')[1]}%—100%`, '画出区间，样本太少时不排名']
+].map(r => `<tr>${r.map((c, i) => `<td class="${i === 2 ? 'poor' : i === 3 ? 'good' : ''}">${c}</td>`).join('')}</tr>`).join('');
+window.__enc = R;
+</script>
+</body>
+</html>
