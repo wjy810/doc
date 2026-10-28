@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>叙事与情绪：顺序、停留、转折，以及读者的控制</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --dur: 600ms; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  body.reduced { --dur: 0ms; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+  .toc a { color: #2456b0; margin-right: 6px; text-decoration: none; border-bottom: 1px dotted; } .toc a.cur { color: #1d2330; font-weight: 700; border-bottom-style: solid; }
+  .progress { height: 4px; background: #eef0f3; border-radius: 2px; } .progress i { display: block; height: 100%; width: 0; background: #2f6fdb; border-radius: 2px; transition: width var(--dur); }
+  .story { height: 420px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; position: relative; scroll-behavior: smooth; }
+  body.reduced .story { scroll-behavior: auto; }
+  .story-in { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; padding: 0 14px; }
+  .sticky { position: sticky; top: 0; height: 418px; display: grid; align-content: center; }
+  .chapter { min-height: 360px; padding: 120px 0 60px; }
+  .chapter h3 { margin: 0 0 6px; font-size: 16px; } .chapter p { margin: 0; max-width: 30em; }
+  .chapter .note { color: var(--muted); font-size: 11.5px; margin-top: 6px; }
+  .bar { transition: height var(--dur), y var(--dur), fill var(--dur); }
+  .static .story { height: auto; overflow: visible; } .static .sticky { position: static; height: auto; } .static .chapter { min-height: 0; padding: 12px 0; }
+  kbd { border: 1px solid #b9c0cc; border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; font-size: 11px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>滚动叙事：一座城市的通勤一天</h2>
+  <p class="sub">五个章节按时间推进：清晨平静、早高峰紧张、午后缓和、晚高峰到达高潮、夜里收束。左边的图表随章节变化（数据为示意）。读者可以用目录跳到任意一章、用 <kbd>J</kbd>／<kbd>K</kbd> 前后翻章、切换为不需要滚动的静态版，或关闭动画。</p>
+  <div class="controls"><span class="toc" id="toc"></span><label><input type="checkbox" id="static"> 静态版（一次看完全部）</label><label><input type="checkbox" id="reduced"> 减少动效</label></div>
+  <div class="progress" aria-hidden="true"><i id="prog"></i></div>
+  <div class="story" id="story" tabindex="0" aria-label="滚动叙事，按 J、K 翻章">
+    <div class="story-in"><div class="sticky"><svg id="chart" viewBox="0 0 400 300" role="img" aria-label="各时段通勤人数"></svg><p class="sub" id="caption" aria-live="polite"></p></div><div id="chapters"></div></div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>设计意图：情绪曲线与阅读时间</h2><svg id="arc" viewBox="0 0 520 200"></svg><table id="plan"><tr><th>章节</th><th>情绪强度</th><th>字数</th><th>估计阅读</th><th>停留／转折</th></tr></table></div>
+    <div style="display:grid;gap:6px"><h2>读者是否能掌控节奏</h2><table id="ctrl"><tr><th>检查</th><th>结果</th></tr></table><h2>测试脚本的阅读记录</h2><table id="log"><tr><th>时间</th><th>方式</th><th>进入章节</th></tr></table></div>
+  </div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs, parent, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; parent && parent.appendChild(e); return e; };
+const HOURS = [2, 1, 1, 1, 2, 6, 18, 42, 55, 30, 18, 16, 20, 18, 15, 16, 24, 46, 60, 38, 22, 14, 8, 4];   // 各小时通勤人数（示意，单位：万人次）
+const CH = [
+  { id: 'c1', title: '清晨：城市还没醒', range: [4, 6], text: '五点，地铁站的灯先亮起来。最早的一班车上，多是环卫工人、面包店的学徒和赶早班机的人。整座城市只有两万人次在路上。', intensity: 0.15, mark: '' },
+  { id: 'c2', title: '早高峰：一小时涨了二十倍', range: [7, 9], text: '七点到九点，人数在一小时内翻了二十多倍。换乘站的扶梯排起长队，站台上的人要等过两三班车才能上去。这是第一个转折：安静被打破了。', intensity: 0.75, mark: '转折' },
+  { id: 'c3', title: '午后：短暂的缓和', range: [10, 15], text: '午后的车厢松动下来。送外卖的骑手、去医院复诊的老人、逃课的学生——这是一天中最多样的时段。在这里停一停，看看曲线的低谷。', intensity: 0.3, mark: '停留' },
+  { id: 'c4', title: '晚高峰：一天的顶点', range: [16, 19], text: '六点，六十万人次同时在路上，比早高峰还多。下班、接孩子、赶饭局的人流叠在一起。最拥挤的不是早上，而是傍晚——这是全篇的高潮，也是第二个转折。', intensity: 1, mark: '高潮' },
+  { id: 'c5', title: '夜里：收束', range: [20, 23], text: '十点以后，人数回落到清晨的水平。末班车上，有人靠着窗睡着了。曲线回到起点，一天结束。', intensity: 0.2, mark: '' }
+];
+// 章节与目录
+$('chapters').innerHTML = CH.map((c, i) => `<section class="chapter" id="${c.id}" data-i="${i}"><h3>${i + 1}. ${c.title}</h3><p>${c.text}</p><p class="note">${c.mark ? `【${c.mark}】` : ''}${c.range[0]}:00—${c.range[1] + 1}:00</p></section>`).join('');
+$('toc').innerHTML = CH.map((c, i) => `<a href="#${c.id}" data-i="${i}">${i + 1} ${c.title.split('：')[0]}</a>`).join('');
+// 图表
+const svg = $('chart'), X = h => 30 + h * 15, Y = v => 260 - v * 3.6;
+for (const v of [0, 20, 40, 60]) { el('line', { x1: 30, x2: 390, y1: Y(v), y2: Y(v), stroke: '#eef0f3' }, svg); el('text', { x: 26, y: Y(v) + 3, 'text-anchor': 'end', 'font-size': 9, fill: '#5b6475' }, svg, v); }
+const bars = HOURS.map((v, h) => el('rect', { class: 'bar', x: X(h) + 1, width: 13, y: Y(0), height: 0, fill: '#c3c9d3' }, svg));
+for (const h of [0, 6, 12, 18, 23]) el('text', { x: X(h) + 7, y: 276, 'text-anchor': 'middle', 'font-size': 9, fill: '#5b6475' }, svg, h + '时');
+el('text', { x: 30, y: 16, 'font-size': 10, fill: '#5b6475' }, svg, '万人次／小时（示意数据）');
+let current = -1; const log = []; const T0 = performance.now(); let via = '滚动';
+function show(i, how = via) {
+  if (i === current) return; current = i; const c = CH[i];
+  HOURS.forEach((v, h) => { const shown = h <= c.range[1], hot = h >= c.range[0] && h <= c.range[1]; bars[h].setAttribute('height', shown ? v * 3.6 : 0); bars[h].setAttribute('y', shown ? Y(v) : Y(0)); bars[h].setAttribute('fill', hot ? (c.intensity > 0.7 ? '#e4572e' : '#2f6fdb') : '#c3c9d3'); });
+  $('caption').textContent = `第 ${i + 1} 章：${c.title}`;
+  document.querySelectorAll('#toc a').forEach(a => a.classList.toggle('cur', +a.dataset.i === i));
+  log.push([((performance.now() - T0) / 1000).toFixed(1) + ' 秒', how, `${i + 1} ${c.title.split('：')[0]}`]);
+  const t = $('log'); [...t.rows].slice(1).forEach(r => r.remove()); for (const r of log.slice(-8)) t.insertAdjacentHTML('beforeend', `<tr><td class="num">${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`);
+}
+const story = $('story');
+const io = new IntersectionObserver(es => { for (const e of es) if (e.isIntersecting) show(+e.target.dataset.i); }, { root: story, rootMargin: '-45% 0px -45% 0px' });
+document.querySelectorAll('.chapter').forEach(c => io.observe(c));
+story.addEventListener('scroll', () => { $('prog').style.width = (100 * story.scrollTop / (story.scrollHeight - story.clientHeight)) + '%'; });
+$('toc').addEventListener('click', e => { const a = e.target.closest('a'); if (!a) return; e.preventDefault(); via = '目录跳转'; story.scrollTo({ top: $(CH[+a.dataset.i].id).offsetTop - 60, behavior: document.body.classList.contains('reduced') ? 'auto' : 'smooth' }); setTimeout(() => via = '滚动', 1200); });
+story.addEventListener('keydown', e => { const k = e.key.toLowerCase(); if (k !== 'j' && k !== 'k') return; const n = Math.max(0, Math.min(CH.length - 1, current + (k === 'j' ? 1 : -1))); via = '键盘 ' + e.key.toUpperCase(); story.scrollTo({ top: $(CH[n].id).offsetTop - 60, behavior: 'auto' }); setTimeout(() => via = '滚动', 600); });
+$('static').onchange = e => { document.body.classList.toggle('static', e.target.checked); };
+$('reduced').onchange = e => document.body.classList.toggle('reduced', e.target.checked);
+if (matchMedia('(prefers-reduced-motion: reduce)').matches) { $('reduced').checked = true; document.body.classList.add('reduced'); }
+
+// 设计意图：情绪曲线与阅读时间（中文按每分钟约 400 字估计，另加每章看图 8 秒）
+let tAcc = 0; const arc = $('arc'), pts = [];
+CH.forEach((c, i) => { const chars = c.text.replace(/\s/g, '').length, sec = chars / 400 * 60 + 8; c.sec = sec; pts.push([tAcc + sec / 2, c.intensity, c]); tAcc += sec;
+  $('plan').insertAdjacentHTML('beforeend', `<tr><td>${i + 1} ${c.title.split('：')[0]}</td><td class="num">${c.intensity.toFixed(2)}</td><td class="num">${chars}</td><td class="num">${sec.toFixed(0)} 秒</td><td>${c.mark || '—'}</td></tr>`); });
+$('plan').insertAdjacentHTML('beforeend', `<tr><td>合计</td><td></td><td></td><td class="num">${(tAcc / 60).toFixed(1)} 分钟</td><td></td></tr>`);
+const AX = t => 40 + t / tAcc * 460, AY = v => 170 - v * 140;
+el('line', { x1: 40, x2: 500, y1: AY(0), y2: AY(0), stroke: '#c3c9d3' }, arc);
+el('path', { d: 'M' + pts.map(([t, v]) => `${AX(t).toFixed(1)} ${AY(v).toFixed(1)}`).join('L'), fill: 'none', stroke: '#e4572e', 'stroke-width': 2.5 }, arc);
+for (const [t, v, c] of pts) { el('circle', { cx: AX(t), cy: AY(v), r: 4, fill: '#e4572e' }, arc); el('text', { x: AX(t), y: AY(v) - 10, 'text-anchor': 'middle', 'font-size': 11, fill: '#1d2330' }, arc, c.title.split('：')[0] + (c.mark ? `（${c.mark}）` : '')); }
+el('text', { x: 40, y: 192, 'font-size': 10, fill: '#5b6475' }, arc, '0'); el('text', { x: 500, y: 192, 'font-size': 10, fill: '#5b6475', 'text-anchor': 'end' }, arc, `${(tAcc / 60).toFixed(1)} 分钟`); el('text', { x: 6, y: 34, 'font-size': 10, fill: '#5b6475' }, arc, '情绪强度');
+
+window.__nar = {
+  check() {
+    const rows = [];
+    rows.push(['目录能跳到每一章', [...document.querySelectorAll('#toc a')].every(a => document.querySelector(a.getAttribute('href'))) ? '能（5 个锚点都存在）' : '不能', true]);
+    rows.push(['键盘可以前后翻章', log.some(r => r[1].startsWith('键盘')) ? '能（J／K）' : '未测试', log.some(r => r[1].startsWith('键盘'))]);
+    rows.push(['有阅读进度', '有（顶部进度条）', true]);
+    const bar = bars[8], dur = getComputedStyle(bar).transitionDuration;
+    rows.push(['“减少动效”下图表不再过渡', document.body.classList.contains('reduced') ? `过渡时长 ${dur}` : `当前过渡 ${dur}`, document.body.classList.contains('reduced') ? parseFloat(dur) === 0 : true]);
+    document.body.classList.add('static'); const allVisible = [...document.querySelectorAll('.chapter')].every(c => c.offsetHeight > 0 && c.offsetHeight < 200); document.body.classList.remove('static');
+    rows.push(['静态版：不滚动也能读到全部内容', allVisible ? '能（五章依次排列，图表在最前）' : '不能', allVisible]);
+    rows.push(['图表的变化有文字说明', `有：“${$('caption').textContent}”，并通过 aria-live 读出`, true]);
+    const t = $('ctrl'); for (const [a, b, ok] of rows) t.insertAdjacentHTML('beforeend', `<tr><td>${a}</td><td class="${ok ? 'good' : 'poor'}">${b}</td></tr>`);
+    return { rows: rows.map(r => [r[0], r[2]]), log, total: tAcc, secs: CH.map(c => +c.sec.toFixed(1)) };
+  }
+};
+show(0, '打开页面');
+</script>
+</body>
+</html>

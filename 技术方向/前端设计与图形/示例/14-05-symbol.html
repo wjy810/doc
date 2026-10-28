@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>符号与意义：颜色、图形与动作的含义取决于语境</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .quotes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .q { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; display: grid; gap: 2px; font-size: 12px; }
+  .q .row { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+  .q .v { font-weight: 700; }
+  .bar { display: flex; gap: 4px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 4px; }
+  .bar button { font: inherit; font-size: 12px; border: 1px solid transparent; background: #f6f7f9; border-radius: 6px; padding: 3px 8px; display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
+  .bar svg { width: 16px; height: 16px; }
+  .anim { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .anim figure { margin: 0; border: 1px solid var(--line); border-radius: 8px; padding: 6px; display: grid; gap: 4px; justify-items: center; font-size: 12px; }
+  .anim svg { width: 100%; height: 60px; background: #fafbfc; border-radius: 6px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 红色表示涨还是跌：同一种颜色，在不同地区意思相反</h2>
+  <p class="sub">在中国大陆的股票行情中，红色通常表示上涨、绿色表示下跌；在香港、美国等市场，习惯相反——绿色表示上涨。研究发现，两地的人看到同样的红色，对走势的判断方向也相反。A 只用颜色表达涨跌；B 按读者所在地区选择颜色，同时加上箭头、正负号和文字。</p>
+  <div class="quotes" id="quotes"></div>
+  <table id="read"><tr><th>读者的习惯</th><th>看到的界面</th><th>A：只有颜色</th><th>B：颜色 ＋ 箭头 ＋ 符号 ＋ 文字</th></tr></table>
+  <table id="cvd"><tr><th>“上涨”与“下跌”两种颜色的差别（OKLab 距离）</th><th>正常</th><th>灰度</th><th>绿色弱模拟</th><th>B 的形状线索</th></tr></table>
+</section>
+
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px">
+      <h2>2 同一个图形，不同语境下的意思</h2>
+      <table id="icons"><tr><th>图形</th><th>可能的含义</th><th>需要语境的原因</th></tr></table>
+      <p class="sub">图形、颜色、材料和动作都会承载意义，而意义来自使用者的经验与当时的场景。重要的操作要用文字标签说明，不能只依赖图标——悬停才显示的提示在触摸屏上看不到。</p>
+    </div>
+    <div style="display:grid;gap:6px">
+      <h3>工具栏检查：A 只有图标，B 图标加文字</h3>
+      <div class="bar" id="barA"></div><div class="bar" id="barB"></div>
+      <table id="tb"><tr><th>检查</th><th>A</th><th>B</th></tr></table>
+      <h2>3 动作也有意义</h2>
+      <div class="anim" id="anim"></div>
+    </div>
+  </div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+// ---------- 1 涨跌 ----------
+const QUOTES = [['星图科技', 2.31], ['远帆传媒', -1.84], ['青禾数据', 0.00], ['北辰图形', 5.02]];
+const CONV = { cn: { name: '中国大陆习惯', up: '#d32f2f', down: '#1a7f3c' }, us: { name: '香港／美国习惯', up: '#1a7f3c', down: '#d32f2f' } };
+function quote(q, conv, withShape) {
+  const [name, v] = q, c = v > 0 ? CONV[conv].up : v < 0 ? CONV[conv].down : '#5b6475';
+  const arrow = v > 0 ? '▲' : v < 0 ? '▼' : '—', sign = v > 0 ? '+' : '', word = v > 0 ? '上涨' : v < 0 ? '下跌' : '持平';
+  return `<div class="row"><span>${name}</span><span class="v" style="color:${c}" aria-label="${word} ${Math.abs(v).toFixed(2)}%">${withShape ? `${arrow} ${sign}${v.toFixed(2)}% <small>${word}</small>` : `${Math.abs(v).toFixed(2)}%`}</span></div>`;
+}
+for (const [conv, shape, label] of [['cn', false, 'A · 中国大陆配色，只有颜色'], ['us', false, 'A · 美国配色，只有颜色'], ['cn', true, 'B · 中国大陆配色，加箭头与文字'], ['us', true, 'B · 美国配色，加箭头与文字']]) $('quotes').insertAdjacentHTML('beforeend', `<div class="q"><b>${label}</b>${QUOTES.map(q => quote(q, conv, shape)).join('')}</div>`);
+// 读者按自己的习惯解读颜色：只有颜色时，习惯不同就会读反；有箭头与符号时不依赖颜色
+const reads = [];
+for (const reader of ['cn', 'us']) for (const ui of ['cn', 'us']) {
+  const wrongA = reader !== ui ? QUOTES.filter(q => q[1] !== 0).length : 0;
+  reads.push({ reader, ui, wrongA, wrongB: 0 });
+  $('read').insertAdjacentHTML('beforeend', `<tr><td>${CONV[reader].name}</td><td>${CONV[ui].name}的配色</td><td class="${wrongA ? 'poor' : 'good'}">${wrongA ? `${wrongA}／3 只涨跌股读反` : '读对'}</td><td class="good">读对（箭头与正负号不依赖颜色）</td></tr>`);
+}
+// 色觉差异：上涨与下跌两种颜色还能分开吗
+const lin = c => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }, gam = c => 255 * (c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055);
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const DEUT = [[0.367322, 0.860646, -0.227968], [0.280085, 0.672501, 0.047413], [-0.011820, 0.042940, 0.968881]];
+function sim(c, m) { const l = c.map(lin); if (m === 'gray') { const y = 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]; return [y, y, y].map(gam); } if (m === 'deut') return DEUT.map(r => gam(Math.min(1, Math.max(0, r[0] * l[0] + r[1] * l[1] + r[2] * l[2])))); return c; }
+function oklab(c) { const [r, g, b] = c.map(v => lin(Math.max(0, Math.min(255, v)))); const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b), m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b), s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b); return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s, 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s]; }
+const dist = (a, b) => { const p = oklab(a), q = oklab(b); return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]); };
+const ds = ['n', 'gray', 'deut'].map(m => dist(sim(hex(CONV.cn.up), m), sim(hex(CONV.cn.down), m)));
+$('cvd').insertAdjacentHTML('beforeend', `<tr><td>红 #d32f2f 与绿 #1a7f3c</td>${ds.map(d => `<td class="num ${d < 0.06 ? 'poor' : d < 0.12 ? 'mid' : 'good'}">${d.toFixed(3)}</td>`).join('')}<td class="good">▲ 与 ▼ 形状相反，“＋”与“－”，“上涨”与“下跌”</td></tr>`);
+
+// ---------- 2 图形与语境 ----------
+const ICONS = [
+  ['✓', '完成、正确、已选中、已读', '“已读”与“已送达”可能只差一个勾'],
+  ['♥', '喜欢、收藏、健康', '在社交应用中是“喜欢”，在健康应用中可能是心率'],
+  ['★', '收藏、评分、重要', '一颗星可能是“收藏”，五颗星是“评分”'],
+  ['☰', '菜单、列表视图、拖动手柄', '同一个三横线，位置不同含义不同'],
+  ['↻', '刷新、重做、同步、循环播放', '方向与上下文决定含义'],
+  ['🔒', '已加密、已锁定、需要登录', '是“安全”还是“无法编辑”？']
+];
+for (const [g, m, why] of ICONS) $('icons').insertAdjacentHTML('beforeend', `<tr><td style="font-size:18px">${g}</td><td>${m}</td><td>${why}</td></tr>`);
+const TOOLS = [['save', '保存', '<path d="M3 3h10l2 2v10H3z M6 3v4h6V3 M6 10h6v5H6z" fill="none" stroke="currentColor" stroke-width="1.5"/>'], ['share', '分享', '<circle cx="4" cy="9" r="2" fill="currentColor"/><circle cx="13" cy="4" r="2" fill="currentColor"/><circle cx="13" cy="14" r="2" fill="currentColor"/><path d="M5.5 8l6-3M5.5 10l6 3" stroke="currentColor" stroke-width="1.5"/>'], ['sync', '同步', '<path d="M14 9a5 5 0 1 1-1.5-3.5M14 3v3h-3" fill="none" stroke="currentColor" stroke-width="1.5"/>'], ['lock', '锁定编辑', '<rect x="4" y="8" width="10" height="7" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6 8V6a3 3 0 0 1 6 0v2" fill="none" stroke="currentColor" stroke-width="1.5"/>'], ['more', '更多', '<circle cx="4" cy="9" r="1.5" fill="currentColor"/><circle cx="9" cy="9" r="1.5" fill="currentColor"/><circle cx="14" cy="9" r="1.5" fill="currentColor"/>']];
+$('barA').innerHTML = TOOLS.map(([k, , p]) => `<button data-k="${k}" title=""><svg viewBox="0 0 18 18">${p}</svg></button>`).join('');
+$('barB').innerHTML = TOOLS.map(([k, n, p]) => `<button data-k="${k}"><svg viewBox="0 0 18 18" aria-hidden="true">${p}</svg>${n}</button>`).join('');
+function audit(bar) { const bs = [...$(bar).querySelectorAll('button')]; const name = b => (b.getAttribute('aria-label') || b.textContent || b.getAttribute('title') || '').trim(); return { n: bs.length, noName: bs.filter(b => !name(b)).length, noVisible: bs.filter(b => !b.textContent.trim()).length }; }
+const aA = audit('barA'), aB = audit('barB');
+$('tb').insertAdjacentHTML('beforeend', `<tr><td>没有可访问名称（读屏软件只读“按钮”）</td><td class="num ${aA.noName ? 'poor' : 'good'}">${aA.noName}／${aA.n}</td><td class="num ${aB.noName ? 'poor' : 'good'}">${aB.noName}／${aB.n}</td></tr><tr><td>没有可见的文字标签</td><td class="num ${aA.noVisible ? 'poor' : 'good'}">${aA.noVisible}／${aA.n}</td><td class="num ${aB.noVisible ? 'poor' : 'good'}">${aB.noVisible}／${aB.n}</td></tr><tr><td>按钮占用的宽度（标签的代价）</td><td class="num" id="wA"></td><td class="num" id="wB"></td></tr>`);
+const used = bar => { const bs = [...$(bar).querySelectorAll('button')]; return Math.round(bs[bs.length - 1].getBoundingClientRect().right - bs[0].getBoundingClientRect().left); };
+document.fonts.ready.then(() => { $('wA').textContent = used('barA') + ' 像素'; $('wB').textContent = used('barB') + ' 像素'; });
+
+// ---------- 3 动作 ----------
+const MOVES = [['左右快速摆动', '错误、拒绝（例如密码不对）', 'shake'], ['缓慢脉动', '进行中、等待', 'pulse'], ['从右侧滑入', '进入下一层', 'slide'], ['逐渐淡出', '消失、不再重要', 'fade']];
+for (const [n, m, k] of MOVES) {
+  const frames = 5, pts = Array.from({ length: frames }, (_, i) => { const t = i / (frames - 1); return k === 'shake' ? { x: 50 + Math.sin(t * Math.PI * 6) * 10 * (1 - t), o: 1, s: 1 } : k === 'pulse' ? { x: 50, o: 1, s: 1 + 0.15 * Math.sin(t * Math.PI * 2) } : k === 'slide' ? { x: 50 + 60 * (1 - t) ** 2, o: t, s: 1 } : { x: 50, o: 1 - t, s: 1 }; });
+  const svg = `<svg viewBox="0 0 220 60">${pts.map((p, i) => `<rect x="${i * 44 + p.x / 2 - 10}" y="${30 - 12 * p.s}" width="${20 * p.s}" height="${24 * p.s}" rx="4" fill="#2f6fdb" fill-opacity="${Math.max(0.08, p.o)}"/>`).join('')}</svg>`;
+  $('anim').insertAdjacentHTML('beforeend', `<figure>${svg}<b>${n}</b><span class="sub">${m}</span></figure>`);
+}
+window.__sym = { reads, ds: ds.map(d => +d.toFixed(3)), aA, aB };
+</script>
+</body>
+</html>
