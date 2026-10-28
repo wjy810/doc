@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>记忆与外部表示：保留上下文、历史与对照，减少记忆负担</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .app { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; display: grid; }
+  .bar { display: flex; gap: 6px; align-items: center; padding: 6px 8px; background: #f6f7f9; border-bottom: 1px solid var(--line); }
+  select, button { font: inherit; font-size: 12px; padding: 1px 8px; border-radius: 6px; border: 1px solid #b9c0cc; background: #fff; cursor: pointer; }
+  .list { height: 210px; overflow: auto; }
+  .row { display: grid; grid-template-columns: 1fr 60px 50px 46px; gap: 6px; padding: 4px 8px; border-bottom: 1px solid #eef0f3; cursor: pointer; font-size: 12px; }
+  .row:hover { background: #f6f9ff; } .row.seen { color: #5b6475; } .row.seen b::after { content: "（看过）"; font-weight: 400; font-size: 11px; }
+  .detail { padding: 8px 10px; display: grid; gap: 4px; min-height: 210px; }
+  .bsplit { display: grid; grid-template-columns: 1.2fr 1fr; }
+  .bsplit .detail { border-left: 1px solid var(--line); }
+  .tray { padding: 6px 8px; border-top: 1px solid var(--line); background: #fbfaf5; font-size: 12px; }
+  .hist { font-size: 11px; color: var(--muted); padding: 4px 8px; border-top: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 同一批岗位，两种界面</h2>
+  <p class="sub">A：列表与详情是两个页面，一次只能看一个岗位；返回列表时，筛选条件和滚动位置都被重置。B：详情在列表旁边打开；返回时保留筛选与位置；“最近看过”记录浏览历史；“对照栏”把选中的岗位并排放在一起。</p>
+  <div class="two">
+    <div><h3>A：一次一页</h3><div class="app" id="appA"></div></div>
+    <div><h3>B：保留上下文、历史与对照</h3><div class="app" id="appB"></div></div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>2 返回列表后，还记得刚才在哪吗</h2><table id="ctx"><tr><th>检查</th><th>A</th><th>B</th></tr></table></div>
+    <div style="display:grid;gap:6px"><h2>3 三项比较任务：要记住多少</h2>
+      <p class="sub">在 A 中，比较需要把一个页面上的数值记在脑子里，再翻到另一页。短时记忆一次大约只能保持 4 个左右的信息块；记不住就要翻回去。下表按任务结构算出要同时记住的数值，以及记忆容量为 3、4、7 个时需要额外回头翻看几个页面（模型很简单：记不下的部分就再翻回去看）。B 把所有数值并排显示，记忆负担为 0。</p>
+      <table id="mem"><tr><th>任务</th><th>A：同时要记住</th><th>A：额外回头翻看的页面（容量 3／4／7）</th><th>B</th></tr></table></div>
+  </div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const r = rng(8), cities = ['上海', '北京', '杭州', '深圳'], titles = ['前端工程师', '数据可视化工程师', '交互设计师', '图形工程师', '全栈工程师'];
+const JOBS = Array.from({ length: 24 }, (_, i) => ({ id: i + 1, title: titles[i % 5], co: `公司 ${String.fromCharCode(65 + i)}`, city: cities[Math.floor(r() * 4)], pay: 15 + Math.floor(r() * 25), commute: 20 + Math.floor(r() * 60), match: 50 + Math.floor(r() * 50), remote: r() < 0.4 ? '可远程' : '坐班', growth: ['培训多', '项目多', '一般'][Math.floor(r() * 3)] }));
+const FIELDS = [['pay', '月薪（千）'], ['commute', '通勤（分钟）'], ['match', '技能匹配（%）'], ['remote', '办公方式'], ['growth', '成长']];
+
+function makeApp(root, kind) {
+  const st = { city: '', open: null, seen: [], pinned: [] };
+  function listHTML() { return JOBS.filter(j => !st.city || j.city === st.city).map(j => `<div class="row${kind === 'B' && st.seen.includes(j.id) ? ' seen' : ''}" data-id="${j.id}"><b>${j.title} · ${j.co}</b><span>${j.city}</span><span>${j.pay}K</span><span>${j.match}%</span></div>`).join(''); }
+  function detailHTML(j) { return `<div class="detail"><b>${j.title} · ${j.co}</b>${FIELDS.map(([k, n]) => `<div>${n}：${j[k]}</div>`).join('')}<div style="display:flex;gap:6px">${kind === 'A' ? '<button data-back>返回列表</button>' : `<button data-pin="${j.id}">${st.pinned.includes(j.id) ? '已在对照栏' : '加入对照'}</button><button data-close>关闭</button>`}</div></div>`; }
+  function render() {
+    const bar = `<div class="bar"><span class="sub">城市</span><select data-city><option value="">全部</option>${cities.map(c => `<option${st.city === c ? ' selected' : ''}>${c}</option>`).join('')}</select><span class="sub" data-count></span></div>`;
+    if (kind === 'A') {
+      root.innerHTML = bar + (st.open ? detailHTML(JOBS[st.open - 1]) : `<div class="list">${listHTML()}</div>`);
+    } else {
+      const keep = root.querySelector('.list') ? root.querySelector('.list').scrollTop : 0;
+      root.innerHTML = bar + `<div class="bsplit"><div class="list">${listHTML()}</div>${st.open ? detailHTML(JOBS[st.open - 1]) : '<div class="detail sub">点击左侧岗位查看详情</div>'}</div>` +
+        `<div class="tray"><b>对照栏</b>${st.pinned.length ? `<table><tr><th></th>${st.pinned.map(id => `<th>${JOBS[id - 1].co}</th>`).join('')}</tr>${FIELDS.map(([k, n]) => `<tr><td>${n}</td>${st.pinned.map(id => `<td>${JOBS[id - 1][k]}</td>`).join('')}</tr>`).join('')}</table>` : '<span class="sub">　把岗位“加入对照”，最多 3 个，并排比较</span>'}</div>` +
+        `<div class="hist">最近看过：${st.seen.slice(-5).reverse().map(id => JOBS[id - 1].co).join('、') || '无'}</div>`;
+      root.querySelector('.list').scrollTop = keep;
+    }
+    const c = root.querySelector('[data-count]'); if (c) c.textContent = `${JOBS.filter(j => !st.city || j.city === st.city).length} 个岗位`;
+  }
+  root.addEventListener('change', e => { if (e.target.matches('[data-city]')) { st.city = e.target.value; if (kind === 'A') st.open = null; render(); } });
+  root.addEventListener('click', e => {
+    const row = e.target.closest('.row'); if (row) { st.open = +row.dataset.id; if (!st.seen.includes(st.open)) st.seen.push(st.open); render(); return; }
+    if (e.target.matches('[data-back]')) { st.open = null; st.city = ''; render(); return; }   // A：返回时重新加载列表，筛选被清空
+    if (e.target.matches('[data-close]')) { st.open = null; render(); return; }
+    if (e.target.matches('[data-pin]')) { const id = +e.target.dataset.pin; if (!st.pinned.includes(id)) { st.pinned.push(id); if (st.pinned.length > 3) st.pinned.shift(); } render(); }
+  });
+  render(); return st;
+}
+const A = makeApp($('appA'), 'A'), B = makeApp($('appB'), 'B');
+
+// 记忆负担：按任务结构计算
+// 额外回头翻看的页面：任务 2 每次往返最多带走 c 个数值；任务 3 每一项要记住前两名（2 个数值），一遍最多同时追踪 ⌊c／2⌋ 项
+const TASKS = [
+  ['在 4 个岗位中找出月薪最高的', 2, c => 0, '依次看，只需记住“目前最高的是谁、多少”'],
+  ['比较两个岗位的 5 项条件，说出各自的优势', 5, c => 2 * Math.ceil(5 / c) - 2, '记住第一个岗位的 5 个数值，再看第二个'],
+  ['从 4 个岗位中找出薪资、通勤、匹配三项都在前两名的', 6, c => 4 * (Math.ceil(3 / Math.max(1, Math.floor(c / 2))) - 1), '每一项都要记住前两名：3 项 × 2 ＝ 6 个数值']
+];
+for (const [name, load, sw, why] of TASKS) {
+  const cell = [3, 4, 7].map(c => sw(c)).join('／');
+  $('mem').insertAdjacentHTML('beforeend', `<tr><td>${name}<br><span class="sub">${why}</span></td><td class="num ${load > 4 ? 'poor' : 'good'}">${load} 个</td><td class="num">${cell}</td><td class="good">0 个；不需要翻页</td></tr>`);
+}
+window.__mem = { A, B, JOBS, tasks: TASKS.map(([n, l, sw]) => [n, l, [3, 4, 7].map(c => sw(c))]) };
+</script>
+</body>
+</html>

@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>注意与显著性：哪里最先被看到，是否服务于任务</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: start; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  canvas { display: block; width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); }
+  figure { margin: 0; display: grid; gap: 4px; } figcaption { font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 同一个岗位页面，两种强调方式：模型预测哪里最显眼</h2>
+  <p class="sub">任务是“投递这个岗位”。A 版本处处醒目：红色徽章、橙色横幅、两个同样实心的按钮；B 版本主次分明：只有“投递”是实心的主按钮。右边的热图是显著性模型的输出：颜色越亮，越可能先吸引目光。</p>
+  <div class="grid4">
+    <figure><canvas id="A" width="320" height="400"></canvas><figcaption>A：处处醒目</figcaption></figure>
+    <figure><canvas id="Ah" width="320" height="400"></canvas><figcaption>A 的显著性</figcaption></figure>
+    <figure><canvas id="B" width="320" height="400"></canvas><figcaption>B：主次分明</figcaption></figure>
+    <figure><canvas id="Bh" width="320" height="400"></canvas><figcaption>B 的显著性</figcaption></figure>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>2 每个元素的显著性排名</h2><table id="rank"><tr><th>元素</th><th>A：排名／得分</th><th>B：排名／得分</th></tr></table><table id="sum"><tr><th>检查</th><th>A</th><th>B</th></tr></table></div>
+    <div style="display:grid;gap:6px"><h2>3 变化会吸引注意：两帧之差</h2>
+      <p class="sub">“新消息”徽章在闪烁。把相邻两帧相减，变化只出现在徽章处。运动和突然出现的变化是很强的注意线索——用来提示真正重要的事，而不是装饰。</p>
+      <div class="two"><figure><canvas id="F" width="320" height="140"></canvas><figcaption>第 2 帧（徽章出现）</figcaption></figure><figure><canvas id="Fd" width="320" height="140"></canvas><figcaption>与第 1 帧之差</figcaption></figure></div>
+      <p class="sub" id="fnote"></p></div>
+  </div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+const W = 320, H = 400;
+// ---------- 两个版本 ----------
+function rr(g, x, y, w, h, r, fill, stroke) { g.beginPath(); g.roundRect(x, y, w, h, r); if (fill) { g.fillStyle = fill; g.fill(); } if (stroke) { g.strokeStyle = stroke; g.lineWidth = 1.5; g.stroke(); } }
+function text(g, s, x, y, size, color, weight = 400) { g.font = `${weight} ${size}px "Noto Sans SC"`; g.fillStyle = color; g.fillText(s, x, y); }
+function page(g, v) {
+  const els = [];
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, W, H);
+  // 顶栏
+  g.fillStyle = v === 'A' ? '#2f6fdb' : '#f4f6f9'; g.fillRect(0, 0, W, 44); text(g, '职途', 16, 28, 16, v === 'A' ? '#fff' : '#1d2330', 700); els.push(['顶栏', 0, 0, W, 44]);
+  // 横幅
+  if (v === 'A') { rr(g, 12, 54, W - 24, 34, 6, '#f97316'); text(g, '限时！本周投递加速审核', 24, 76, 13, '#fff', 700); els.push(['促销横幅', 12, 54, W - 24, 34]); }
+  else { text(g, '本周投递加速审核', 16, 74, 12, '#5b6475'); els.push(['促销横幅', 12, 60, 150, 20]); }
+  // 标题与徽章
+  text(g, '数据可视化工程师', 16, 120, 20, '#1d2330', 700); els.push(['岗位名称', 16, 100, 170, 26]);
+  if (v === 'A') { rr(g, 196, 103, 44, 22, 11, '#e11d48'); text(g, '热招', 206, 119, 12, '#fff', 700); } else { rr(g, 196, 104, 40, 20, 10, '#eef0f3'); text(g, '热招', 205, 118, 11, '#5b6475'); }
+  els.push(['“热招”徽章', 196, 103, 44, 22]);
+  // 薪资
+  text(g, '25—35K', 16, 156, v === 'A' ? 22 : 16, v === 'A' ? '#e11d48' : '#1d2330', 700); els.push(['薪资', 16, 136, 110, 26]);
+  // 正文
+  for (let i = 0; i < 5; i++) { g.fillStyle = '#c3c9d3'; g.fillRect(16, 180 + i * 18, i === 4 ? 180 : 288, 8); }
+  els.push(['职位描述', 16, 178, 288, 90]);
+  // 技能标签
+  const tags = ['D3', 'Canvas', 'TypeScript'], tagColors = ['#7b4bd1', '#1f7a4d', '#0ea5e9'];
+  let x = 16; tags.forEach((t, i) => { g.font = '12px "Noto Sans SC"'; const w = g.measureText(t).width + 16; rr(g, x, 278, w, 22, 11, v === 'A' ? tagColors[i] : '#eef0f3'); text(g, t, x + 8, 293, 12, v === 'A' ? '#fff' : '#3b4252'); x += w + 6; });
+  els.push(['技能标签', 16, 278, x - 22, 22]);
+  // 按钮
+  rr(g, 16, 330, 136, 40, 8, '#2f6fdb'); text(g, '投递', 66, 356, 15, '#fff', 700); els.push(['“投递”按钮', 16, 330, 136, 40]);
+  if (v === 'A') { rr(g, 168, 330, 136, 40, 8, '#16a34a'); text(g, '收藏', 218, 356, 15, '#fff', 700); }
+  else { rr(g, 168, 330, 136, 40, 8, '#fff', '#b9c0cc'); text(g, '收藏', 218, 356, 15, '#1d2330'); }
+  els.push(['“收藏”按钮', 168, 330, 136, 40]);
+  return els;
+}
+
+// ---------- 显著性模型（简化的 Itti–Koch）：Lab 三个通道上的中心—周边差，多尺度，按“峰值越突出权重越大”归一化 ----------
+function toLab(r, g, b) {
+  const lin = c => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+  const R = lin(r), G = lin(g), B = lin(b);
+  const X = (0.4124 * R + 0.3576 * G + 0.1805 * B) / 0.95047, Y = 0.2126 * R + 0.7152 * G + 0.0722 * B, Z = (0.0193 * R + 0.1192 * G + 0.9505 * B) / 1.08883;
+  const f = t => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
+  return [116 * f(Y) - 16, 500 * (f(X) - f(Y)), 200 * (f(Y) - f(Z))];
+}
+function blur(a, w, h, rad) {   // 三次盒式模糊近似高斯
+  let src = Float32Array.from(a), tmp = new Float32Array(a.length);
+  for (let pass = 0; pass < 3; pass++) {
+    for (let y = 0; y < h; y++) { let s = 0; for (let x = -rad; x <= rad; x++) s += src[y * w + Math.min(w - 1, Math.max(0, x))]; for (let x = 0; x < w; x++) { tmp[y * w + x] = s / (2 * rad + 1); s += src[y * w + Math.min(w - 1, x + rad + 1)] - src[y * w + Math.max(0, x - rad)]; } }
+    for (let x = 0; x < w; x++) { let s = 0; for (let y = -rad; y <= rad; y++) s += tmp[Math.min(h - 1, Math.max(0, y)) * w + x]; for (let y = 0; y < h; y++) { src[y * w + x] = s / (2 * rad + 1); s += tmp[Math.min(h - 1, y + rad + 1) * w + x] - tmp[Math.max(0, y - rad) * w + x]; } }
+  }
+  return src;
+}
+function normalize(m) { let mx = 0, sum = 0; for (const v of m) { mx = Math.max(mx, v); sum += v; } const mean = sum / m.length, k = mx > 0 ? (1 - mean / mx) ** 2 / mx : 0; return m.map(v => v * k); }
+function saliency(canvas) {
+  const S = 2, w = W / S, h = H / S, g = canvas.getContext('2d'), d = g.getImageData(0, 0, W, H).data;
+  const ch = [new Float32Array(w * h), new Float32Array(w * h), new Float32Array(w * h)];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let r = 0, gg = 0, b = 0; for (let dy = 0; dy < S; dy++) for (let dx = 0; dx < S; dx++) { const i = ((y * S + dy) * W + x * S + dx) * 4; r += d[i]; gg += d[i + 1]; b += d[i + 2]; } const lab = toLab(r / 4, gg / 4, b / 4); ch[0][y * w + x] = lab[0]; ch[1][y * w + x] = lab[1]; ch[2][y * w + x] = lab[2]; }
+  const total = new Float32Array(w * h);
+  for (const c of ch) for (const [rc, rs] of [[2, 10], [4, 20]]) { const a = blur(c, w, h, rc), b = blur(c, w, h, rs), m = a.map((v, i) => Math.abs(v - b[i])); const n = normalize(m); for (let i = 0; i < total.length; i++) total[i] += n[i]; }
+  let mx = 0; for (const v of total) mx = Math.max(mx, v); return { map: total.map(v => v / mx), w, h, S };
+}
+function heat(canvas, sal) {
+  const g = canvas.getContext('2d'), img = g.createImageData(W, H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const v = sal.map[Math.floor(y / sal.S) * sal.w + Math.floor(x / sal.S)], i = (y * W + x) * 4; const t = Math.min(1, v); img.data[i] = 255 * Math.min(1, t * 2); img.data[i + 1] = 255 * Math.max(0, Math.min(1, t * 2 - 0.6)); img.data[i + 2] = 255 * Math.max(0, 0.5 - t) * 0.6 + 40 * (1 - t); img.data[i + 3] = 255; }
+  g.putImageData(img, 0, 0);
+}
+function score(sal, els) {   // 元素区域内显著性的平均值
+  return els.map(([name, x, y, w, h]) => { let s = 0, n = 0; for (let yy = Math.floor(y / sal.S); yy < Math.ceil((y + h) / sal.S); yy++) for (let xx = Math.floor(x / sal.S); xx < Math.ceil((x + w) / sal.S); xx++) { s += sal.map[yy * sal.w + xx]; n++; } return { name, v: s / n }; }).sort((a, b) => b.v - a.v);
+}
+const out = {};
+document.fonts.load('700 16px "Noto Sans SC"').then(() => document.fonts.ready).then(() => {
+  for (const v of ['A', 'B']) {
+    const c = $(v), els = page(c.getContext('2d'), v), sal = saliency(c); heat($(v + 'h'), sal);
+    const hg = $(v + 'h').getContext('2d'); hg.strokeStyle = '#ffffff99'; hg.lineWidth = 1; for (const [, x, y, w, h] of els) hg.strokeRect(x, y, w, h);
+    out[v] = score(sal, els);
+  }
+  const names = out.A.map(e => e.name), t = $('rank');
+  for (const n of names) { const a = out.A.findIndex(e => e.name === n), b = out.B.findIndex(e => e.name === n); t.insertAdjacentHTML('beforeend', `<tr${n === '“投递”按钮' ? ' style="font-weight:700"' : ''}><td>${n}</td><td class="num">${a + 1}／${out.A[a].v.toFixed(2)}</td><td class="num">${b + 1}／${out.B[b].v.toFixed(2)}</td></tr>`); }
+  const target = v => out[v].findIndex(e => e.name === '“投递”按钮') + 1, compete = v => { const tv = out[v].find(e => e.name === '“投递”按钮').v; return out[v].filter(e => e.name !== '“投递”按钮' && e.v >= tv * 0.8).map(e => e.name); };
+  out.summary = { A: { rank: target('A'), compete: compete('A') }, B: { rank: target('B'), compete: compete('B') } };
+  $('sum').insertAdjacentHTML('beforeend', `<tr><td>任务目标“投递”的排名</td><td class="num ${target('A') === 1 ? 'good' : 'poor'}">第 ${target('A')} 名</td><td class="num ${target('B') === 1 ? 'good' : 'poor'}">第 ${target('B')} 名</td></tr><tr><td>与它竞争的元素（得分 ≥ 它的 80%）</td><td>${compete('A').join('、') || '无'}</td><td>${compete('B').join('、') || '无'}</td></tr><tr><td colspan="3" class="sub">模型只看低层的颜色与亮度对比，不知道文字的含义、用户的目标和阅读习惯；它的预测要用眼动或任务测试检验。</td></tr>`);
+  // ---------- 变化：两帧之差 ----------
+  const F = $('F').getContext('2d'), Fd = $('Fd').getContext('2d');
+  const frame = (g, on) => { g.fillStyle = '#fff'; g.fillRect(0, 0, 320, 140); g.fillStyle = '#f4f6f9'; g.fillRect(0, 0, 320, 40); text(g, '消息', 16, 26, 14, '#1d2330', 700); for (let i = 0; i < 4; i++) { g.fillStyle = '#c3c9d3'; g.fillRect(16, 58 + i * 18, 260, 8); } if (on) { rr(g, 52, 10, 40, 20, 10, '#e11d48'); text(g, '新 3', 60, 25, 11, '#fff', 700); } };
+  const c1 = document.createElement('canvas'); c1.width = 320; c1.height = 140; frame(c1.getContext('2d'), false); frame(F, true);
+  const d1 = c1.getContext('2d').getImageData(0, 0, 320, 140).data, d2 = F.getImageData(0, 0, 320, 140), diff = Fd.createImageData(320, 140);
+  let changed = 0, minx = 320, maxx = 0, miny = 140, maxy = 0;
+  for (let i = 0; i < d1.length; i += 4) { const v = Math.abs(d1[i] - d2.data[i]) + Math.abs(d1[i + 1] - d2.data[i + 1]) + Math.abs(d1[i + 2] - d2.data[i + 2]); const p = i / 4, x = p % 320, y = Math.floor(p / 320); if (v > 30) { changed++; minx = Math.min(minx, x); maxx = Math.max(maxx, x); miny = Math.min(miny, y); maxy = Math.max(maxy, y); } diff.data[i] = diff.data[i + 1] = diff.data[i + 2] = 255 - Math.min(255, v); diff.data[i + 3] = 255; }
+  Fd.putImageData(diff, 0, 0);
+  out.change = { changed, pct: changed / (320 * 140), box: [minx, miny, maxx, maxy] };
+  $('fnote').textContent = `变化的像素：${changed} 个（画面的 ${(100 * changed / (320 * 140)).toFixed(1)}%），全部位于 (${minx}, ${miny})—(${maxx}, ${maxy}) 的徽章区域。`;
+  window.__sal = out;
+});
+</script>
+</body>
+</html>

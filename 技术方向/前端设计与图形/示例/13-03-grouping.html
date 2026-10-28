@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>视觉分组：接近、相似、连续、边界、图底，以及四种分组方式的比较</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .demos { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+  .demos figure { margin: 0; display: grid; gap: 4px; } .demos figcaption { font-size: 12px; } .demos figcaption b { display: block; }
+  svg { display: block; width: 100%; height: auto; background: #fafbfc; border-radius: 8px; }
+  .versions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }
+  .form { border: 1px solid var(--line); border-radius: 8px; padding: 10px; position: relative; }
+  .form h3 { margin-bottom: 6px; }
+  .f { display: grid; grid-template-columns: 64px 1fr; gap: 6px; align-items: center; font-size: 12px; }
+  .f span { color: var(--muted); } .f i { display: block; height: 22px; border: 1px solid #c3c9d3; border-radius: 4px; background: #fff; }
+  .grp-title { font-size: 11px; color: var(--muted); font-weight: 700; line-height: 16px; }
+  /* V1 不分组：标题与字段之间、组与组之间，间距都是 12 像素 */
+  .v1 .f { margin-bottom: 12px; } .v1 .grp-title { margin-bottom: 12px; } .v1 .g:last-child .f:last-child { margin-bottom: 0; }
+  /* V2 间距分组：组内 4—6 像素，组间 30 像素 */
+  .v2 .g { margin-bottom: 30px; } .v2 .g:last-child { margin-bottom: 0; } .v2 .f { margin-bottom: 6px; } .v2 .g:last-child .f:last-child { margin-bottom: 0; } .v2 .grp-title { margin-bottom: 4px; }
+  /* V3 边框分组：加边框，同时让组间距离仍是 12（内边距 5 ＋ 边框 1 ＋ 边框 1 ＋ 内边距 5） */
+  .v3 .g { border: 1px solid #8a93a3; border-radius: 6px; padding: 5px; margin: 0; } .v3 .f { margin-bottom: 12px; } .v3 .f:last-child { margin-bottom: 0; } .v3 .grp-title { margin-bottom: 12px; }
+  /* V4 背景分组：加浅色背景，组间距离仍是 12（内边距 5 ＋ 间隔 2 ＋ 内边距 5） */
+  .v4 .g { background: #e3e8f0; border-radius: 6px; padding: 5px; margin-bottom: 2px; } .v4 .f { margin-bottom: 12px; } .v4 .f:last-child { margin-bottom: 0; } .v4 .grp-title { margin-bottom: 12px; }
+  svg.overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; background: none; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 五种分组线索</h2>
+  <div class="demos" id="demos"></div>
+</section>
+
+<section class="panel">
+  <h2>2 同一份表单，四种分组方式</h2>
+  <p class="sub">12 个字段属于 3 组：个人信息、求职意向、通知设置。四个版本的文字与字段完全相同，只改变分组的方式。每个表单右边缘的彩色竖条是下面的模型预测的分组。</p>
+  <div class="versions" id="versions"></div>
+</section>
+
+<section class="panel">
+  <h2>3 从版面测量与预测</h2>
+  <p class="sub">间距比 ＝ 最小的组间距离 ／ 最大的组内距离：比值越大，“接近”原则越能把组分开。模型先按共同区域（同一个边框或背景块）分组；没有区域时，按距离把相邻字段连起来——相邻两项的距离超过组内中位距离的 1.8 倍就断开。预测只是假设，要用 11 章的测试去检验。</p>
+  <table id="measure"><tr><th>版本</th><th>组内最大距离</th><th>组间最小距离</th><th>间距比</th><th>模型预测的组数</th><th>与设计意图一致的项（标题＋字段）</th><th>表单高度</th></tr></table>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs, parent, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; parent && parent.appendChild(e); return e; };
+
+// ---------- 1 五种线索 ----------
+const demos = [
+  ['接近', '距离近的点被看成一组：这里是三组竖列，而不是四行', s => { for (let c = 0; c < 6; c++) for (let r = 0; r < 4; r++) el('circle', { cx: 18 + c * 16 + Math.floor(c / 2) * 34, cy: 22 + r * 22, r: 6, fill: '#5b6475' }, s); }],
+  ['相似', '颜色相同的点被看成一组：这里是交替的行', s => { for (let r = 0; r < 4; r++) for (let c = 0; c < 6; c++) el('circle', { cx: 22 + c * 27, cy: 22 + r * 22, r: 6, fill: r % 2 ? '#e4572e' : '#2f6fdb' }, s); }],
+  ['连续', '沿着平滑路径的点被看成一条线：两条曲线交叉，而不是两个折角', s => { for (let i = 0; i <= 12; i++) { const t = i / 12; el('circle', { cx: 15 + t * 150, cy: 95 - t * 80, r: 4, fill: '#5b6475' }, s); el('circle', { cx: 15 + t * 150, cy: 15 + 80 * t * t, r: 4, fill: '#8a93a3' }, s); } }],
+  ['边界（共同区域）', '同一个框里的点被看成一组，即使它们离别的组更近', s => { el('rect', { x: 8, y: 30, width: 72, height: 50, rx: 8, fill: 'none', stroke: '#2f6fdb', 'stroke-width': 2 }, s); el('rect', { x: 96, y: 30, width: 72, height: 50, rx: 8, fill: 'none', stroke: '#2f6fdb', 'stroke-width': 2 }, s); for (const x of [26, 62, 112, 148]) el('circle', { cx: x, cy: 55, r: 7, fill: '#5b6475' }, s); }],
+  ['图底关系', '遮罩把对话框（图）和背后的页面（底）分开', s => { for (let i = 0; i < 5; i++) el('rect', { x: 10, y: 10 + i * 18, width: 156, height: 10, rx: 3, fill: '#c3c9d3' }, s); el('rect', { x: 0, y: 0, width: 176, height: 110, fill: '#1d2330', 'fill-opacity': 0.45 }, s); el('rect', { x: 40, y: 28, width: 96, height: 54, rx: 8, fill: '#fff' }, s); el('rect', { x: 52, y: 40, width: 60, height: 8, rx: 2, fill: '#1d2330' }, s); el('rect', { x: 52, y: 60, width: 36, height: 12, rx: 3, fill: '#2f6fdb' }, s); }]
+];
+for (const [name, desc, draw] of demos) {
+  const f = document.createElement('figure'), s = document.createElementNS(NS, 'svg'); s.setAttribute('viewBox', '0 0 176 110'); draw(s); f.appendChild(s);
+  f.insertAdjacentHTML('beforeend', `<figcaption><b>${name}</b>${desc}</figcaption>`); $('demos').appendChild(f);
+}
+
+// ---------- 2 四个版本 ----------
+const GROUPS = [['个人信息', ['姓名', '手机', '邮箱', '城市']], ['求职意向', ['岗位', '行业', '薪资', '到岗时间']], ['通知设置', ['新职位', '面试提醒', '周报', '推送时段']]];
+const VERS = [['v1', '不分组（间距相同）'], ['v2', '间距分组'], ['v3', '边框分组'], ['v4', '背景分组']];
+for (const [cls, name] of VERS) {
+  const html = GROUPS.map(([g, fs], gi) => `<div class="g" data-g="${gi}"><div class="grp-title">${g}</div>${fs.map(f => `<div class="f" data-g="${gi}"><span>${f}</span><i></i></div>`).join('')}</div>`).join('');
+  $('versions').insertAdjacentHTML('beforeend', `<div><h3>${name}</h3><div class="form ${cls}" id="${cls}">${html}<svg class="overlay"></svg></div></div>`);
+}
+
+// ---------- 3 测量与预测 ----------
+function analyze(cls) {
+  const form = $(cls), fr = form.getBoundingClientRect();
+  // 依次排列的项目：每组的标题与字段（标题属于它的组）
+  const fields = [...form.querySelectorAll('.grp-title, .f')].map(e => { const r = e.getBoundingClientRect(); return { g: +e.closest('.g').dataset.g, top: r.top - fr.top, bottom: r.bottom - fr.top, el: e }; });
+  // 相邻字段之间的空白距离
+  const gaps = []; for (let i = 0; i + 1 < fields.length; i++) gaps.push({ i, d: fields[i + 1].top - fields[i].bottom, same: fields[i].g === fields[i + 1].g });
+  const within = Math.max(...gaps.filter(x => x.same).map(x => x.d)), between = Math.min(...gaps.filter(x => !x.same).map(x => x.d));
+  // 共同区域：字段所在的、有可见边框或背景的容器
+  const region = f => { const g = f.el.closest('.g'), cs = getComputedStyle(g); const visible = cs.borderTopStyle !== 'none' && parseFloat(cs.borderTopWidth) > 0 || cs.backgroundColor !== 'rgba(0, 0, 0, 0)'; return visible ? g : null; };
+  const regions = fields.map(region);
+  let pred;
+  if (regions.every(Boolean)) pred = regions.map(r => [...form.querySelectorAll('.g')].indexOf(r));
+  else { const sorted = gaps.map(x => x.d).sort((a, b) => a - b), med = sorted[Math.floor(sorted.length / 2)]; pred = [0]; for (const x of gaps) pred.push(pred[pred.length - 1] + (x.d > med * 1.8 ? 1 : 0)); }
+  const nGroups = new Set(pred).size;
+  // 与设计意图一致（共 15 项）：预测组与真实组一一对应（同组的项在预测中也同组、不同组的也不同组）
+  let agree = 0; fields.forEach((f, i) => { const sameTrue = fields.filter(x => x.g === f.g).map(x => fields.indexOf(x)), samePred = pred.map((p, j) => p === pred[i] ? j : -1).filter(j => j >= 0); if (sameTrue.length === samePred.length && sameTrue.every(j => samePred.includes(j))) agree++; });
+  // 在版本右侧画出预测的分组
+  const svg = form.querySelector('.overlay'); svg.setAttribute('viewBox', `0 0 ${fr.width} ${fr.height}`); svg.innerHTML = '';
+  const colors = ['#2f6fdb', '#e4572e', '#1f7a4d', '#7b4bd1'];
+  for (const p of new Set(pred)) { const fs = fields.filter((_, i) => pred[i] === p); const t = Math.min(...fs.map(f => f.top)), b = Math.max(...fs.map(f => f.bottom)); el('rect', { x: fr.width - 7, y: t, width: 4, height: b - t, rx: 2, fill: colors[p % 4] }, svg); }
+  return { within, between, ratio: between / within, nGroups, agree, height: fr.height };
+}
+const results = {};
+function measureAll() {
+  const t = $('measure'); [...t.rows].slice(1).forEach(r => r.remove());
+  for (const [cls, name] of VERS) {
+    const m = analyze(cls); results[cls] = m;
+    t.insertAdjacentHTML('beforeend', `<tr><td>${name}</td><td class="num">${m.within.toFixed(0)} 像素</td><td class="num">${m.between.toFixed(0)} 像素</td><td class="num ${m.ratio >= 2 ? 'good' : 'poor'}">${m.ratio.toFixed(2)}</td><td class="num">${m.nGroups} 组</td><td class="num ${m.agree === 15 ? 'good' : 'poor'}">${m.agree} / 15</td><td class="num">${m.height.toFixed(0)} 像素</td></tr>`);
+  }
+  t.insertAdjacentHTML('beforeend', `<tr><td colspan="7" class="sub">边框与背景两个版本刻意让组间距离与“不分组”相同（间距比都是 1.00），这样比较时只有一个因素在变；否则加框时顺带加大的间距会混进结果。模型对它们的预测完全来自共同区域。间距分组不需要额外的线条和颜色，但要求组间距离明显大于组内距离。哪一种更容易理解、更快找到字段，要由测试回答。</td></tr>`);
+  return results;
+}
+document.fonts.ready.then(() => { measureAll(); window.__grp = results; });
+</script>
+</body>
+</html>
