@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>声音设计：音频层级、播放条件与音量控制</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  canvas { width: 100%; height: auto; display: block; border-radius: 6px; background: #fbfbfa; }
+  .ctl { display: grid; grid-template-columns: 70px 1fr 48px 84px; gap: 6px; align-items: center; font-size: 12px; } .ctl input[type=range] { width: 100%; }
+  .key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 3px 0 8px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>音频层级：语音、提示音、环境音放在一起时</h2>
+  <p class="sub">用 OfflineAudioContext 离线渲染 6 秒的混音（不需要扬声器，每次结果相同）：环境音一直在；第 1 秒“保存成功”提示音；第 2—4 秒一段模拟的讲解（锯齿波经过两个共振峰滤波器、每秒 4 个音节）；第 4.2 秒“提醒”两声。图中是每 50 毫秒的响度（dBFS）。<span class="key" style="background:#2f6fdb"></span>讲解<span class="key" style="background:#e08a3c"></span>提示音<span class="key" style="background:#8a93a3"></span>环境音</p>
+  <div class="two"><div><h3>不压低环境音</h3><canvas id="c0" width="1080" height="300"></canvas></div><div><h3>讲解时把环境音压低 12 dB（闪避）</h3><canvas id="c1" width="1080" height="300"></canvas></div></div>
+  <table id="t1"></table>
+</section>
+<section class="panel">
+  <div class="two">
+    <div style="display:grid;gap:6px"><h2>播放条件：耳机、手机扬声器、公共环境</h2><p class="sub" id="cond">手机扬声器用两级 300 赫兹高通加 7 千赫低通模拟；公共环境用一段带通的嘈杂声模拟。数字是每个提示音保留下来的能量，以及它高出嘈杂声多少分贝。</p><table id="t2"></table><p class="m" id="m2"></p></div>
+    <div style="display:grid;gap:6px"><h2>音量与静音：每一类都能单独控制</h2>
+      <div id="ctls" style="display:grid;gap:4px"></div><table id="t3"></table>
+      <h3>语音不可用时</h3><p class="m" id="m3"></p></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const SR = 22050, DUR = 6, R = {};
+const db = x => 20 * Math.log10(Math.max(x, 1e-9));
+const rmsWin = (data, a, b) => { let s = 0; const i0 = Math.floor(a * SR), i1 = Math.floor(b * SR); for (let i = i0; i < i1; i++) s += data[i] * data[i]; return Math.sqrt(s / Math.max(1, i1 - i0)); };
+function noiseBuffer(ctx, seed) { const b = ctx.createBuffer(1, SR * DUR, SR), d = b.getChannelData(0); let x = seed; for (let i = 0; i < d.length; i++) { x = (x * 16807) % 2147483647; d[i] = x / 2147483647 * 2 - 1; } return b; }
+// 三层声音，各自接到自己的增益节点（分类音量），再接到总音量
+async function render({ duck = false, vol = { speech: 1, cue: 1, amb: 1 }, master = 1, only = null, device = 'headphone', crowd = false } = {}) {
+  const ctx = new OfflineAudioContext(1, SR * DUR, SR), out = ctx.createGain(); out.gain.value = master;
+  let dest = out;
+  if (device === 'phone') { const h1 = ctx.createBiquadFilter(), h2 = ctx.createBiquadFilter(), lp = ctx.createBiquadFilter(); h1.type = h2.type = 'highpass'; h1.frequency.value = h2.frequency.value = 300; lp.type = 'lowpass'; lp.frequency.value = 7000; h1.Q.value = h2.Q.value = lp.Q.value = -3.0103; out.connect(h1); h1.connect(h2); h2.connect(lp); lp.connect(ctx.destination); }
+  else out.connect(ctx.destination);
+  const bus = k => { const g = ctx.createGain(); g.gain.value = vol[k]; g.connect(out); return g; };
+  const B = { speech: bus('speech'), cue: bus('cue'), amb: bus('amb') };
+  if (!only || only === 'amb') {   // 环境音：低通的噪声，约 −30 dBFS
+    const src = ctx.createBufferSource(), lp = ctx.createBiquadFilter(), g = ctx.createGain(); src.buffer = noiseBuffer(ctx, 7); lp.type = 'lowpass'; lp.frequency.value = 900; const A = 0.14; g.gain.value = A;
+    if (duck) { g.gain.setValueAtTime(A, 1.9); g.gain.linearRampToValueAtTime(A * 10 ** (-12 / 20), 2.0); g.gain.setValueAtTime(A * 10 ** (-12 / 20), 4.0); g.gain.linearRampToValueAtTime(A, 4.1); }
+    src.connect(lp); lp.connect(g); g.connect(B.amb); src.start(0);
+  }
+  if (crowd) { const src = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), g = ctx.createGain(); src.buffer = noiseBuffer(ctx, 99); bp.type = 'bandpass'; bp.frequency.value = 600; bp.Q.value = 0.5; g.gain.value = 0.25; src.connect(bp); bp.connect(g); g.connect(ctx.destination); src.start(0); }
+  const tone = (f, t, d, type = 'sine', peak = 0.3) => { const o = ctx.createOscillator(), g = ctx.createGain(); o.type = type; o.frequency.value = f; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + 0.01); g.gain.exponentialRampToValueAtTime(0.001, t + d); o.connect(g); g.connect(B.cue); o.start(t); o.stop(t + d + 0.02); };
+  if (!only || only === 'cue') { tone(660, 1.0, 0.12); tone(880, 1.12, 0.2); tone(1320, 4.2, 0.12, 'triangle'); tone(1320, 4.42, 0.12, 'triangle'); }
+  if (!only || only === 'speech') {   // 模拟讲解：锯齿波 → 两个共振峰 → 每秒 4 个音节的包络
+    const o = ctx.createOscillator(), f1 = ctx.createBiquadFilter(), f2 = ctx.createBiquadFilter(), env = ctx.createGain(), mix = ctx.createGain(); o.type = 'sawtooth'; o.frequency.value = 140;
+    f1.type = f2.type = 'bandpass'; f1.frequency.value = 700; f2.frequency.value = 1200; f1.Q.value = f2.Q.value = 4; mix.gain.value = 1.4;
+    env.gain.setValueAtTime(0, 0); for (let t = 2.0; t < 4.0; t += 0.25) { env.gain.setValueAtTime(0.0, t); env.gain.linearRampToValueAtTime(0.9, t + 0.05); env.gain.linearRampToValueAtTime(0.15, t + 0.2); }
+    env.gain.setValueAtTime(0, 4.0);
+    o.connect(f1); o.connect(f2); f1.connect(mix); f2.connect(mix); mix.connect(env); env.connect(B.speech); o.start(0); o.stop(DUR);
+  }
+  return (await ctx.startRendering()).getChannelData(0);
+}
+// ---------- 1 层级与闪避 ----------
+async function layers(duck) {
+  const L = {}; for (const k of ['speech', 'cue', 'amb']) L[k] = await render({ duck, only: k });
+  return L;
+}
+function plot(cv, L) {
+  const g = cv.getContext('2d'), W = cv.width, H = cv.height, x = t => 50 + t / DUR * (W - 90), y = d => 20 + (-d) / 60 * (H - 50);
+  g.clearRect(0, 0, W, H); g.font = '20px "Noto Sans SC"'; g.fillStyle = '#5b6475'; g.strokeStyle = '#e3e7ec';
+  for (let d = 0; d >= -60; d -= 20) { g.beginPath(); g.moveTo(50, y(d)); g.lineTo(W - 10, y(d)); g.stroke(); g.fillText(`${d}`, 4, y(d) + 6); }
+  for (let t = 0; t <= DUR; t++) g.fillText(`${t} 秒`, x(t) - 16, H - 4);
+  g.fillStyle = 'rgba(47,111,219,.08)'; g.fillRect(x(2), 20, x(4) - x(2), H - 50);
+  for (const [k, c] of [['amb', '#8a93a3'], ['cue', '#e08a3c'], ['speech', '#2f6fdb']]) { g.strokeStyle = c; g.lineWidth = 3; g.beginPath(); for (let t = 0; t < DUR; t += 0.05) { const v = Math.max(-60, db(rmsWin(L[k], t, t + 0.05))); g[t ? 'lineTo' : 'moveTo'](x(t + 0.025), y(v)); } g.stroke(); }
+}
+// ---------- 2 播放条件 ----------
+const CUES = [['低音“咚”（150 赫兹）', 150, 'sine'], ['保存成功（660→880 赫兹）', 660, 'sine'], ['提醒（1320 赫兹）', 1320, 'triangle'], ['点击（短噪声）', 0, 'noise']];
+async function cueEnergy(spec, device, crowd) {
+  const ctx = new OfflineAudioContext(1, SR, SR); let node;
+  if (spec[2] === 'noise') { const s = ctx.createBufferSource(); s.buffer = noiseBuffer(ctx, 3); const g = ctx.createGain(); g.gain.setValueAtTime(0.3, 0.2); g.gain.exponentialRampToValueAtTime(0.001, 0.26); s.connect(g); node = g; s.start(0.2); }
+  else { const o = ctx.createOscillator(), g = ctx.createGain(); o.type = spec[2]; o.frequency.value = spec[1]; if (spec[1] === 660) o.frequency.setValueAtTime(880, 0.32); g.gain.setValueAtTime(0, 0.2); g.gain.linearRampToValueAtTime(0.3, 0.21); g.gain.exponentialRampToValueAtTime(0.001, 0.5); o.connect(g); node = g; o.start(0.2); o.stop(0.55); }
+  if (device === 'phone') { const h1 = ctx.createBiquadFilter(), h2 = ctx.createBiquadFilter(), lp = ctx.createBiquadFilter(); h1.type = h2.type = 'highpass'; h1.frequency.value = h2.frequency.value = 300; lp.type = 'lowpass'; lp.frequency.value = 7000; h1.Q.value = h2.Q.value = lp.Q.value = -3.0103; /* 高通、低通的 Q 以分贝计，−3.01 dB 对应巴特沃斯响应，通带内不放大 */ node.connect(h1); h1.connect(h2); h2.connect(lp); lp.connect(ctx.destination); } else node.connect(ctx.destination);
+  const d = (await ctx.startRendering()).getChannelData(0); return rmsWin(d, 0.2, 0.55);
+}
+document.fonts.ready.then(async () => {
+  const L0 = await layers(false), L1 = await layers(true);
+  plot($('c0'), L0); plot($('c1'), L1);
+  const snr = L => db(rmsWin(L.speech, 2, 4)) - db(rmsWin(L.amb, 2.05, 3.95));
+  const crowdL = { speech: L1.speech, amb: await render({ duck: true, only: 'amb', crowd: true }) };
+  R.levels = { speech: +db(rmsWin(L0.speech, 2, 4)).toFixed(1), cue: +db(rmsWin(L0.cue, 1.0, 1.32)).toFixed(1), amb: +db(rmsWin(L0.amb, 0, 1.9)).toFixed(1) };
+  R.snr = { plain: +snr(L0).toFixed(1), duck: +snr(L1).toFixed(1), crowd: +snr(crowdL).toFixed(1) };
+  $('t1').innerHTML = '<tr><th>测量（dBFS，越接近 0 越响）</th><th>不压低</th><th>闪避 12 dB</th><th>闪避 ＋ 公共环境的嘈杂声</th></tr>' +
+    `<tr><td>讲解的响度（第 2—4 秒）</td><td class="num">${R.levels.speech}</td><td class="num">${R.levels.speech}</td><td class="num">${R.levels.speech}</td></tr>` +
+    `<tr><td>环境音的响度（讲解之外）</td><td class="num">${R.levels.amb}</td><td class="num">${R.levels.amb}</td><td class="num">—</td></tr>` +
+    `<tr><td>讲解高出背景</td><td class="num ${R.snr.plain >= 15 ? 'good' : 'poor'}">${R.snr.plain} dB</td><td class="num ${R.snr.duck >= 15 ? 'good' : 'poor'}">${R.snr.duck} dB</td><td class="num ${R.snr.crowd >= 15 ? 'good' : 'poor'}">${R.snr.crowd} dB</td></tr>` +
+    `<tr><td colspan="4" class="sub">提示音“保存成功”的响度 ${R.levels.cue} dBFS。团队约定讲解比背景高 15 dB 以上（这是示例中的设计约定，应在目标环境中请人试听来校准）。闪避解决了自家环境音的干扰；但在嘈杂的公共环境里，背景来自外面，应用压不低它——这时需要字幕。</td></tr>`;
+  // 播放条件
+  const rows = [];
+  const crowdLvl = rmsWin(await render({ only: 'amb', crowd: true, vol: { speech: 0, cue: 0, amb: 0 } }), 0.2, 0.55);
+  for (const c of CUES) { const hp = await cueEnergy(c, 'headphone'), ph = await cueEnergy(c, 'phone'); rows.push({ name: c[0], keep: (ph / hp) ** 2, phoneDb: db(ph) - db(hp), crowd: db(hp) - db(crowdLvl) }); }
+  $('cond').textContent += `（嘈杂声 ${db(crowdLvl).toFixed(1)} dBFS，比应用的环境音高 ${(db(crowdLvl) - R.levels.amb).toFixed(1)} dB）`;
+  R.crowdDb = +db(crowdLvl).toFixed(1);
+  R.device = rows.map(r => ({ name: r.name, keep: +(100 * r.keep).toFixed(1), crowd: +r.crowd.toFixed(1) }));
+  $('t2').innerHTML = '<tr><th>提示音</th><th>手机扬声器上保留的能量</th><th>公共环境中高出嘈杂声</th></tr>' + rows.map(r => `<tr><td>${r.name}</td><td class="num ${r.keep < 0.1 ? 'poor' : 'good'}">${(100 * r.keep).toFixed(1)}%（${r.phoneDb > -0.05 ? '0.0' : r.phoneDb.toFixed(1)} dB）</td><td class="num ${r.crowd < 0 ? 'poor' : r.crowd < 6 ? 'mid' : 'good'}">${r.crowd.toFixed(1)} dB</td></tr>`).join('');
+  $('m2').innerHTML = `150 赫兹的“咚”在手机扬声器上只剩 ${(100 * rows[0].keep).toFixed(1)}% 的能量，几乎听不到——只在耳机上试听，就不会发现。提示音的主要能量应放在约 500 赫兹到 4 千赫之间。公共环境中，提示音的响度与嘈杂声相近甚至更低，很容易被盖住（宽带响度的比较只是粗略估计，是否听得见要在现场试听），所以每个声音都要有视觉或振动的替代。`;
+  // 音量与静音
+  const V = { master: 0.8, speech: 1, cue: 1, amb: 0.6 }, M = { speech: false, cue: false, amb: false };
+  const NAMES = { master: '总音量', speech: '讲解', cue: '提示音', amb: '环境音' };
+  $('ctls').innerHTML = Object.keys(V).map(k => `<div class="ctl"><label for="v-${k}">${NAMES[k]}</label><input id="v-${k}" type="range" min="0" max="1" step="0.05" value="${V[k]}"><output id="o-${k}">${Math.round(V[k] * 100)}%</output>${k === 'master' ? '<button id="muteAll">全部静音</button>' : `<label><input type="checkbox" id="m-${k}"> 静音</label>`}</div>`).join('');
+  async function measure(label) {
+    const vol = Object.fromEntries(['speech', 'cue', 'amb'].map(k => [k, M[k] ? 0 : V[k]])), lv = {};
+    for (const k of ['speech', 'cue', 'amb']) { const d = await render({ duck: true, only: k, vol, master: V.master }); lv[k] = db(rmsWin(d, k === 'speech' ? 2 : k === 'cue' ? 1 : 0, k === 'speech' ? 4 : k === 'cue' ? 1.32 : 1.9)); }
+    return { label, ...Object.fromEntries(Object.entries(lv).map(([k, v]) => [k, v < -150 ? '静音' : v.toFixed(1)])) };
+  }
+  const states = [];
+  states.push(await measure('默认（总音量 80%，环境音 60%）'));
+  M.amb = true; states.push(await measure('只静音环境音'));
+  M.amb = false; V.master = 0; states.push(await measure('全部静音'));
+  V.master = 0.8;
+  R.mix = states;
+  $('t3').innerHTML = '<tr><th>设置（离线渲染后测得，dBFS）</th><th>讲解</th><th>提示音</th><th>环境音</th></tr>' + states.map(s => `<tr><td>${s.label}</td><td class="num">${s.speech}</td><td class="num">${s.cue}</td><td class="num">${s.amb}</td></tr>`).join('') + '<tr><td colspan="4" class="sub">每一类声音走自己的增益节点，再汇到总音量；设置保存在本地，下次打开仍然有效。</td></tr>';
+  for (const k of Object.keys(V)) $(`v-${k}`).oninput = e => { V[k] = +e.target.value; $(`o-${k}`).textContent = Math.round(V[k] * 100) + '%'; try { localStorage.setItem('sound', JSON.stringify({ V, M })); } catch (_) {} };
+  for (const k of ['speech', 'cue', 'amb']) $(`m-${k}`).onchange = e => { M[k] = e.target.checked; try { localStorage.setItem('sound', JSON.stringify({ V, M })); } catch (_) {} };
+  $('muteAll').onclick = () => { V.master = 0; $('v-master').value = 0; $('o-master').textContent = '0%'; };
+  // 语音
+  const voices = 'speechSynthesis' in window ? speechSynthesis.getVoices().length : -1;
+  R.voices = voices;
+  $('m3').innerHTML = voices > 0 ? `这台设备有 ${voices} 个语音，可以用 speechSynthesis 朗读讲解；同时显示字幕。` : `这台设备${voices < 0 ? '不支持 speechSynthesis' : '没有可用的语音（无头浏览器中常见）'}：讲解自动改为只显示字幕，并在设置里说明原因。语音与字幕都不能成为唯一的通道。`;
+  window.__snd = R;
+});
+</script>
+</body>
+</html>
