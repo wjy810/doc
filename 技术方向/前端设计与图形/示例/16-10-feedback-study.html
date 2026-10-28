@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>触摸与笔输入：比较四种反馈方式的小研究</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 4px 0 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr > th:first-child, #env th { white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .col { display: grid; gap: 6px; align-content: start; }
+  .manual { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px 10px; font-size: 11.5px; }
+  .manual label { display: grid; grid-template-columns: 7.5em minmax(0, 1fr); align-items: center; gap: 4px; color: var(--muted); }
+  .manual input { font: inherit; padding: 1px 4px; border: 1px solid var(--line); border-radius: 4px; min-width: 0; color: var(--ink); }
+  .manual input[placeholder="必填"]:placeholder-shown { border-color: #e7b7b2; background: #fdf3f2; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 12px; }
+  select, button { font: inherit; font-size: 12px; }
+  button { padding: 2px 10px; border: 1px solid #b9c3d3; background: #f3f6fb; border-radius: 6px; cursor: pointer; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+  #arena { position: relative; margin: 0 auto; background: #fbfbfa; border: 1px solid var(--line); border-radius: 6px; touch-action: none; user-select: none; -webkit-user-select: none; }
+  #trace { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #target { position: absolute; border-radius: 50%; background: #2f6fdb; pointer-events: none; display: none; }
+  #target.hit { background: #174ea6; box-shadow: 0 0 0 3px #fff, 0 0 0 5px #174ea6; }
+  #target.hit::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid #174ea6; animation: ring .3s ease-out forwards; }
+  @keyframes ring { to { inset: -16px; opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { #target.hit::after { animation: none; display: none; } }
+  .key { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 3px 0 8px; vertical-align: -1px; }
+  pre { margin: 0; font: 11px/1.5 ui-monospace, "SFMono-Regular", Menlo, monospace; background: #f6f7f9; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; word-break: break-all; }
+  ul.checks { margin: 0; padding-left: 0; list-style: none; font-size: 12px; } ul.checks li { padding: 1px 0; }
+  .tag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 9px; background: #fff3d6; color: #7a4a00; }
+  details summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+  #card { border: 2px dashed #7d8796; border-radius: 10px; margin: 6px 0; display: grid; place-items: center; color: var(--muted); font-size: 11px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div class="col"><h2>1 研究设计：问题、条件与顺序</h2><table id="design"></table>
+      <h3>条件顺序：平衡拉丁方（8 人，每人四块）</h3><table id="latin"></table><p class="m" id="mlatin"></p></div>
+    <div class="col"><h2>2 测试条件记录：设备、环境与校准</h2><table id="env"></table>
+      <div class="manual" id="manual"></div>
+      <details><summary>校准：用银行卡对齐屏幕上的边框（实体尺寸以毫米记录）</summary>
+        <p class="sub">把一张银行卡（ISO/IEC 7810 ID-1：85.60 × 53.98 毫米）贴在屏幕上，拖动滑块直到虚线框和卡片一样宽。</p>
+        <input id="cal" type="range" min="200" max="700" step="0.5" aria-label="虚线框宽度（像素）"><div id="card">银行卡大小</div></details>
+      <p class="m" id="menv"></p></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div class="col"><h2>3 任务：尽快按中出现的圆点</h2>
+      <div class="bar"><label>参与者 <select id="pid"></select></label><label>输入方式 <select id="input"><option>笔</option><option>手指</option></select></label>
+        <button id="start" type="button">开始第 1 块</button><span id="status" role="status" aria-live="polite"></span></div>
+      <div id="arena"><div id="target"></div><canvas id="trace"></canvas></div>
+      <p class="sub" id="legend"></p>
+      <h3>最近一次输入事件里能读到什么</h3><table id="inspect"></table></div>
+    <div class="col"><h2>4 反馈在代码里花了多久，以及网页管不到的部分</h2><table id="lat"></table><p class="m" id="mlat"></p>
+      <h3>系统边界：谁负责什么，谁能测到什么</h3><table id="boundary"></table>
+      <pre id="proto"></pre></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div class="col"><h2>5 分析：先用已知答案检验分析程序</h2><table id="summary"></table><table id="known"></table><p class="m" id="mknown"></p></div>
+    <div class="col"><h2>6 数据质量与导出</h2><ul class="checks" id="quality"></ul><pre id="csv"></pre>
+      <div class="bar"><button id="dlcsv" type="button">下载试验记录 CSV</button><button id="dljson" type="button">下载测试条件 JSON</button></div>
+      <p class="m" id="mconc"></p></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const fmt = (v, d = 1) => v == null || Number.isNaN(v) ? '—' : v.toFixed(d);
+const median = a => { if (!a.length) return NaN; const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const sum = a => a.reduce((s, v) => s + v, 0);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ok = (b, y = '是', n = '否') => b ? `<span class="good">${y}</span>` : `<span class="poor">${n}</span>`;
+
+// ---------- 1 研究设计 ----------
+const COND = [
+  { k: 'A', name: '无反馈', note: '按中后圆点不变，350 毫秒后出现下一个' },
+  { k: 'B', name: '视觉', note: '按下即变深色加外圈（减少动效时不扩散）' },
+  { k: 'C', name: '声音', note: '1 千赫短音，约 25 毫秒' },
+  { k: 'D', name: '振动', note: 'navigator.vibrate(15)，不支持时记为未送达' }
+];
+const SEED = 20261028, PRACTICE = 2, FORMAL = 16, ITI = 350, AREA = { w: 120, h: 70 }, SIZES = [9, 5], VERSION = '16-10 第 1 版';
+let pxmm = 96 / 25.4, calibrated = false;
+
+function mulberry32(a) {
+  return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+// 威廉姆斯设计：条件数为偶数时，每种条件紧跟在其他每种条件之后恰好一次
+function williams(n) {
+  const rows = [];
+  for (let r = 0; r < n; r++) {
+    const row = [];
+    for (let j = 0; j < n; j++) row.push(j % 2 === 0 ? (r + j / 2) % n : (r + n - (j + 1) / 2) % n);
+    rows.push(row);
+  }
+  return rows;
+}
+const LATIN = williams(COND.length);
+const PIDS = Array.from({ length: 8 }, (_, i) => 'P0' + (i + 1));
+const orderFor = pid => LATIN[(Number(pid.slice(1)) - 1) % LATIN.length];
+
+// 每种条件一组固定的目标：同一个种子，所有参与者在同一条件下看到同样的位置与大小
+function makeSeqs(seed) {
+  return COND.map((_, ci) => {
+    const rnd = mulberry32(seed + ci * 1000);
+    const sizes = Array.from({ length: FORMAL }, (_, i) => SIZES[i % 2]);
+    for (let i = sizes.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [sizes[i], sizes[j]] = [sizes[j], sizes[i]]; }
+    const all = [SIZES[0], SIZES[0], ...sizes];
+    let prev = { x: AREA.w / 2, y: AREA.h / 2 };
+    return all.map((w, i) => {
+      let x, y, d;
+      do { x = 8 + rnd() * (AREA.w - 16); y = 8 + rnd() * (AREA.h - 16); d = Math.hypot(x - prev.x, y - prev.y); } while (d < 25);
+      prev = { x, y };
+      return { i, practice: i < PRACTICE, x: +x.toFixed(1), y: +y.toFixed(1), w, d: +d.toFixed(1) };
+    });
+  });
+}
+const fnv = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(16).padStart(8, '0'); };
+const SEQS = makeSeqs(SEED), PRINT = fnv(JSON.stringify(SEQS)), PRINT2 = fnv(JSON.stringify(makeSeqs(SEED)));
+
+$('design').innerHTML = [
+  ['问题', '按中一个小圆点时，不同的反馈方式会不会改变完成时间、误触，以及“不确定有没有按上、又按一次”的次数？'],
+  ['自变量', COND.map(c => `${c.k} ${c.name}（${c.note}）`).join('；') + '。只对“按中”给反馈，按偏了四种条件都没有反馈。'],
+  ['因变量', '移动时间（目标出现 → 按下）、误触次数、重复按压（按中后 350 毫秒内又按同一处）、被忽略的手掌触摸；每块之后一道主观题（1—7：我能确定每次按压都被识别了）'],
+  ['任务', `区域 ${AREA.w} × ${AREA.h} 毫米；圆点直径 ${SIZES.join(' 与 ')} 毫米各半，相邻两个相距至少 25 毫米；每块先练习 ${PRACTICE} 次（不计入分析），再正式 ${FORMAL} 次`],
+  ['设计', '被试内设计：每人四种条件都做；顺序用平衡拉丁方抵消练习与疲劳的影响'],
+  ['可复现', `种子 ${SEED} → 目标序列指纹 ${PRINT}；再生成一次 ${PRINT2}：${ok(PRINT === PRINT2, '一致', '不一致')}；页面版本 ${VERSION}`]
+].map(([k, v]) => `<tr><th style="width:4.5em">${k}</th><td>${v}</td></tr>`).join('');
+
+const posCount = COND.map(() => COND.map(() => 0)), pairCount = {};
+for (const p of PIDS) { const o = orderFor(p); o.forEach((c, i) => { posCount[c][i]++; if (i) { const key = o[i - 1] + '-' + c; pairCount[key] = (pairCount[key] || 0) + 1; } }); }
+const pairVals = Object.values(pairCount), posOk = posCount.every(r => r.every(v => v === PIDS.length / COND.length));
+const pairOk = Object.keys(pairCount).length === COND.length * (COND.length - 1) && pairVals.every(v => v === pairVals[0]);
+$('latin').innerHTML = '<tr><th>参与者</th><th>第 1 块</th><th>第 2 块</th><th>第 3 块</th><th>第 4 块</th></tr>' +
+  [0, 1, 2, 3].map(r => `<tr><td>${PIDS[r]}、${PIDS[r + 4]}</td>${LATIN[r].map(c => `<td>${COND[c].k} ${COND[c].name}</td>`).join('')}</tr>`).join('');
+$('mlatin').innerHTML = `检查：每种条件在每个位置各出现 ${posCount[0][0]} 次 ${ok(posOk, '✓', '✗')}；12 种“前一块 → 后一块”组合各出现 ${pairVals[0]} 次 ${ok(pairOk, '✓', '✗')}。人数是 4 的倍数时才完全平衡；中途有人退出，要补一位同顺序的参与者。`;
+
+// ---------- 2 测试条件记录 ----------
+const mq = q => matchMedia(q).matches;
+let AC = null, AC0 = null, frameMs = NaN, clockMs = NaN;
+(() => { let m = Infinity, a = performance.now(); for (let i = 0; i < 5000; i++) { const b = performance.now(); if (b > a && b - a < m) m = b - a; a = b; } clockMs = m; })();
+(() => { const ts = []; const step = t => { ts.push(t); if (ts.length < 41) requestAnimationFrame(step); else { frameMs = median(ts.slice(1).map((v, i) => v - ts[i])); renderEnv(); } }; requestAnimationFrame(step); })();
+const product = (navigator.userAgent.match(/(HeadlessChrome|Edg|Firefox|Chrome|Version)\/[\d.]+/g) || ['未知']).slice(-1)[0];
+function envData() {
+  return {
+    时间: new Date().toLocaleString('zh-CN', { hour12: false }), 页面版本: VERSION, 浏览器: product, 完整标识: navigator.userAgent, 平台: navigator.platform || '未知',
+    主要指针: mq('(pointer: coarse)') ? '粗（触摸）' : mq('(pointer: fine)') ? '细（鼠标或笔）' : '无',
+    全部指针: [mq('(any-pointer: coarse)') && '粗', mq('(any-pointer: fine)') && '细'].filter(Boolean).join('、') || '无',
+    能否悬停: mq('(hover: hover)') ? '能' : '不能', 最多触摸点: navigator.maxTouchPoints,
+    屏幕: `${screen.width} × ${screen.height}，设备像素比 ${devicePixelRatio}`, 视口: `${innerWidth} × ${innerHeight}`,
+    刷新间隔: Number.isNaN(frameMs) ? '测量中' : `${frameMs.toFixed(1)} 毫秒（约 ${Math.round(1000 / frameMs)} 赫兹）`, 时钟精度: `${clockMs.toFixed(3)} 毫秒`,
+    振动接口: 'vibrate' in navigator ? '有' : '无',
+    音频延迟: AC ? `基础 ${(AC.baseLatency * 1000).toFixed(1)} 毫秒，输出 ${((AC.outputLatency || 0) * 1000).toFixed(1)} 毫秒` : '开始第 1 块后检测',
+    合并采样: 'getCoalescedEvents' in PointerEvent.prototype ? '支持' : '不支持', 减少动效: mq('(prefers-reduced-motion: reduce)') ? '开' : '关',
+    校准: `${pxmm.toFixed(2)} 像素/毫米（${calibrated ? '已用银行卡校准' : '未校准，用 CSS 默认的 96 像素/英寸'}）`
+  };
+}
+function renderEnv() {
+  const d = envData(), rows = Object.entries(d).filter(([k]) => k !== '完整标识' && k !== '时间' && k !== '页面版本');
+  const half = Math.ceil(rows.length / 2);
+  $('env').innerHTML = rows.slice(0, half).map((r, i) => `<tr><th>${r[0]}</th><td>${esc(r[1])}</td>${rows[half + i] ? `<th>${rows[half + i][0]}</th><td>${esc(rows[half + i][1])}</td>` : '<td></td><td></td>'}</tr>`).join('');
+}
+const MANUAL = [['device', '设备型号', true], ['os', '系统版本', true], ['protector', '屏幕保护膜', true], ['tool', '笔型号／手指', true], ['grip', '握持与姿势', true], ['room', '光线与噪声', true], ['volume', '系统音量', true], ['vib', '系统振动强度', true], ['host', '主持人', false], ['note', '备注', false]];
+$('manual').innerHTML = MANUAL.map(([id, label, req]) => `<label>${label}${req ? '' : '（选填）'}<input id="m-${id}" placeholder="${req ? '必填' : ' '}"></label>`).join('');
+function manualData() { const o = {}; for (const [id, label] of MANUAL) o[label] = $('m-' + id).value.trim(); return o; }
+function renderManualCheck() {
+  const req = MANUAL.filter(m => m[2]), filled = req.filter(([id]) => $('m-' + id).value.trim()).length;
+  $('menv').innerHTML = `手填项：必填 ${req.length} 项，已填 ${filled} 项 ${filled === req.length ? '<span class="good">可以开始正式记录</span>' : '<span class="poor">缺项时只能算试跑</span>'}。自动检测的部分每次打开页面重新读取，和试验记录一起导出。`;
+  return filled === req.length;
+}
+for (const [id] of MANUAL) $('m-' + id).addEventListener('input', renderManualCheck);
+const CARD_W = 85.60;
+$('cal').value = (CARD_W * pxmm).toFixed(1);
+function sizeCard() { const w = Number($('cal').value); $('card').style.width = w + 'px'; $('card').style.height = (w * 53.98 / CARD_W) + 'px'; }
+$('cal').addEventListener('input', () => { pxmm = Number($('cal').value) / CARD_W; calibrated = true; sizeCard(); sizeArena(); renderEnv(); });
+sizeCard(); renderEnv(); renderManualCheck();
+
+// ---------- 3 任务 ----------
+$('pid').innerHTML = PIDS.map(p => `<option>${p}</option>`).join('');
+const arena = $('arena'), tgt = $('target'), trace = $('trace'), tg = trace.getContext('2d');
+function sizeArena() {
+  arena.style.width = AREA.w * pxmm + 'px'; arena.style.height = AREA.h * pxmm + 'px';
+  trace.width = Math.round(AREA.w * pxmm * devicePixelRatio); trace.height = Math.round(AREA.h * pxmm * devicePixelRatio);
+  drawTrace();
+}
+const S = { pid: 'P01', input: '笔', session: '正式', blocksDone: 0, order: [], trials: [], state: 'idle', block: -1, cond: -1, ti: -1, cur: null, prev: null, ready: false, penDown: false, lastPen: -1e9, counts: {}, last: null, lastPalm: null, moveCoalesced: null, marks: [], events: 0, lastStamp: -Infinity, monotonic: true };
+const MARK = { hit: '#1f7a4d', miss: '#b3261e', retap: '#c77700', palm: '#7d8796', stray: '#7b5ea7' };
+$('legend').innerHTML = '本块按压：<span class="key" style="background:#1f7a4d"></span>按中<span class="key" style="background:#b3261e"></span>误触<span class="key" style="background:#c77700"></span>重复按压<span class="key" style="background:#7d8796"></span>被忽略的手掌触摸。浅色圆圈是这一块的全部目标（练习的两个为虚线）。';
+function drawTrace() {
+  const k = pxmm * devicePixelRatio;
+  tg.clearRect(0, 0, trace.width, trace.height);
+  if (S.cond < 0) { tg.fillStyle = '#8a93a3'; tg.font = `${12 * devicePixelRatio}px "Noto Sans SC"`; tg.fillText('选择参与者后按“开始第 1 块”', 10 * devicePixelRatio, 20 * devicePixelRatio); return; }
+  for (const s of SEQS[S.cond]) {
+    tg.setLineDash(s.practice ? [3 * devicePixelRatio, 3 * devicePixelRatio] : []);
+    tg.strokeStyle = '#c9d3e3'; tg.lineWidth = devicePixelRatio; tg.beginPath(); tg.arc(s.x * k, s.y * k, s.w / 2 * k, 0, Math.PI * 2); tg.stroke();
+  }
+  tg.setLineDash([]);
+  for (const m of S.marks) {
+    tg.fillStyle = MARK[m.kind]; tg.strokeStyle = MARK[m.kind]; tg.lineWidth = 1.6 * devicePixelRatio;
+    const x = m.x * k, y = m.y * k, r = 3.2 * devicePixelRatio;
+    tg.beginPath();
+    if (m.kind === 'miss') { tg.moveTo(x - r, y - r); tg.lineTo(x + r, y + r); tg.moveTo(x + r, y - r); tg.lineTo(x - r, y + r); tg.stroke(); }
+    else if (m.kind === 'retap') { tg.arc(x, y, r + 2 * devicePixelRatio, 0, Math.PI * 2); tg.stroke(); }
+    else if (m.kind === 'palm') { tg.moveTo(x, y - r - 1); tg.lineTo(x + r + 1, y + r); tg.lineTo(x - r - 1, y + r); tg.closePath(); tg.fill(); }
+    else { tg.arc(x, y, r, 0, Math.PI * 2); tg.fill(); }
+  }
+}
+sizeArena();
+const toMm = e => { const r = arena.getBoundingClientRect(); return { x: (e.clientX - r.left) / pxmm, y: (e.clientY - r.top) / pxmm }; };
+const snap = e => ({ type: e.pointerType, pressure: e.pressure, tiltX: e.tiltX, tiltY: e.tiltY, w: e.width, h: e.height, primary: e.isPrimary });
+const status = t => { $('status').textContent = t; };
+
+function startTrial() {
+  const seq = SEQS[S.cond][S.ti];
+  S.cur = { session: S.session, participant: S.pid, block: S.block + 1, condition: COND[S.cond].k, trial: S.ti + 1, formal: seq.practice ? null : S.ti + 1 - PRACTICE, practice: seq.practice,
+    x: seq.x, y: seq.y, w: seq.w, d: seq.d, tShow: null, mt: null, misses: 0, retaps: 0, palm: 0, palmOutside: 0, stray: 0, pointer: '', pressure: null, tiltX: null, tiltY: null, cw: null, ch: null, handler: null, fbCall: null, fbFrame: null, audioLat: null, vib: null };
+  S.trials.push(S.cur);
+  tgt.style.width = tgt.style.height = seq.w * pxmm + 'px';
+  tgt.style.left = (seq.x - seq.w / 2) * pxmm + 'px'; tgt.style.top = (seq.y - seq.w / 2) * pxmm + 'px';
+  tgt.style.display = 'block'; tgt.classList.remove('hit');
+  S.state = 'running'; S.ready = false;
+  status(`${S.pid} · 第 ${S.block + 1} 块（${COND[S.cond].k} ${COND[S.cond].name}）· ${seq.practice ? '练习 ' + (S.ti + 1) : '正式 ' + S.cur.formal} / ${FORMAL}`);
+  const t = S.cur;
+  requestAnimationFrame(() => { t.tShow = performance.now(); S.ready = true; });
+}
+function feedback(t, e) {
+  const c = COND[S.cond].k;
+  if (c === 'B') { tgt.classList.add('hit'); requestAnimationFrame(() => { t.fbFrame = performance.now() - e.timeStamp; }); }
+  else if (c === 'C' && AC) {
+    const o = AC.createOscillator(), g = AC.createGain(), t0 = AC.currentTime;
+    o.frequency.value = 1000; g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.25, t0 + 0.003); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.025);
+    o.connect(g).connect(AC.destination); o.start(t0); o.stop(t0 + 0.03);
+    t.audioLat = (AC.baseLatency + (AC.outputLatency || 0)) * 1000;
+  } else if (c === 'D') { t.vib = 'vibrate' in navigator ? navigator.vibrate(15) : null; }
+  if (c !== 'A') t.fbCall = performance.now() - e.timeStamp;
+}
+function next() {
+  tgt.classList.remove('hit');
+  S.ti++;
+  if (S.ti < PRACTICE + FORMAL) { startTrial(); return; }
+  S.blocksDone++; tgt.style.display = 'none'; S.cur = null;
+  if (S.blocksDone < COND.length) { S.state = 'blockdone'; $('start').textContent = `开始第 ${S.blocksDone + 1} 块`; status(`第 ${S.blocksDone} 块完成。先请参与者回答主观题，休息一下再继续。`); }
+  else { S.state = 'alldone'; $('start').disabled = true; status('四块全部完成。'); analyze(); }
+}
+arena.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  const now = performance.now(), p = toMm(e);
+  S.counts[e.pointerType] = (S.counts[e.pointerType] || 0) + 1; S.events++;
+  if (e.timeStamp < S.lastStamp) S.monotonic = false;
+  S.lastStamp = e.timeStamp;
+  if (e.pointerType === 'pen') { S.penDown = true; S.lastPen = now; }
+  const owner = S.state === 'iti' ? S.prev : S.state === 'running' ? S.cur : null;
+  // 手掌忽略：笔正按着或刚离开 300 毫秒内，触摸一律不算
+  if (e.pointerType === 'touch' && (S.penDown || now - S.lastPen < 300)) {
+    S.lastPalm = snap(e);
+    if (owner) { owner.palm++; if (Math.hypot(p.x - owner.x, p.y - owner.y) > owner.w / 2) owner.palmOutside++; S.marks.push({ kind: 'palm', ...p }); drawTrace(); }
+    renderInspector(); return;
+  }
+  S.last = snap(e); renderInspector();
+  if (S.state === 'iti' && S.prev) {
+    const kind = Math.hypot(p.x - S.prev.x, p.y - S.prev.y) <= S.prev.w / 2 + 3 ? 'retap' : 'stray';
+    S.prev[kind === 'retap' ? 'retaps' : 'stray']++; S.marks.push({ kind, ...p }); drawTrace(); return;
+  }
+  if (S.state !== 'running' || !S.ready) return;
+  const t = S.cur;
+  if (Math.hypot(p.x - t.x, p.y - t.y) > t.w / 2) { t.misses++; S.marks.push({ kind: 'miss', ...p }); drawTrace(); return; }
+  t.handler = now - e.timeStamp; t.mt = e.timeStamp - t.tShow;
+  Object.assign(t, { pointer: e.pointerType, pressure: e.pressure, tiltX: e.tiltX, tiltY: e.tiltY, cw: e.width, ch: e.height });
+  feedback(t, e);
+  S.marks.push({ kind: 'hit', ...p }); drawTrace();
+  S.state = 'iti'; S.prev = t;
+  setTimeout(next, ITI);
+});
+arena.addEventListener('pointermove', e => {
+  if (e.pointerType === 'pen') S.lastPen = performance.now();
+  if (e.buttons && e.pointerType !== 'touch') { S.moveCoalesced = e.getCoalescedEvents ? e.getCoalescedEvents().length : null; renderInspector(); }
+});
+for (const type of ['pointerup', 'pointercancel']) arena.addEventListener(type, e => { if (e.pointerType === 'pen') { S.penDown = false; S.lastPen = performance.now(); } });
+function renderInspector() {
+  const l = S.last, p = S.lastPalm, v = (o, f) => o ? f(o) : '—';
+  $('inspect').innerHTML = '<tr><th></th><th>最近一次按压</th><th>最近一次被忽略的触摸</th><th>说明</th></tr>' + [
+    ['输入类型', o => o.type, 'pointerType：mouse／pen／touch'],
+    ['压力', o => o.pressure.toFixed(2), '0—1；不支持压力的设备按下时固定为 0.5'],
+    ['倾斜 X／Y', o => `${o.tiltX}° ／ ${o.tiltY}°`, '笔相对屏幕法线的倾角；手指为 0'],
+    ['接触尺寸', o => `${o.w} × ${o.h} 像素`, '触摸时是接触面积的近似；笔和鼠标为 1 × 1'],
+    ['主指针', o => o.primary ? '是' : '否', '多点触摸时第一个点为主指针']
+  ].map(([k, f, n]) => `<tr><th>${k}</th><td class="num">${v(l, f)}</td><td class="num">${v(p, f)}</td><td class="sub">${n}</td></tr>`).join('') +
+  `<tr><th>合并采样</th><td class="num">${S.moveCoalesced ?? '—'}</td><td></td><td class="sub">上一次拖动事件里合并了几个采样；画线时要用 getCoalescedEvents() 取全</td></tr>`;
+}
+renderInspector();
+$('start').addEventListener('click', () => {
+  if (!['idle', 'blockdone'].includes(S.state)) return;
+  if (!AC) { AC = new AudioContext(); AC0 = { base: AC.baseLatency * 1000, out: (AC.outputLatency || 0) * 1000 }; renderEnv(); }
+  if (S.state === 'idle') {
+    S.pid = $('pid').value; S.input = $('input').value; S.order = orderFor(S.pid); S.session = window.__plan ? '演练' : renderManualCheck() ? '正式' : '试跑';
+    $('pid').disabled = $('input').disabled = true;
+  }
+  S.block = S.blocksDone; S.cond = S.order[S.block]; S.ti = 0; S.marks = []; S.prev = null;
+  drawTrace(); startTrial();
+});
+
+// ---------- 4 延迟与系统边界 ----------
+$('boundary').innerHTML = '<tr><th>部分</th><th>负责</th><th>这页能记下</th><th>要另外测</th></tr>' + [
+  ['网页', '出题、判定、视觉与声音反馈、发出振动请求、记录与导出', '事件时间戳、位置、压力、倾斜、各步调用耗时', '—'],
+  ['浏览器与系统', '事件分发与合并、音频缓冲、是否真的振动以及振动强度', '音频基础延迟与输出延迟（可能报 0 或不准）、vibrate 的返回值', '声音与振动是否真的出现、何时出现'],
+  ['设备', '触摸与笔的采样、压力曲线、屏幕刷新、马达', '设备型号（手填）、刷新间隔', '触碰到事件的延迟、马达起振时间'],
+  ['外接装置（可选）', '强度可控的振动、力反馈、额外传感器', '经 Web Serial 收发的命令与回传时间', '装置时钟与页面时钟的对时'],
+  ['测量工具', '高速摄像、光电传感器、加速度计', '—', '手指接触 → 反馈出现 的完整延迟']
+].map(r => `<tr>${r.map((c, i) => i ? `<td>${c}</td>` : `<th>${c}</th>`).join('')}</tr>`).join('');
+$('proto').textContent = '外接振动装置的文本协议草案（每行一条，换行结束）：\n页面 → 装置  V 20 60        振动 20 毫秒，强度 60%\n装置 → 页面  OK V 20 60 t=1234567   装置时钟上的起振时刻（微秒）\n页面 → 装置  SYNC           对时：页面记下发出与收到回复的时刻\n装置 → 页面  T 1234000      往返时间的一半当作单程，换算两边时钟';
+
+// ---------- 5、6 分析、质量与导出 ----------
+const CSV_COLS = ['session', 'participant', 'block', 'condition', 'trial', 'practice', 'target_x_mm', 'target_y_mm', 'width_mm', 'distance_mm', 'fitts_id_bits', 'pointer_type', 'mt_ms', 'misses', 'retaps', 'palm_ignored', 'pressure', 'tilt_x', 'tilt_y', 'contact_w_px', 'contact_h_px', 'handler_ms', 'fb_call_ms', 'fb_frame_ms', 'audio_latency_ms', 'vibrate_ok'];
+const csvRow = t => [t.session, t.participant, t.block, t.condition, t.trial, t.practice ? 1 : 0, t.x, t.y, t.w, t.d, Math.log2(t.d / t.w + 1).toFixed(2), t.pointer, fmt(t.mt), t.misses, t.retaps, t.palm,
+  t.pressure == null ? '' : t.pressure.toFixed(3), t.tiltX ?? '', t.tiltY ?? '', t.cw ?? '', t.ch ?? '', fmt(t.handler, 2), t.fbCall == null ? '' : t.fbCall.toFixed(2), t.fbFrame == null ? '' : t.fbFrame.toFixed(1), t.audioLat == null ? '' : t.audioLat.toFixed(1), t.vib == null ? '' : t.vib];
+const toCSV = () => [CSV_COLS.join(','), ...S.trials.map(t => csvRow(t).join(','))].join('\n');
+function download(name, text, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
+$('dlcsv').addEventListener('click', () => download(`16-10-${S.pid}-${S.session}.csv`, '﻿' + toCSV(), 'text/csv'));
+$('dljson').addEventListener('click', () => download(`16-10-${S.pid}-条件.json`, JSON.stringify({ 自动: envData(), 手填: manualData(), 种子: SEED, 指纹: PRINT, 顺序: S.order.map(c => COND[c].k) }, null, 2), 'application/json'));
+$('summary').innerHTML = '<tr><td class="sub">四块完成后，这里按条件汇总正式试验。</td></tr>';
+$('csv').textContent = CSV_COLS.join(',');
+
+function analyze() {
+  const formal = S.trials.filter(t => !t.practice);
+  const rows = COND.map((c, ci) => {
+    const ts = formal.filter(t => t.condition === c.k), fb = ts.filter(t => t.fbCall != null);
+    return { k: c.k, name: c.name, pos: S.order.indexOf(ci) + 1, n: ts.length, mt: median(ts.map(t => t.mt)), misses: sum(ts.map(t => t.misses)), retaps: sum(ts.map(t => t.retaps)), palm: sum(ts.map(t => t.palm)), palmOutside: sum(ts.map(t => t.palmOutside)), stray: sum(ts.map(t => t.stray)),
+      handler: median(ts.map(t => t.handler)), fbCall: median(fb.map(t => t.fbCall)), fbCallMax: fb.length ? Math.max(...fb.map(t => t.fbCall)) : NaN, fbFrame: median(ts.filter(t => t.fbFrame != null).map(t => t.fbFrame)),
+      audioLat: median(ts.filter(t => t.audioLat != null).map(t => t.audioLat)), vibOk: ts.filter(t => t.vib === true).length, vibAsked: ts.filter(t => t.vib != null).length };
+  });
+  const dry = S.session === '演练';
+  $('summary').innerHTML = `<tr><th>条件</th><th>第几块</th><th>正式次数</th><th>移动时间中位数</th><th>误触</th><th>重复按压</th><th>手掌（已忽略）</th></tr>` +
+    rows.map(r => `<tr><td>${r.k} ${r.name}</td><td class="num">${r.pos}</td><td class="num">${r.n}</td><td class="num">${fmt(r.mt, 0)} 毫秒${dry ? '*' : ''}</td><td class="num">${r.misses}</td><td class="num">${r.retaps}</td><td class="num">${r.palm}</td></tr>`).join('');
+  const out = { rows, session: S.session, order: S.order.map(c => COND[c].k).join(''), counts: S.counts };
+
+  // 已知答案检验：演练脚本事先写好在哪几次故意按偏、重复按、放手掌；分析结果必须逐条对上
+  const plan = window.__plan;
+  if (plan) {
+    const pick = (ts, f) => ts.filter(f).map(t => t.formal).join('、') || '无';
+    const exp = l => l.join('、') || '无';
+    const kr = COND.map(c => {
+      const ts = formal.filter(t => t.condition === c.k);
+      const got = { misses: pick(ts, t => t.misses > 0), retaps: pick(ts, t => t.retaps > 0), palm: pick(ts, t => t.palm > 0) };
+      return { k: c.k, got, pass: got.misses === exp(plan.misses) && got.retaps === exp(plan.retaps) && got.palm === exp(plan.palm) };
+    });
+    const pracMiss = S.trials.filter(t => t.practice && t.misses > 0).length;
+    out.known = { kr, pass: kr.every(r => r.pass), pracMiss, pracExpected: plan.practiceMiss.length * COND.length };
+    $('known').innerHTML = `<tr><th>条件</th><th>误触在第几次（期望 ${exp(plan.misses)}）</th><th>重复按压（期望 ${exp(plan.retaps)}）</th><th>手掌（期望 ${exp(plan.palm)}）</th><th>对上</th></tr>` +
+      kr.map(r => `<tr><td>${r.k}</td><td>${r.got.misses}</td><td>${r.got.retaps}</td><td>${r.got.palm}</td><td>${ok(r.pass, '✓', '✗')}</td></tr>`).join('');
+    $('mknown').innerHTML = `<span class="tag">演练数据</span> 这一轮由测试脚本发出真实的笔与触摸事件（参与者 ${S.pid}，顺序 ${out.order}），不是任何人的操作记录。脚本在每块的第 ${exp(plan.misses)} 次故意先按偏，第 ${exp(plan.retaps)} 次按中后再按一下，第 ${exp(plan.palm)} 次按住笔时放下手掌，并在练习第 ${exp(plan.practiceMiss)} 次按偏一次。分析结果 ${ok(out.known.pass, '与期望逐条一致', '与期望不一致')}；练习里的 ${pracMiss} 次误触（期望 ${out.known.pracExpected}）记录在案，但没有进入上表。<br>* 演练中的移动时间由脚本的等待与浏览器调度决定，四种条件的差别不代表人的表现。`;
+  } else {
+    $('known').innerHTML = '';
+    $('mknown').textContent = '本次没有演练计划，上表来自真实操作。正式收集数据前，先用测试脚本跑一轮已知答案的演练，确认分析程序能逐条找回脚本故意制造的误触与重复按压。';
+  }
+
+  const [, B, C, D] = rows;
+  $('lat').innerHTML = '<tr><th>反馈</th><th>代码层测得（中位数）</th><th>没算进去的部分</th></tr>' + [
+    ['所有条件', `输入事件 → 处理函数开始 ${fmt(median(rows.map(r => r.handler)), 2)} 毫秒`, '触碰到系统产生事件的时间（触摸采样、驱动）'],
+    ['B 视觉', `事件 → 下一帧绘制前 ${fmt(B.fbFrame)} 毫秒`, `合成与显示器扫描（刷新间隔 ${fmt(frameMs)} 毫秒）、像素响应`],
+    ['C 声音', `事件 → 开始播放的调用 ${fmt(C.fbCall, 2)} 毫秒；浏览器报告的输出延迟 ${fmt(C.audioLat)} 毫秒`, '扬声器与耳机；蓝牙耳机通常还要再加一段，需实测'],
+    ['D 振动', `事件 → vibrate 调用返回 ${fmt(D.fbCall, 2)} 毫秒；返回 true ${D.vibOk}／${D.vibAsked} 次`, '马达起振与达到能感觉到的强度；true 只表示请求被接受']
+  ].map(r => `<tr><th>${r[0]}</th><td>${r[1]}</td><td class="sub">${r[2]}</td></tr>`).join('');
+  $('mlat').textContent = `这些数字只说明网页自己的部分很快（不到 1 毫秒到一帧）；用户真正感到的延迟大部分在网页之外。比较不同反馈时，要么在同一台设备上实测完整延迟，要么至少记录“这部分没有测”。音频的输出延迟要在播放之后读：AudioContext 刚创建时报 ${fmt(AC0.out)} 毫秒，开始播放后报 ${fmt((AC.outputLatency || 0) * 1000)} 毫秒，所以每次试验都记一次。本次是无头浏览器，没有真实的屏幕、扬声器和马达；这个输出延迟来自虚拟输出设备，不代表任何真实扬声器。`;
+  renderEnv();
+  out.lat = { ac0: AC0, handler: median(rows.map(r => r.handler)), frame: B.fbFrame, audioCall: C.fbCall, audioLat: C.audioLat, vibCall: D.fbCall, vibOk: D.vibOk, vibAsked: D.vibAsked, frameMs };
+
+  const fresh = makeSeqs(SEED), seqOk = S.trials.every(t => { const s = fresh['ABCD'.indexOf(t.condition)][t.trial - 1]; return s.x === t.x && s.y === t.y && s.w === t.w; });
+  const blocksOk = COND.every((c, i) => S.trials.filter(t => t.block === i + 1).length === PRACTICE + FORMAL);
+  const runOrder = [1, 2, 3, 4].map(b => S.trials.find(t => t.block === b).condition).join('');
+  const expOrder = orderFor(S.pid).map(c => COND[c].k).join('');
+  const declared = S.input === '笔' ? 'pen' : 'touch', hitsByType = {};
+  for (const t of formal) hitsByType[t.pointer] = (hitsByType[t.pointer] || 0) + 1;
+  const typeOk = Object.keys(hitsByType).every(k => k === declared);
+  const manualOk = renderManualCheck(), missingFields = formal.filter(t => t.mt == null || t.pointer === '').length;
+  const vibDelivered = D.vibAsked === D.n && D.vibOk === D.n;
+  const checks = [
+    [runOrder === expOrder, `条件顺序与拉丁方一致：${S.pid} 应为 ${expOrder}，实际 ${runOrder}`],
+    [blocksOk, `每块 ${PRACTICE} 次练习 + ${FORMAL} 次正式，四块都完整`],
+    [seqOk, `每次试验的目标都能由种子 ${SEED} 重新生成（指纹 ${PRINT}）`],
+    [S.monotonic && missingFields === 0, `事件时间戳单调递增；正式试验缺字段 ${missingFields} 条`],
+    [typeOk, `声明的输入方式是“${S.input}”；按中的 ${formal.length} 次全部来自 ${Object.entries(hitsByType).map(([k, v]) => `${k} ${v} 次`).join('、')}；另有 touch ${S.counts.touch || 0} 次全部作为手掌被忽略`],
+    [vibDelivered, `振动条件：请求 ${D.vibAsked} 次，返回 true ${D.vibOk} 次（不支持振动的设备上这一条会失败，该条件的数据要单独标记）`],
+    [manualOk, '测试条件记录的必填项齐全，并随数据一起导出'],
+    [rows.every(r => r.n === FORMAL), '练习试验没有进入分析']
+  ];
+  $('quality').innerHTML = checks.map(([b, t]) => `<li>${b ? '<span class="good">✓</span>' : '<span class="poor">✗</span>'} ${t}</li>`).join('');
+  out.checks = checks.map(([b, t]) => [b, t]);
+  out.palmOutside = sum(rows.map(r => r.palmOutside));
+  const csv = toCSV().split('\n');
+  out.csvLines = csv.length; out.csvHead = csv.slice(0, 1 + PRACTICE + 2);
+  $('csv').textContent = `${csv.slice(0, 1 + PRACTICE + 2).join('\n')}\n……（共 ${csv.length - 1} 行，每行一次试验；练习也保留，用 practice 列区分）`;
+  $('mconc').innerHTML = (dry ? '演练能说明的只有一件事：从按压到表格的整条流程是对的。' : '') +
+    `四种条件下手掌触摸共 ${out.palmOutside} 次落在目标之外；如果没有手掌忽略，它们会全部算成误触。正式研究至少 8 人（拉丁方的两轮），每人四块；报告每人每种条件的中位数和个人之间的差异，不只报平均值；配合每块之后的主观评分和简短访谈；在真实设备上另外测一次完整延迟，并在报告里写明设备、系统设置和没有测到的部分。`;
+  window.__fs16 = out;
+}
+window.__fs = { cur: () => {
+  const r = arena.getBoundingClientRect(), t = S.state === 'running' ? S.cur : null;
+  return { state: S.state, block: S.block, trial: S.ti, ready: S.ready, x: t ? r.left + t.x * pxmm : null, y: t ? r.top + t.y * pxmm : null, r: t ? t.w / 2 * pxmm : null, cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+} };
+</script>
+</body>
+</html>
