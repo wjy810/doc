@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>概率与随机、微积分基础：分布、采样、噪声、变化率与优化</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; } .row figure { margin: 0; font-size: 11px; color: var(--muted); } .row canvas { display: block; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div><h2>1 分布：同样是“随机”，形状不同</h2><p class="sub">各取 20000 个数画直方图。均匀分布每个值机会相同；三个均匀随机数的平均值集中在中间；正态分布用 Box–Muller 方法从两个均匀随机数变换得到。所有随机数来自同一个可以设定种子的生成器，重新打开页面结果不变。</p><div class="row" id="dist"></div><table class="t" id="tDist"></table></div>
+    <div><h2>2 采样：在一块区域里撒点</h2><p class="sub">A 每个点的坐标各取一个均匀随机数；B 用泊松圆盘采样（Bridson 方法）：新点必须离所有已有的点至少 r。两边点数相同。“最大空白”是区域内离最近的点最远的位置到该点的距离。</p><div class="row" id="samp"></div><table class="t" id="tSamp"></table></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>3 噪声与随机</h2><p class="sub">同样 250 个采样。A 每个位置取一个独立的随机数；B 用一维梯度噪声：在整数格点上放随机斜率，中间用平滑曲线过渡，相邻位置的值相近。表中测量相邻两个值的平均差，以及“前后两个值的相关程度”（自相关，1 表示完全跟随，0 表示无关）。</p><div class="row" id="noise"></div><table class="t" id="tNoise"></table></div>
+    <div><h2>4 变化率与优化</h2><p class="sub">上表：用差分近似 sin 在 x = 1 处的导数（准确值 cos 1）。前向差分 [f(x+h) − f(x)] / h；中心差分 [f(x+h) − f(x−h)] / 2h。下图：在 f(x, y) = x² + 10y² 上做梯度下降，从 (−4, 1.5) 出发，比较三种步长。</p><table class="t" id="tDiff"></table><div class="row" id="gd"></div><table class="t" id="tGd"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const fig = (host, cv, cap) => { const f = document.createElement('figure'); f.append(cv); f.insertAdjacentHTML('beforeend', `<figcaption>${cap}</figcaption>`); host.append(f); };
+const canvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); return c; };
+// 可以设定种子的随机数生成器（mulberry32）
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+// ---------- 1 分布 ----------
+function dist() {
+  const R = rng(1), N = 20000, out = {};
+  const gens = { '均匀': () => R(), '三个均匀数的平均': () => (R() + R() + R()) / 3, '正态（Box–Muller）': () => { const u = 1 - R(), v = R(); return 0.5 + 0.15 * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); } };
+  Object.entries(gens).forEach(([name, gen], gi) => {
+    const xs = Array.from({ length: N }, gen), bins = new Array(30).fill(0);
+    let outside = 0; xs.forEach(x => { if (x < 0 || x >= 1) outside++; else bins[Math.floor(x * 30)]++; });
+    const mean = xs.reduce((a, b) => a + b, 0) / N, sd = Math.sqrt(xs.reduce((a, b) => a + (b - mean) ** 2, 0) / N), within = xs.filter(x => Math.abs(x - mean) < sd).length / N;
+    const c = canvas(166, 90), g = c.getContext('2d'), mx = Math.max(...bins);
+    g.fillStyle = ['#9aa2b1', '#2f6fdb', '#1f7a4d'][gi]; bins.forEach((b, i) => g.fillRect(4 + i * 5.27, 86 - b / mx * 76, 4.3, b / mx * 76));
+    fig($('dist'), c, name);
+    out[name] = { mean, sd, within, outside };
+  });
+  $('tDist').innerHTML = `<tr><th>分布</th><th>平均值</th><th>标准差</th><th>落在平均值 ±1 个标准差内</th><th>落在 0～1 之外</th></tr>` + Object.entries(out).map(([n, o]) => `<tr><th>${n}</th><td class="num">${o.mean.toFixed(3)}</td><td class="num">${o.sd.toFixed(3)}</td><td class="num">${(o.within * 100).toFixed(1)}%</td><td class="num ${o.outside ? 'poor' : ''}">${o.outside}</td></tr>`).join('') + `<tr><td colspan="5">均匀分布 ±1 个标准差内约 57.7%，正态分布约 68.3%。正态分布没有边界，用作尺寸或位置时要截断或重新抽取；三个均匀数的平均值近似正态，而且一定落在 0～1 之内。</td></tr>`;
+  return out;
+}
+// ---------- 2 采样 ----------
+function bridson(W, H, r, R, k = 30) {
+  const cell = r / Math.SQRT2, gw = Math.ceil(W / cell), gh = Math.ceil(H / cell), grid = new Array(gw * gh).fill(-1), pts = [], active = [];
+  const add = p => { pts.push(p); active.push(p); grid[Math.floor(p[1] / cell) * gw + Math.floor(p[0] / cell)] = pts.length - 1; };
+  const ok = p => { if (p[0] < 0 || p[1] < 0 || p[0] >= W || p[1] >= H) return false; const gx = Math.floor(p[0] / cell), gy = Math.floor(p[1] / cell); for (let y = Math.max(0, gy - 2); y <= Math.min(gh - 1, gy + 2); y++) for (let x = Math.max(0, gx - 2); x <= Math.min(gw - 1, gx + 2); x++) { const i = grid[y * gw + x]; if (i >= 0 && Math.hypot(pts[i][0] - p[0], pts[i][1] - p[1]) < r) return false; } return true; };
+  add([R() * W, R() * H]);
+  while (active.length) {
+    const ai = Math.floor(R() * active.length), a = active[ai]; let found = false;
+    for (let j = 0; j < k; j++) { const ang = R() * 2 * Math.PI, d = r * (1 + R()), p = [a[0] + d * Math.cos(ang), a[1] + d * Math.sin(ang)]; if (ok(p)) { add(p); found = true; break; } }
+    if (!found) active.splice(ai, 1);
+  }
+  return pts;
+}
+function sampling() {
+  const W = 240, H = 150, R = rng(7), out = {}, B = bridson(W, H, 12, R), N = B.length, A = Array.from({ length: N }, () => [R() * W, R() * H]);
+  for (const [v, pts] of [['A', A], ['B', B]]) {
+    const c = canvas(W + 10, H + 10), g = c.getContext('2d'); g.fillStyle = v === 'A' ? '#b3261e' : '#2f6fdb'; pts.forEach(p => { g.beginPath(); g.arc(p[0] + 5, p[1] + 5, 2.2, 0, 7); g.fill(); });
+    const nn = pts.map((p, i) => Math.min(...pts.map((q, j) => i === j ? Infinity : Math.hypot(p[0] - q[0], p[1] - q[1])))), mean = nn.reduce((a, b) => a + b, 0) / N, sd = Math.sqrt(nn.reduce((a, b) => a + (b - mean) ** 2, 0) / N);
+    let gap = 0, gp = null; for (let y = 0; y <= H; y += 2) for (let x = 0; x <= W; x += 2) { const d = Math.min(...pts.map(q => Math.hypot(q[0] - x, q[1] - y))); if (d > gap) { gap = d; gp = [x, y]; } }
+    g.strokeStyle = '#9aa2b1'; g.setLineDash([3, 3]); g.beginPath(); g.arc(gp[0] + 5, gp[1] + 5, gap, 0, 7); g.stroke(); g.setLineDash([]);
+    fig($('samp'), c, v === 'A' ? 'A：均匀随机坐标' : 'B：泊松圆盘采样（r = 12）');
+    out[v] = { n: N, min: Math.min(...nn), close: nn.filter(d => d < 6).length, cv: sd / mean, gap };
+  }
+  $('tSamp').innerHTML = `<tr><th></th><th>点数</th><th>最近两点的距离</th><th>近邻距离小于 6 的点</th><th>近邻距离的变异系数</th><th>最大空白（虚线圆）</th></tr>` + ['A', 'B'].map(v => { const o = out[v]; return `<tr><th>${v}</th><td class="num">${o.n}</td><td class="num ${o.min < 6 ? 'poor' : 'good'}">${o.min.toFixed(1)}</td><td class="num ${o.close ? 'poor' : 'good'}">${o.close}</td><td class="num">${(o.cv * 100).toFixed(0)}%</td><td class="num ${o.gap > 20 ? 'poor' : 'good'}">${o.gap.toFixed(1)}</td></tr>`; }).join('');
+  return out;
+}
+// ---------- 3 噪声 ----------
+function noise() {
+  const R = rng(3), grads = Array.from({ length: 64 }, () => R() * 2 - 1), fade = t => t * t * t * (t * (t * 6 - 15) + 10);
+  const perlin1 = x => { const i = Math.floor(x), f = x - i, g0 = grads[i & 63], g1 = grads[(i + 1) & 63]; const a = g0 * f, b = g1 * (f - 1); return 2 * (a + (b - a) * fade(f)); };
+  const N = 250, out = {}, series = { A: Array.from({ length: N }, () => R() * 2 - 1), B: Array.from({ length: N }, (_, i) => perlin1(i * 0.06)) };
+  for (const v of ['A', 'B']) {
+    const s = series[v], c = canvas(250, 90), g = c.getContext('2d'), lo = Math.min(...s), hi = Math.max(...s);
+    g.strokeStyle = v === 'A' ? '#b3261e' : '#2f6fdb'; g.beginPath(); s.forEach((y, i) => { const X = i, Y = 45 - y * 38; i ? g.lineTo(X, Y) : g.moveTo(X, Y); }); g.stroke();
+    fig($('noise'), c, v === 'A' ? 'A：每个位置独立的随机数' : 'B：一维梯度噪声（频率 0.06）');
+    const m = s.reduce((a, b) => a + b, 0) / N, d = s.slice(1).map((y, i) => Math.abs(y - s[i])), meanD = d.reduce((a, b) => a + b, 0) / d.length;
+    let num = 0, den = 0; for (let i = 0; i < N; i++) { den += (s[i] - m) ** 2; if (i) num += (s[i] - m) * (s[i - 1] - m); }
+    out[v] = { range: hi - lo, meanD, rel: meanD / (hi - lo), ac: num / den };
+  }
+  $('tNoise').innerHTML = `<tr><th></th><th>取值范围</th><th>相邻两值的平均差</th><th>平均差／范围</th><th>前后两个值的自相关</th></tr>` + ['A', 'B'].map(v => { const o = out[v]; return `<tr><th>${v}</th><td class="num">${o.range.toFixed(2)}</td><td class="num">${o.meanD.toFixed(3)}</td><td class="num ${o.rel > 0.1 ? 'poor' : 'good'}">${(o.rel * 100).toFixed(1)}%</td><td class="num">${o.ac.toFixed(2)}</td></tr>`; }).join('') + `<tr><td colspan="5">用独立随机数驱动位置或亮度，每一帧都会跳；噪声让变化连续，频率决定变化的快慢。</td></tr>`;
+  return out;
+}
+// ---------- 4 变化率与优化 ----------
+function deriv() {
+  const f = Math.sin, x = 1, exact = Math.cos(1), hs = [1e-1, 1e-2, 1e-4, 1e-6, 1e-8, 1e-11], out = [];
+  for (const h of hs) out.push({ h, fwd: Math.abs((f(x + h) - f(x)) / h - exact), ctr: Math.abs((f(x + h) - f(x - h)) / (2 * h) - exact) });
+  const best = k => out.reduce((a, b) => b[k] < a[k] ? b : a);
+  $('tDiff').innerHTML = `<tr><th>步长 h</th>${out.map(o => `<th>${o.h.toExponential(0)}</th>`).join('')}</tr>` + [['fwd', '前向差分的误差'], ['ctr', '中心差分的误差']].map(([k, n]) => `<tr><th>${n}</th>${out.map(o => `<td class="num ${o === best(k) ? 'good' : ''}">${o[k].toExponential(0)}</td>`).join('')}</tr>`).join('') + `<tr><td colspan="${hs.length + 1}">h 变小，截断误差变小（前向差分与 h 成正比，中心差分与 h² 成正比）；h 太小时两个相近的数相减，舍入误差变大。</td></tr>`;
+  return { rows: out, bestFwd: best('fwd').h, bestCtr: best('ctr').h };
+}
+function descent() {
+  const F = (x, y) => x * x + 10 * y * y, grad = (x, y) => [2 * x, 20 * y], W = 250, H = 150, X = x => W / 2 + x * 26, Y = y => H / 2 - y * 26, out = {};
+  const c = canvas(W, H), g = c.getContext('2d');
+  g.strokeStyle = '#e4e7ec'; for (const lv of [0.5, 2, 5, 10, 18]) { g.beginPath(); for (let a = 0; a <= 64; a++) { const t = a / 64 * 2 * Math.PI, x = Math.sqrt(lv) * Math.cos(t), y = Math.sqrt(lv / 10) * Math.sin(t); a ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y)); } g.stroke(); }
+  [['0.02', 0.02, '#5b6475', 60], ['0.09', 0.09, '#2f6fdb', 60], ['0.11', 0.11, '#b3261e', 9]].forEach(([name, lr, col, show]) => {
+    let p = [-4, 1.5], it = 0; const path = [p];
+    while (it < 500) { const gr = grad(...p); if (Math.hypot(...gr) < 1e-3 || !isFinite(F(...p)) || F(...p) > 1e6) break; p = [p[0] - lr * gr[0], p[1] - lr * gr[1]]; path.push(p); it++; }
+    g.strokeStyle = col; g.lineWidth = 1.3; g.beginPath(); path.slice(0, show).forEach((q, i) => { const px = Math.max(-5, Math.min(W + 5, X(q[0]))), py = Math.max(-5, Math.min(H + 5, Y(q[1]))); i ? g.lineTo(px, py) : g.moveTo(px, py); }); g.stroke();
+    out[name] = { it, f: F(...p), converged: Math.hypot(...grad(...p)) < 1e-3 };
+  });
+  fig($('gd'), c, '深灰：步长 0.02　蓝：0.09（画前 60 步）　红：0.11（画前 9 步）');
+  $('tGd').innerHTML = `<tr><th>步长</th><th>迭代次数</th><th>结果</th></tr>` + Object.entries(out).map(([n, o]) => `<tr><th>${n}</th><td class="num">${o.it}${o.converged ? '' : '（停止）'}</td><td class="${o.converged ? 'good' : 'poor'}">${o.converged ? `收敛，f = ${o.f.toExponential(1)}` : `发散，f 超过 ${o.f.toExponential(1)}`}</td></tr>`).join('') + `<tr><td colspan="3">y 方向的“陡度”是 x 方向的 10 倍：步长超过 2 ÷ 20 = 0.1 时，y 方向每一步都跳过谷底而且越跳越远；步长太小，平缓的 x 方向要走几百步。</td></tr>`;
+  return out;
+}
+window.__rc = { run: () => ({ dist: dist(), sampling: sampling(), noise: noise(), deriv: deriv(), descent: descent() }) };
+</script>
+</body>
+</html>
