@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>版式效果：静态页、杂志式排版、Bento 与瀑布流</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script>
+// 先注册布局偏移观察器：瀑布流的图片到达时，记录谁被挤动了
+const SHIFTS = [];
+new PerformanceObserver(l => l.getEntries().forEach(e => { if (!e.hadRecentInput) SHIFTS.push({ v: e.value, src: e.sources.map(s => s.node && s.node.closest && s.node.closest('[data-m]') ? s.node.closest('[data-m]').dataset.m : null) }); })).observe({ type: 'layout-shift', buffered: true });
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); }
+  .row { display: flex; gap: 12px; align-items: flex-start; } .tag { font-size: 11px; color: var(--muted); margin: 0 0 2px; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  /* ---------- 1 精致静态页面：同一篇文章在三种容器宽度 ---------- */
+  .box { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fffdf8; }
+  .art { padding: 12px 14px; }
+  .art .kicker { color: #a15c00; font-size: 11px; letter-spacing: .08em; } .art h1 { margin: 2px 0 6px; } .art .lead { color: #444b57; margin: 0 0 6px; } .art p { margin: 0; }
+  .A .art h1 { font-size: 34px; line-height: 1.15; } .A .art .lead { font-size: 16px; } .A .art p { font-size: 14px; }
+  .B { container-type: inline-size; }
+  .B .art h1 { font-size: clamp(20px, 7cqi, 34px); line-height: 1.2; text-wrap: balance; } .B .art .lead { font-size: clamp(13px, 3.6cqi, 16px); } .B .art p { font-size: 14px; line-height: 1.75; max-width: 30em; }
+  /* ---------- 2 杂志式排版 ---------- */
+  .mag { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; font-size: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: #fffdf8; }
+  .mag > * { margin: 0; } .mag h3 { grid-column: 1 / -1; font-size: 18px; line-height: 1.2; }
+  .mag .pic { grid-column: 1 / 5; height: 90px; border-radius: 6px; background: linear-gradient(135deg, #2c5aa0, #86a9e0); }
+  .mag .quote { grid-column: 5 / 7; font-size: 13px; font-weight: 700; color: #a15c00; border-left: 3px solid #a15c00; padding-left: 6px; align-self: center; }
+  .mag .c1 { grid-column: 1 / 4; } .mag .c2 { grid-column: 4 / 7; }
+  .mag.A .quote { grid-row: 2; } .mag.A .pic { grid-row: 2; } .mag.A .c1 { grid-row: 3; } .mag.A .c2 { grid-row: 3; }
+  /* ---------- 3 Bento ---------- */
+  .bento { display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: 64px; gap: 6px; font-size: 12px; }
+  .bento > div { border-radius: 8px; padding: 6px 8px; background: #eef2f8; overflow: hidden; }
+  .bento b { display: block; font-size: 12.5px; }
+  .bento .p1 { grid-column: span 2; grid-row: span 2; background: #dfe8f8; } .bento .p2 { grid-column: span 2; } .bento .p3, .bento .p4 { grid-column: span 1; }
+  .bento.B > div { min-height: 64px; overflow: visible; } .bento.B { grid-auto-rows: minmax(64px, auto); }
+  .bento.B .txt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; } .bento.B a { font-size: 11px; color: var(--accent); }
+  .narrow .bento { grid-template-columns: 1fr; } .narrow .bento > div { grid-column: auto !important; grid-row: auto !important; }
+  /* ---------- 4 瀑布流 ---------- */
+  .feed { position: relative; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fafbfc; }
+  .feed.cols { column-count: 3; column-gap: 6px; padding: 6px; }
+  .feed.cols .it { break-inside: avoid; margin-bottom: 6px; }
+  .feed .it { width: calc((100% - 24px) / 3); border-radius: 6px; background: #fff; border: 1px solid var(--line); font-size: 11px; overflow: hidden; }
+  .feed.cols .it { width: auto; }
+  .feed.js .it { position: absolute; }
+  .feed .it img { display: block; width: 100%; } .feed .it .ph { width: 100%; background: #e3e7ee; }
+  .feed .it span { display: block; padding: 2px 5px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 精致静态页面：同一篇文章在三种宽度</h2>
+  <p class="sub">A 的标题和正文写死字号、正文不限行长；B 用容器查询单位让标题随容器宽度缩放，并把正文限制在约 30 个字一行。下表由页面测量计算样式与每行字数得到。文章为演示而构造。</p>
+  <div id="static"></div>
+  <table class="t" id="tStatic"></table>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>2 杂志式排版：视觉顺序与阅读顺序</h2><p class="sub">用网格把引语、图片和正文排成杂志的样子。A 为了让引语出现在图片旁边，把它放在源码最前面，再用网格位置挪回去；B 源码顺序就是阅读顺序。读屏软件和 Tab 键按源码顺序走。</p><div class="row" id="mag"></div><table class="t" id="tMag"></table></div>
+    <div><h2>3 Bento 卡片：优先级与内容变化</h2><p class="sub">六张卡片按优先级排列，第 1 张最大。把第 4 张的内容换成长文本，并在窄屏下改成一列。A 的卡片固定高度、超出部分直接裁掉，源码顺序与优先级无关；B 高度随内容增长、摘要截成两行并给出“更多”，源码顺序就是优先级。</p><div id="bento"></div><table class="t" id="tBento"></table></div>
+  </div>
+</section>
+<section class="panel">
+  <h2>4 瀑布流：阅读顺序与加载位移</h2>
+  <p class="sub">12 条动态按时间排序（1 最新）。图片在 0.2—1.3 秒之间陆续到达（用计时器模拟网络），三种做法依次运行。三种做法：CSS 多列、脚本按最短列摆放但不知道图片高度、脚本按数据里的宽高比预留位置。布局偏移由浏览器的 PerformanceObserver 记录。</p>
+  <div class="row" id="feeds"></div>
+  <table class="t" id="tFeed"></table><p class="m" id="mFeed"></p>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const TEXT = '城市噪声地图把一周的监测数据画成可以拖动时间的地图。夜间施工的噪声在地图上一目了然，居民第一次能指着屏幕说出问题出在哪条街、哪个时段。';
+const ART = `<div class="art"><div class="kicker">作品故事</div><h1>听见城市：一张噪声地图的诞生</h1><p class="lead">三位同学用一个学期，把冷冰冰的分贝数变成人人看得懂的地图。</p><p>${TEXT}</p></div>`;
+// 每行字数：段落字数 ÷ 行数（行数 = 高度 ÷ 行高）
+const perLine = p => { const lh = parseFloat(getComputedStyle(p).lineHeight), n = Math.round(p.getBoundingClientRect().height / lh); return Math.round(p.textContent.length / n); };
+const overflow = root => { const r = root.getBoundingClientRect(); return [...root.querySelectorAll('*')].filter(e => { const b = e.getBoundingClientRect(); return b.width && b.right > r.right + 0.5; }).length; };
+
+function staticPage() {
+  const W = [596, 290, 200];
+  $('static').innerHTML = ['A', 'B'].map(v => `<p class="tag">${v === 'A' ? 'A：写死字号，正文不限行长' : 'B：容器查询单位 ＋ 限制行长'}</p><div class="row">${W.map(w => `<div class="box ${v}" style="width:${w}px" data-v="${v}" data-w="${w}">${ART}</div>`).join('')}</div>`).join('');
+  const rows = [];
+  for (const b of document.querySelectorAll('#static .box')) {
+    const h1 = b.querySelector('h1'), p = b.querySelector('.art p:not(.lead)'), fs = parseFloat(getComputedStyle(h1).fontSize), body = parseFloat(getComputedStyle(p).fontSize);
+    const lh = parseFloat(getComputedStyle(h1).lineHeight), titleLines = Math.round(h1.getBoundingClientRect().height / lh);
+    const lastLine = (() => { const r = document.createRange(); r.selectNodeContents(h1); const rects = [...r.getClientRects()]; const last = rects[rects.length - 1]; return rects.filter(x => Math.abs(x.top - last.top) < 2).reduce((a, x) => a + x.width, 0) / fs; })();
+    rows.push({ v: b.dataset.v, w: +b.dataset.w, fs, ratio: fs / body, titleLines, orphan: Math.round(lastLine), cpl: perLine(p), over: overflow(b) });
+  }
+  $('tStatic').innerHTML = `<tr><th>版本</th><th>宽度</th><th>标题字号</th><th>标题／正文</th><th>标题行数</th><th>标题末行字数</th><th>正文每行字数</th><th>伸出容器的元素</th></tr>` + rows.map(r => `<tr><th>${r.v}</th><td class="num">${r.w} 像素</td><td class="num">${r.fs.toFixed(1)} 像素</td><td class="num">${r.ratio.toFixed(2)}</td><td class="num">${r.titleLines}</td><td class="num ${r.orphan <= 2 ? 'poor' : ''}">${r.orphan}</td><td class="num ${r.cpl > 30 ? 'poor' : 'good'}">${r.cpl}</td><td class="num ${r.over ? 'poor' : ''}">${r.over}</td></tr>`).join('');
+  return rows;
+}
+function magazine() {
+  const blocks = { h: '<h3 data-k="标题">一张噪声地图的诞生</h3>', q: '<p class="quote" data-k="引语">“第一次能指着屏幕说出问题在哪条街。”</p>', pic: '<div class="pic" role="img" aria-label="地图截图" data-k="图片"></div>', c1: `<p class="c1" data-k="正文一">${TEXT.slice(0, 34)}</p>`, c2: `<p class="c2" data-k="正文二">${TEXT.slice(34)}</p>` };
+  const A = ['q', 'h', 'c2', 'pic', 'c1'], B = ['h', 'pic', 'q', 'c1', 'c2'];
+  $('mag').innerHTML = [['A', A], ['B', B]].map(([v, o]) => `<div style="flex:1"><p class="tag">${v}</p><div class="mag ${v}" id="mag${v}">${o.map(k => blocks[k]).join('')}</div></div>`).join('');
+  const res = ['A', 'B'].map(v => {
+    const els = [...document.querySelectorAll(`#mag${v} [data-k]`)], dom = els.map(e => e.dataset.k);
+    const vis = [...els].sort((a, b) => { const p = a.getBoundingClientRect(), q = b.getBoundingClientRect(); return Math.abs(p.top - q.top) > 6 ? p.top - q.top : p.left - q.left; }).map(e => e.dataset.k);
+    return { v, dom, vis, wrong: dom.filter((k, i) => k !== vis[i]).length };
+  });
+  $('tMag').innerHTML = `<tr><th>版本</th><th>源码顺序（读屏、Tab）</th><th>视觉顺序</th><th>位置不一致</th></tr>` + res.map(r => `<tr><th>${r.v}</th><td>${r.dom.join(' → ')}</td><td>${r.vis.join(' → ')}</td><td class="num ${r.wrong ? 'poor' : 'good'}">${r.wrong}／5</td></tr>`).join('');
+  return res;
+}
+function bento() {
+  const CARDS = [['p1', '本周推荐', '数据可视化入门：从表格到交互图表'], ['p2', '继续学习', '第 5 周：比例尺'], ['p3', '作业', '周日 22:00 截止'], ['p4', '公告', '周六晚上系统维护'], ['p5', '同学动态', '林同学完成了作品'], ['p6', '小测验', '3 道题']];
+  const LONG = '周六 22:00—24:00 系统维护，期间无法提交作业；已经开始的测验会自动保存，维护结束后可以继续作答，截止时间顺延两小时。';
+  const html = (v, order) => `<div class="bento ${v}" id="bento${v}">${order.map(i => { const [cls, t, s] = CARDS[i]; const txt = cls === 'p4' ? LONG : s; return `<div class="${cls}" data-p="${i + 1}"><b>${t}</b><span class="txt">${txt}</span>${v === 'B' && cls === 'p4' ? ' <a href="#">更多</a>' : ''}</div>`; }).join('')}</div>`;
+  const orderA = [2, 0, 5, 1, 4, 3], orderB = [0, 1, 2, 3, 4, 5];
+  $('bento').innerHTML = `<div class="two"><div><p class="tag">A</p>${html('A', orderA)}</div><div><p class="tag">B</p>${html('B', orderB)}</div></div>`;
+  const cut = v => [...document.querySelectorAll(`#bento${v} > div`)].filter(d => { const t = d.querySelector('.txt'); return d.scrollHeight > d.clientHeight + 1 || (v === 'B' ? false : t.getBoundingClientRect().bottom > d.getBoundingClientRect().bottom + 1); }).map(d => '第 ' + d.dataset.p + ' 张');
+  const hidden = v => { const t = document.querySelector(`#bento${v} .p4 .txt`); return t.scrollHeight > t.clientHeight + 1 && !t.parentElement.querySelector('a'); };
+  const r = { A: { cut: cut('A'), silent: hidden('A') || cut('A').length > 0 }, B: { cut: cut('B'), silent: hidden('B') } };
+  // 窄屏：改成一列，看先后顺序
+  $('bento').classList.add('narrow');
+  for (const v of ['A', 'B']) r[v].narrow = [...document.querySelectorAll(`#bento${v} > div`)].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top).map(d => d.dataset.p).join(' ');
+  $('bento').classList.remove('narrow');
+  $('tBento').innerHTML = `<tr><th>版本</th><th>长文本放进第 4 张后</th><th>窄屏一列时的先后（数字是优先级）</th></tr>` + ['A', 'B'].map(v => `<tr><th>${v}</th><td class="${r[v].silent ? 'poor' : 'good'}">${r[v].silent ? `${r[v].cut.join('、') || '第 4 张'}的文字被直接裁掉，没有任何提示` : '摘要截成两行，给出“更多”'}</td><td class="${r[v].narrow === '1 2 3 4 5 6' ? 'good' : 'poor'}">${r[v].narrow}</td></tr>`).join('');
+  return r;
+}
+// ---------- 瀑布流 ----------
+const ITEMS = Array.from({ length: 12 }, (_, i) => ({ n: i + 1, ratio: [0.45, 0.78, 0.6, 0.36, 0.9, 0.54, 0.72, 0.42, 0.66, 0.48, 0.84, 0.6][i], arrive: 200 + ((i * 7) % 12) * 100 }));
+function picture(it) { const c = document.createElement('canvas'); c.width = 120; c.height = Math.round(120 * it.ratio); const g = c.getContext('2d'); g.fillStyle = `hsl(${it.n * 29} 50% 60%)`; g.fillRect(0, 0, c.width, c.height); g.fillStyle = '#fff'; g.font = '700 24px system-ui'; g.fillText(it.n, 8, 28); return c.toDataURL(); }
+function feeds() {
+  $('feeds').innerHTML = [['cols', 'CSS 多列'], ['js0', '脚本摆放，不知道图片高度'], ['js1', '脚本摆放，按宽高比预留']].map(([k, n]) => `<div style="flex:1"><p class="tag">${n}</p><div class="feed ${k === 'cols' ? 'cols' : 'js'}" id="f-${k}" data-m="${k}">${ITEMS.map(it => `<div class="it" data-n="${it.n}">${k === 'js1' ? `<div class="ph" style="aspect-ratio:1/${it.ratio}"></div>` : k === 'cols' ? `<div class="ph" style="aspect-ratio:1/${it.ratio}"></div>` : ''}<span>动态 ${it.n}</span></div>`).join('')}</div></div>`).join('');
+  const place = k => { const f = $('f-' + k), W = f.clientWidth, cw = (W - 24) / 3, h = [6, 6, 6]; for (const el of f.querySelectorAll('.it')) { const c = h.indexOf(Math.min(...h)); el.style.left = 6 + c * (cw + 6) + 'px'; el.style.top = h[c] + 'px'; h[c] += el.offsetHeight + 6; } f.style.height = Math.max(...h) + 'px'; };
+  place('js0'); place('js1');
+  // 图片陆续到达：不知道高度的那一版只能到达后重新摆放。三种做法依次运行，各自的布局偏移不会混在一起
+  const run = (k, t0) => Promise.all(ITEMS.map(it => new Promise(res => setTimeout(() => {
+    const el = document.querySelector(`#f-${k} [data-n="${it.n}"]`), img = new Image(); img.src = picture(it); img.alt = `动态 ${it.n} 的配图`;
+    const ph = el.querySelector('.ph'); if (ph) ph.replaceWith(img); else el.prepend(img);
+    if (k !== 'cols') place(k); res();
+  }, t0 + it.arrive))));
+  return run('cols', 0).then(() => run('js0', 200)).then(() => run('js1', 200));
+}
+function feedReport() {
+  const firstRow = k => { const f = $('f-' + k), its = [...f.querySelectorAll('.it')], top = Math.min(...its.map(e => e.getBoundingClientRect().top)); return its.filter(e => e.getBoundingClientRect().top - top < 8).sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left).map(e => e.dataset.n); };
+  const cls = k => SHIFTS.filter(s => s.src.includes(k)).reduce((a, s) => a + s.v, 0), cnt = k => SHIFTS.filter(s => s.src.includes(k)).length;
+  const rows = [['cols', 'CSS 多列'], ['js0', '脚本，不知道高度'], ['js1', '脚本，预留位置']].map(([k, n]) => ({ k, n, row: firstRow(k), cls: cls(k), cnt: cnt(k) }));
+  $('tFeed').innerHTML = `<tr><th>做法</th><th>第一行从左到右</th><th>阅读顺序</th><th>图片到达时的布局偏移</th></tr>` + rows.map(r => `<tr><th>${r.n}</th><td class="num">${r.row.join('、')}</td><td class="${r.row.join() === '1,2,3' ? 'good' : 'poor'}">${r.row.join() === '1,2,3' ? '与时间顺序一致（先左后右）' : '先竖着读完一列再读下一列，最新的几条被分散到各列底部'}</td><td class="num ${r.cls > 0.01 ? 'poor' : 'good'}">${r.cnt} 次，合计 ${r.cls.toFixed(3)}</td></tr>`).join('');
+  $('mFeed').textContent = '不知道图片高度时，每张图到达都要重新摆放，已经在看的卡片会跳到别的列；数据里带上宽高比，就能一开始摆在最终位置。';
+  return rows;
+}
+window.__ly = { staticPage, magazine, bento, feeds, feedReport, SHIFTS };
+</script>
+</body>
+</html>
