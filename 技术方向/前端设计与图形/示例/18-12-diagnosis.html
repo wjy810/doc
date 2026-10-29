@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>问题定位：十种常见症状的测量与修改</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: grid; gap: 5px; align-content: start; }
+  .card h3 { font-size: 13px; margin: 0; } .card .chk { font-size: 11.5px; color: var(--muted); margin: 0; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stage { border: 1px solid var(--line); border-radius: 6px; height: 128px; overflow: hidden; position: relative; background: #fff; }
+  .stage .lab { position: absolute; right: 4px; top: 2px; font-size: 10px; color: #9aa2b1; z-index: 5; background: rgba(255,255,255,.8); padding: 0 3px; border-radius: 3px; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 1px 4px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); }
+  .fix { font-size: 11.5px; margin: 0; } .fix b { color: var(--ok); }
+  /* 各个小场景 */
+  .crowd p { margin: 0; } .crowd.b0 { font-size: 10px; line-height: 1.2; padding: 3px; } .crowd.b1 { font-size: 12px; line-height: 1.7; padding: 6px 10px; } .crowd.b1 h4 { margin: 0 0 2px; font-size: 12px; } .crowd.b1 details { margin-top: 6px; font-size: 12px; }
+  .emp { height: 100%; display: grid; place-items: center; } .emp.b1 { place-items: stretch; padding: 8px; gap: 4px; align-content: start; grid-template-columns: 60px 1fr; }
+  .uni { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; align-items: center; }
+  .flash { height: 100%; display: grid; place-items: center; position: relative; background: #11162a; color: #fff; }
+  .flash i { position: absolute; width: 14px; height: 14px; border-radius: 50%; background: #ff4fd8; animation: fl 1.2s ease-in-out infinite alternate; }
+  @keyframes fl { to { transform: translate(18px, -12px) scale(1.6); opacity: .3; } }
+  .flash .cta0 { font-size: 10px; padding: 1px 6px; background: #3a3f58; color: #8c92aa; border: 0; border-radius: 4px; }
+  .flash .cta1 { font: inherit; font-size: 14px; padding: 6px 18px; background: #ffd34d; color: #1d2330; border: 0; border-radius: 6px; font-weight: 700; }
+  .mover { position: absolute; left: 10px; top: 46px; width: 28px; height: 28px; border-radius: 6px; background: var(--accent); }
+  .lbl { padding: 8px; display: grid; gap: 6px; } .lbl .btns { display: flex; gap: 6px; flex-wrap: wrap; } .lbl button { font: inherit; font-size: 12px; white-space: nowrap; border: 1px solid var(--line); background: #f6f7f9; border-radius: 6px; padding: 2px 10px; } .lbl .st { font-size: 11.5px; color: var(--ok); min-height: 18px; }
+  .dep { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; align-content: start; } .dep .c { border: 1px dashed #c9d0db; border-radius: 6px; padding: 3px; font-size: 11px; } .dep button { font: inherit; font-size: 11px; }
+  .req { padding: 6px 8px; font-size: 11.5px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>十种常见问题：先测量，再修改</h2>
+  <p class="sub">每张卡片对应一种观察到的问题。左边是有问题的版本，右边是按“可尝试的修改”改过的版本；表格里的数字由本页在浏览器里实际测得（布局、计算样式、动画、像素和帧时间）。阈值是本例约定的检查线，不是通用标准。内容为演示而构造。</p>
+  <div class="grid" id="grid"></div>
+</section>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const frame = () => new Promise(r => requestAnimationFrame(r));
+const TEXT = '这门课用 12 周带你从表格走到交互图表。前四周学习数据整理与基本图表，中间四周学习颜色、比例尺和交互，最后四周完成一件可以发布的作品。每周有两次直播课和一次作业点评，作业需要在周日晚上提交。';
+const CARDS = [];
+function card(id, title, check, fix, run) { CARDS.push({ id, title, check, fix, run }); }
+function lines(el) { const lh = parseFloat(getComputedStyle(el).lineHeight); return Math.round(el.getBoundingClientRect().height / lh); }
+const lin = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }, L = c => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]), rgb = s => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+const contrast = (a, b) => { const x = L(rgb(a)), y = L(rgb(b)); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+
+// 1 拥挤
+card('crowd', '页面显得拥挤', '内容分组、行长、间距、信息密度', '<b>改：</b>按内容分组并加小标题，字号 12、行高 1.7；次要的“怎样上课”收进可展开的区域。',
+  async (s0, s1) => {
+    s0.innerHTML = `<div class="crowd b0"><p>${TEXT}${TEXT}</p></div>`;
+    s1.innerHTML = `<div class="crowd b1"><h4>学什么</h4><p>${TEXT.slice(0, 52)}</p><details><summary>怎样上课</summary><p>${TEXT.slice(52)}</p></details></div>`;
+    const m = el => { const p = el.querySelector('p'), cs = getComputedStyle(p); return { 字号: parseFloat(cs.fontSize) + ' 像素', 行高: (parseFloat(cs.lineHeight) / parseFloat(cs.fontSize)).toFixed(2), 分组: el.querySelectorAll('h4, summary').length || 1, 首屏文字行数: [...el.querySelectorAll('p')].filter(x => x.offsetParent).reduce((a, x) => a + lines(x), 0) }; };
+    return [m(s0), m(s1), { 字号: x => x >= 12, 行高: x => x >= 1.5, 分组: x => x >= 2, 首屏文字行数: x => x <= 4 }];
+  });
+// 2 空
+card('empty', '页面显得空', '内容价值、视觉重心、版式比例', '<b>改：</b>补上用户需要的信息（进度、下次课时间、下一步操作），用图像建立视觉重心。',
+  async (s0, s1) => {
+    s0.innerHTML = '<div class="emp"><span style="font-size:11px;color:#9aa2b1">我的学习</span></div>';
+    s1.innerHTML = '<div class="emp b1"><span style="grid-row:span 3;background:linear-gradient(135deg,#2c5aa0,#86a9e0);border-radius:6px"></span><b style="font-size:13px">数据可视化入门 · 第 5 周</b><span style="font-size:11.5px">进度 38%，下次课 周四 19:00</span><span><button style="font:inherit;font-size:11.5px;background:#2f6fdb;color:#fff;border:0;border-radius:5px;padding:2px 10px">继续学习：比例尺</button></span></div>';
+    const m = st => { const box = st.getBoundingClientRect(), area = box.width * box.height; let a = 0; st.querySelectorAll('.emp > *').forEach(e => { const r = e.getBoundingClientRect(); a += r.width * r.height; }); return { 内容面积占比: (a / area * 100).toFixed(0) + '%', 可做的操作: st.querySelectorAll('button').length }; };
+    return [m(s0), m(s1), { 内容面积占比: x => parseFloat(x) >= 25, 可做的操作: x => x >= 1 }];
+  });
+// 3 缺少整体感
+card('unity', '很多组件却缺少整体感', '字体、色彩、圆角、素材与节奏', '<b>改：</b>建立令牌（两种圆角、一个主色、一套字体、4 的倍数间距），逐个组件替换。',
+  async (s0, s1) => {
+    const raw = [['button', 'border-radius:3px;background:#2f6fdb;color:#fff;font-family:serif;padding:3px 9px;border:0', '报名'], ['span', 'border-radius:12px;background:#ff8a00;color:#fff;padding:1px 7px;font-size:11px', '热门'], ['button', 'border-radius:9px;background:#1aa37a;color:#fff;padding:5px 14px;border:0;font-family:monospace', '收藏'], ['input', 'border-radius:0;border:2px solid #7b5ea7;padding:2px 4px;width:90px', ''], ['span', 'border-radius:5px;background:#e8455a;color:#fff;padding:2px 5px;font-family:cursive', '提示'], ['span', 'border-radius:50%;background:#c77700;color:#fff;width:26px;height:26px;display:grid;place-items:center', '林']];
+    const tok = [['button', 'border-radius:6px;background:#2f6fdb;color:#fff;padding:3px 12px;border:0', '报名'], ['span', 'border-radius:6px;background:#e8eefb;color:#1f4fae;padding:1px 8px;font-size:11px', '热门'], ['button', 'border-radius:6px;background:#fff;color:#1f4fae;padding:3px 12px;border:1px solid #2f6fdb', '收藏'], ['input', 'border-radius:6px;border:1px solid #c9d0db;padding:2px 8px;width:90px', ''], ['span', 'border-radius:6px;background:#e8eefb;color:#1f4fae;padding:1px 8px', '提示'], ['span', 'border-radius:50%;background:#2f6fdb;color:#fff;width:26px;height:26px;display:grid;place-items:center', '林']];
+    const html = (list, inherit) => '<div class="uni">' + list.map(([t, st, x]) => t === 'input' ? `<input style="${inherit ? 'font-family:inherit;' : ''}${st};font-size:12px" value="搜索" aria-label="搜索">` : `<${t} style="${inherit ? 'font-family:inherit;' : ''}${st};font-size:12px">${x}</${t}>`).join('') + '</div>';
+    s0.innerHTML = html(raw, false); s1.innerHTML = html(tok, true);
+    const m = st => { const els = [...st.querySelectorAll('.uni > *')], cs = els.map(e => getComputedStyle(e)); return { 圆角种数: new Set(cs.filter((c, i) => !els[i].textContent.match(/^林$/)).map(c => c.borderTopLeftRadius)).size, 强调色种数: new Set(cs.map(c => c.backgroundColor).filter(c => !/255, 255, 255|0, 0, 0, 0/.test(c))).size, 字体种数: new Set(cs.map(c => c.fontFamily.split(',')[0])).size }; };
+    return [m(s0), m(s1), { 圆角种数: x => x <= 2, 强调色种数: x => x <= 2, 字体种数: x => x === 1 }];
+  });
+// 4 炫但不好用
+card('flashy', '画面很炫但不好用', '主任务、导航、动效时机', '<b>改：</b>主操作做成最醒目的元素；装饰动效减到一个并在打开页面后停下；保留暂停控制。',
+  async (s0, s1) => {
+    s0.innerHTML = '<div class="flash">' + Array.from({ length: 8 }, (_, i) => `<i style="left:${10 + i * 30}px;top:${20 + (i % 3) * 30}px;animation-delay:${i * 0.15}s"></i>`).join('') + '<button class="cta0">开始学习</button></div>';
+    s1.innerHTML = '<div class="flash"><i style="left:20px;top:20px;animation-iteration-count:2"></i><button class="cta1">开始学习</button></div>';
+    await sleep(100);
+    const m = st => { const b = st.querySelector('button'), r = b.getBoundingClientRect(); return { 进行中的动画: st.getAnimations({ subtree: true }).filter(a => a.playState === 'running' && a.effect.getTiming().iterations === Infinity).length, 主按钮面积: Math.round(r.width * r.height), 主按钮对比度: contrast(getComputedStyle(b).color, getComputedStyle(b).backgroundColor).toFixed(1) }; };
+    return [m(s0), m(s1), { 进行中的动画: x => x === 0, 主按钮面积: x => x >= 1500, 主按钮对比度: x => x >= 4.5 }];
+  });
+// 5 三维画面像塑料
+card('plastic', '三维画面像塑料', '材质、灯光、环境、色彩流程', '<b>改：</b>改用基于物理的材质并调粗糙度，加环境光照，开启色调映射与 sRGB 输出。',
+  async (s0, s1) => {
+    const shoot = async (st, good) => {
+      const cv = document.createElement('canvas'); cv.style.cssText = 'width:100%;height:100%;display:block'; st.append(cv);
+      const r = st.getBoundingClientRect(), ren = new THREE.WebGLRenderer({ canvas: cv, antialias: true, preserveDrawingBuffer: true }); ren.setSize(r.width, r.height, false);
+      const sc = new THREE.Scene(), cam = new THREE.PerspectiveCamera(35, r.width / r.height, 0.1, 20); cam.position.set(0, 0.3, 4.2); cam.lookAt(0, 0, 0);
+      sc.background = new THREE.Color(0xe9ecf1);
+      if (good) { ren.toneMapping = THREE.ACESFilmicToneMapping; ren.outputColorSpace = THREE.SRGBColorSpace; const pm = new THREE.PMREMGenerator(ren); sc.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture; }
+      else { ren.toneMapping = THREE.NoToneMapping; ren.outputColorSpace = THREE.LinearSRGBColorSpace; sc.add(new THREE.AmbientLight(0xffffff, 0.6)); }
+      const d = new THREE.DirectionalLight(0xffffff, good ? 1.2 : 2.2); d.position.set(2, 3, 2); sc.add(d);
+      const mat = good ? new THREE.MeshStandardMaterial({ color: 0xb5651d, roughness: 0.42, metalness: 0.0 }) : new THREE.MeshPhongMaterial({ color: 0xb5651d, shininess: 90, specular: 0xffffff });
+      const geo = new THREE.TorusKnotGeometry(0.6, 0.22, 160, 24); sc.add(new THREE.Mesh(geo, mat));
+      ren.render(sc, cam);
+      // 只统计物体上的像素：和背景色差别明显的像素
+      const g = document.createElement('canvas'); g.width = cv.width; g.height = cv.height; const x = g.getContext('2d'); x.drawImage(cv, 0, 0); const px = x.getImageData(0, 0, g.width, g.height).data;
+      let n = 0, clip = 0; const lum = [];
+      const bg = [px[0], px[1], px[2]];   // 左上角是背景
+      for (let i = 0; i < px.length; i += 4) { if (Math.abs(px[i] - bg[0]) + Math.abs(px[i + 1] - bg[1]) + Math.abs(px[i + 2] - bg[2]) < 24) continue; n++; if (px[i] > 248 && px[i + 1] > 248 && px[i + 2] > 248) clip++; lum.push(0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]); }
+      lum.sort((a, b) => a - b); const p = q => lum[Math.floor(lum.length * q)];
+      // 画面转成图片留在页面上，再释放 WebGL 上下文
+      const im = new Image(); im.src = cv.toDataURL(); im.alt = good ? '基于物理的材质与环境光照' : '高光很硬的塑料感材质'; im.style.cssText = 'width:100%;height:100%;display:block;object-fit:contain'; cv.replaceWith(im);
+      ren.dispose(); ren.forceContextLoss();
+      return { 高光溢出: (clip / n * 100).toFixed(1) + '%', 暗部亮度: Math.round(p(0.05)), 中间调亮度: Math.round(p(0.5)) };
+    };
+    return [await shoot(s0, false), await shoot(s1, true), { 高光溢出: x => parseFloat(x) < 1, 暗部亮度: x => x >= 20, 中间调亮度: x => true }];
+  });
+// 6 动画跳变
+card('jump', '动画出现跳变', '数据状态、布局、中断处理', '<b>改：</b>打断时从当前位置出发（读出当前状态再开始新动画），而不是从新动画的起点出发。',
+  async (s0, s1) => {
+    const run = async (st, fromCurrent) => {
+      st.innerHTML = '<div class="mover"></div>'; const el = st.firstChild, xs = [];
+      el.animate([{ transform: 'translateX(0px)' }, { transform: 'translateX(200px)' }], { duration: 1000, fill: 'forwards' });
+      const t0 = performance.now(); let interrupted = false;
+      while (performance.now() - t0 < 1100) {
+        await frame(); xs.push(new DOMMatrix(getComputedStyle(el).transform).m41);
+        if (!interrupted && performance.now() - t0 > 450) {
+          interrupted = true; const cur = new DOMMatrix(getComputedStyle(el).transform).m41;
+          el.getAnimations().forEach(a => a.cancel());
+          // 用户中途要求回到起点：原始版从新动画的起点（200）出发，修改版从当前位置出发
+          el.animate([{ transform: `translateX(${fromCurrent ? cur : 200}px)` }, { transform: 'translateX(0px)' }], { duration: 500, fill: 'forwards' });
+        }
+      }
+      let jump = 0, at = 0; for (let i = 1; i < xs.length; i++) { const d = Math.abs(xs[i] - xs[i - 1]); if (d > jump) { jump = d; at = i; } }
+      // 把每一帧的位置画成曲线：横轴是帧，纵轴是位置
+      const r = st.getBoundingClientRect(), W = r.width - 16, H = r.height - 24, X = i => 8 + i / (xs.length - 1) * W, Y = x => 14 + H - x / 200 * H;
+      st.innerHTML = `<svg width="${r.width}" height="${r.height}" style="display:block"><text x="8" y="11" font-size="10" fill="#5b6475">位置（0—200 像素）随帧变化</text><polyline fill="none" stroke="#2f6fdb" stroke-width="1.5" points="${xs.map((x, i) => X(i).toFixed(1) + ',' + Y(x).toFixed(1)).join(' ')}"/>${jump > 20 ? `<line x1="${X(at)}" x2="${X(at)}" y1="${Y(xs[at - 1])}" y2="${Y(xs[at])}" stroke="#b3261e" stroke-width="3"/><text x="${X(at) + 4}" y="${(Y(xs[at - 1]) + Y(xs[at])) / 2}" font-size="10" fill="#b3261e">跳了 ${Math.round(jump)} 像素</text>` : ''}</svg>`;
+      return { 一帧内最大位移: Math.round(jump) + ' 像素' };
+    };
+    return [await run(s0, false), await run(s1, true), { 一帧内最大位移: x => parseFloat(x) <= 20 }];
+  });
+// 7 低端设备卡顿
+card('jank', '低端设备卡顿', '主线程、绘制、粒子、纹理与后处理', '<b>改：</b>先测量，找到瓶颈是阴影模糊的绘制；去掉模糊、粒子数按质量档位减少。',
+  async (s0, s1) => {
+    const run = async (st, n, blur) => {
+      const cv = document.createElement('canvas'), r = st.getBoundingClientRect(); cv.width = r.width; cv.height = r.height; st.append(cv); const g = cv.getContext('2d');
+      const P = Array.from({ length: n }, (_, i) => [((i * 97) % r.width), ((i * 57) % r.height), (i % 7) - 3, (i % 5) - 2]);
+      const ts = []; let last = 0; const t0 = performance.now();
+      while (performance.now() - t0 < 1200) { const now = await frame(); if (last) ts.push(now - last); last = now; g.fillStyle = '#11162a'; g.fillRect(0, 0, cv.width, cv.height); g.fillStyle = '#7fb0ff'; if (blur) { g.shadowColor = '#7fb0ff'; g.shadowBlur = 6; } for (const p of P) { p[0] = (p[0] + p[2] + r.width) % r.width; p[1] = (p[1] + p[3] + r.height) % r.height; g.beginPath(); g.arc(p[0], p[1], 1.6, 0, 7); g.fill(); } }
+      ts.sort((a, b) => a - b);
+      return { 粒子数: n, 帧时间中位数: ts[ts.length >> 1].toFixed(1) + ' 毫秒', 第95百分位: ts[Math.floor(ts.length * 0.95)].toFixed(1) + ' 毫秒' };
+    };
+    return [await run(s0, 4000, true), await run(s1, 1500, false), { 粒子数: x => true, 帧时间中位数: x => parseFloat(x) <= 20, 第95百分位: x => parseFloat(x) <= 33.4 }];
+  });
+// 8 用户不知道下一步
+card('next', '用户不知道下一步', '标签、反馈、任务顺序', '<b>改：</b>按钮写清动作和对象；操作后说明结果和下一步。',
+  async (s0, s1) => {
+    s0.innerHTML = '<div class="lbl"><b style="font-size:12px">报名信息</b><div class="btns"><button>确定</button><button>确定</button><button>下一步</button></div><div class="st"></div></div>';
+    s1.innerHTML = '<div class="lbl"><b style="font-size:12px">报名信息</b><div class="btns"><button>保存草稿</button><button>提交报名</button><button>填写联系方式</button></div><div class="st" role="status"></div></div>';
+    s1.querySelector('button').onclick = () => { s1.querySelector('.st').textContent = '已保存草稿。下一步：填写联系方式。'; };
+    s0.querySelector('button').onclick = () => {};
+    for (const s of [s0, s1]) s.querySelector('button').click();
+    await sleep(100);
+    const VAGUE = /^(确定|好的|提交|下一步|OK|点击这里|继续)$/;
+    const m = st => ({ 含糊的按钮名: [...st.querySelectorAll('button')].filter(b => VAGUE.test(b.textContent.trim())).length, 操作后的说明: st.querySelector('.st').textContent ? '有' : '无' });
+    return [m(s0), m(s1), { 含糊的按钮名: x => x === 0, 操作后的说明: x => x === '有' }];
+  });
+// 9 改一处影响多处
+card('deps', '改一个页面影响很多地方', '组件边界、令牌与隐式依赖', '<b>改：</b>把样式限定在组件自己的类名下，共用的值改成令牌并写明谁在用。',
+  async (s0, s1) => {
+    const comps = n => Array.from({ length: 6 }, (_, i) => `<div class="c c${i}"><button class="${n === 1 && i === 0 ? 'signup-submit' : ''}">${['报名', '收藏', '分享', '搜索', '关闭', '更多'][i]}</button></div>`).join('');
+    s0.innerHTML = `<div class="dep d0">${comps(0)}</div>`; s1.innerHTML = `<div class="dep d1">${comps(1)}</div>`;
+    // 只看组件自己的变化（宽度、按钮在组件里的位置）；因为前一个组件变宽而整体平移的不算
+    const rects = st => [...st.querySelectorAll('.c')].map(c => { const r = c.getBoundingClientRect(), b = c.querySelector('button').getBoundingClientRect(); return [Math.round(r.width), Math.round(b.left - r.left)].join(); });
+    const b0 = rects(s0), b1 = rects(s1);
+    // 需求只是“报名按钮左边加 12 像素”：原始版写成了全局选择器，修改版写在组件自己的类名上
+    const st = document.createElement('style'); st.textContent = '.d0 button { margin-left: 12px; } .d1 .signup-submit { margin-left: 12px; }'; document.head.append(st); await frame();
+    const a0 = rects(s0), a1 = rects(s1);
+    return [{ 受影响的组件: b0.filter((x, i) => x !== a0[i]).length + '／6' }, { 受影响的组件: b1.filter((x, i) => x !== a1[i]).length + '／6' }, { 受影响的组件: x => parseInt(x) <= 1 }];
+  });
+// 10 AI 多次修改仍不满意
+card('ai', 'AI 多次修改仍不满意', '目标、参考、内容与验收描述', '<b>改：</b>写清目标对象、具体观察、参考、内容约束与验收条件，每次只改一项。',
+  async (s0, s1) => {
+    const A = '页面做得高级一点，再好看些，配色也调调。';
+    const B = '目标：课程详情页首屏。观察：标题 18 像素和正文 16 像素差别太小，价格不醒目。参考：18-09 示例里 B 的卡片层级。内容：标题最长 40 字，价格可能到 8 位数。这次只改文字层级。验收：标题、价格、正文、注释至少三级，深色主题对比度不低于 4.5。';
+    s0.innerHTML = `<div class="req">${A}</div>`; s1.innerHTML = `<div class="req">${B}</div>`;
+    const m = t => { const has = { 目标对象: /目标|首屏|页面的?[^，。]*区/.test(t) && /：/.test(t), 具体观察: /\d+ ?像素|对比度|不醒目|太小/.test(t), 参考: /参考/.test(t), 内容约束: /最长|可能到|字/.test(t), 一次只改一项: /只改/.test(t), 验收条件: /验收/.test(t) }; return { 包含的要素: Object.values(has).filter(Boolean).length + '／6', 缺少: Object.keys(has).filter(k => !has[k]).join('、') || '无' }; };
+    return [m(A), m(B), { 包含的要素: x => parseInt(x) >= 5, 缺少: x => true }];
+  });
+
+// ---------- 运行全部卡片 ----------
+const grid = $('grid');
+async function runAll() {
+  const out = [];
+  for (const [i, c] of CARDS.entries()) {
+    grid.insertAdjacentHTML('beforeend', `<div class="card" id="k-${c.id}"><h3>${i + 1} ${c.title}</h3><p class="chk">优先检查：${c.check}</p><div class="pair"><div class="stage" id="s0-${c.id}"></div><div class="stage" id="s1-${c.id}"></div></div><table class="t" id="t-${c.id}"></table><p class="fix">${c.fix}</p></div>`);
+  }
+  for (const c of CARDS) {
+    const s0 = $('s0-' + c.id), s1 = $('s1-' + c.id);
+    const [b, a, ok] = await c.run(s0, s1);
+    s0.insertAdjacentHTML('beforeend', '<span class="lab">原始</span>'); s1.insertAdjacentHTML('beforeend', '<span class="lab">修改后</span>');
+    const keys = Object.keys(b), v = (k, x) => ok[k](typeof x === 'string' && /\d/.test(x) && !/[、]/.test(x) ? parseFloat(x) : x);
+    $('t-' + c.id).innerHTML = `<tr><th>测量</th><th>原始</th><th>修改后</th></tr>` + keys.map(k => `<tr><th>${k.replace('第95百分位', '第 95 百分位')}</th><td class="num ${v(k, b[k]) ? '' : 'poor'}">${b[k]}</td><td class="num ${v(k, a[k]) ? 'good' : 'poor'}">${a[k]}</td></tr>`).join('');
+    out.push([c.id, b, a]);
+  }
+  return out;
+}
+window.__dx = { runAll };
+</script>
+</body>
+</html>
