@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>项目 04 产品设计系统：审计、令牌、组件状态与采用页面</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: #1d2330; font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  section.panel { background: #fff; border: 1px solid #dde1e7; border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3.cap { font-size: 12px; margin: 4px 0 0; color: #5b6475; font-weight: 400; } .sub { color: #5b6475; margin: 0; font-size: 12px; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid #dde1e7; padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: #5b6475; font-weight: 400; } table.t tr > th:first-child { white-space: nowrap; }
+  .good { color: #1f7a4d; } .poor { color: #b3261e; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid #0002; vertical-align: -2px; margin-right: 3px; }
+  .legacy { border: 1px solid #dde1e7; border-radius: 8px; padding: 0; overflow: hidden; }
+  .states { display: grid; grid-template-columns: 70px repeat(5, minmax(0, 1fr)); gap: 6px 8px; align-items: center; } .states .lab { font-size: 11px; color: #5b6475; }
+</style>
+<!-- 设计令牌 -->
+<style id="tokens">
+  :root {
+    --color-text: #1d2330; --color-text-muted: #5b6475; --color-border: #8a93a3; --color-surface: #ffffff; --color-bg: #f4f4f1;
+    --color-primary: #2f6fdb; --color-primary-hover: #2253b8; --color-danger: #b3261e; --color-focus: #c26a00; --color-disabled-bg: #e5e7eb;
+    --font-12: 0.75rem; --font-14: 0.875rem; --font-16: 1rem; --font-20: 1.25rem; --font-24: 1.5rem;
+    --space-4: 4px; --space-8: 8px; --space-12: 12px; --space-16: 16px; --space-24: 24px; --space-32: 32px;
+    --radius-6: 6px; --radius-10: 10px; --border-1: 1px; }
+</style>
+<!-- 系统组件 -->
+<style id="components">
+  .ds-btn { font: 700 var(--font-14)/1 "Noto Sans SC", system-ui, sans-serif; height: 36px; padding: 0 var(--space-16); border-radius: var(--radius-6); border: 1px solid var(--color-primary); background: var(--color-primary); color: var(--color-surface); cursor: pointer; display: inline-flex; align-items: center; gap: var(--space-8); }
+  .ds-btn:hover, .ds-btn.is-hover { background: var(--color-primary-hover); border-color: var(--color-primary-hover); }
+  .ds-btn:focus-visible, .ds-btn.is-focus { outline: 3px solid var(--color-focus); outline-offset: 2px; }
+  .ds-btn:disabled { background: var(--color-disabled-bg); border-color: var(--color-disabled-bg); color: var(--color-text-muted); cursor: not-allowed; }
+  .ds-btn[aria-busy="true"] { cursor: progress; }
+  .ds-btn .spin { width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
+  .ds-btn.secondary { background: var(--color-surface); color: var(--color-primary); }
+  .ds-btn.secondary:hover, .ds-btn.secondary.is-hover { background: #eef3fc; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .ds-btn .spin { animation: none; } }
+  .ds-field { display: grid; gap: var(--space-4); font-size: var(--font-14); }
+  .ds-field label { font-weight: 700; color: var(--color-text); }
+  .ds-field input { font: var(--font-14) "Noto Sans SC", system-ui, sans-serif; height: 36px; padding: 0 var(--space-12); border: 1px solid var(--color-border); border-radius: var(--radius-6); color: var(--color-text); background: var(--color-surface); width: 100%; }
+  .ds-field input:focus-visible, .ds-field input.is-focus { outline: 3px solid var(--color-focus); outline-offset: 1px; }
+  .ds-field input:disabled { background: var(--color-disabled-bg); color: var(--color-text-muted); }
+  .ds-field input[aria-invalid="true"] { border: 2px solid var(--color-danger); }
+  .ds-field .err { color: var(--color-danger); font-size: var(--font-12); margin: 0; }
+</style>
+<!-- 初版组件（为对照而写） -->
+<style>
+  .old-btn { display: inline-block; font: 14px "Noto Sans SC", sans-serif; padding: 8px 16px; border-radius: 6px; background: #4a8af4; color: #fff; cursor: pointer; }
+  .old-btn.disabled { opacity: .5; } .old-btn .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid #fff; border-right-color: transparent; border-radius: 50%; }
+  .old-inp { font: 14px "Noto Sans SC", sans-serif; height: 36px; padding: 0 12px; border: 1px solid #ddd; border-radius: 6px; width: 100%; color: #999; } .old-inp:focus { outline: none; } .old-inp.error { border-color: #e33; }
+</style>
+<!-- 采用页面：A 直接写死数值，B 只用令牌与组件 -->
+<style id="adoptA">
+  .pageA { padding: 20px; background: #fff; border: 1px solid #e3e3e3; border-radius: 10px; }
+  .pageA h4 { font-size: 19px; margin: 0 0 6px; color: #222; } .pageA p { font-size: 13px; color: #777; margin: 0 0 14px; }
+  .pageA .row { display: flex; gap: 10px; margin-top: 18px; }
+</style>
+<style id="adoptB">
+  .pageB { padding: var(--space-24); background: var(--color-surface); border: var(--border-1) solid var(--color-border); border-radius: var(--radius-10); }
+  .pageB h4 { font-size: var(--font-20); margin: 0 0 var(--space-8); color: var(--color-text); } .pageB p { font-size: var(--font-14); color: var(--color-text-muted); margin: 0 0 var(--space-16); }
+  .pageB .row { display: flex; gap: var(--space-8); margin-top: var(--space-24); }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div><h2>1 审计：从两个已有页面提取颜色、字号和间距</h2><p class="sub">两个页面片段为演示而构造，代表“各自写样式”的现状。脚本遍历其中每个元素的计算样式，统计不同取值的数量，再把每个旧值换成最接近的令牌，记录最大偏差。</p>
+      <div class="two"><div class="legacy" id="old1"></div><div class="legacy" id="old2"></div></div><table class="t" id="tAudit"></table></div>
+    <div><h2>2 令牌</h2><table class="t" id="tTokens"></table></div>
+  </div>
+</section>
+<section class="panel">
+  <h2>3 组件展示：按钮与输入框的适用状态</h2>
+  <p class="sub">“悬浮”和“焦点”两列是为了展示而固定的样式副本；验收检查使用下方另行放置的真实组件，由脚本用鼠标与键盘操作。</p>
+  <div class="states" id="gallery"></div>
+  <div class="two"><div><table class="t" id="tComp"></table></div><div><h3 class="cap">完成版按钮与输入框的无障碍树（ariaSnapshot）</h3><pre id="aria" style="margin:0;font:11px/1.45 ui-monospace,monospace;background:#f6f7f9;border:1px solid #dde1e7;border-radius:6px;padding:6px 8px;white-space:pre-wrap"></pre></div></div>
+  <div id="bench" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end"></div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>4 一个实际采用页面</h2><p class="sub">同一个“通知设置”页面写两遍：A 直接写数值，B 只用令牌和系统组件。看起来几乎一样，区别在于以后改一处令牌能不能改到所有页面。</p><div class="two"><div id="adoptAHost"></div><div id="adoptBHost"></div></div><table class="t" id="tLint"></table></div>
+    <div><h2>5 使用规则</h2><table class="t" id="tRules"></table><h2 style="margin-top:6px">让其他人按文档完成新页面</h2><table class="t" id="tTrial"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+// ---------- 1 审计 ----------
+$('old1').innerHTML = `<div style="padding:15px;background:#fff;font-family:'Noto Sans SC'"><div style="font-size:18px;color:#333;margin-bottom:7px;font-weight:700">订单列表</div><div style="font-size:13px;color:#777;margin-bottom:12px">最近 30 天</div><div style="display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid #e3e3e3;font-size:15px;color:#3a3a3a"><span>订单 1024</span><span style="color:#2e6cd9">查看</span></div><div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid #eee;font-size:14px;color:#444"><span>订单 1025</span><span style="color:#3070e0">查看</span></div><div style="font-size:12px;color:#999;margin-top:5px">共 2 条</div><span style="display:inline-block;margin-top:16px;padding:7px 20px;background:#2f6fdb;color:#fff;border-radius:4px;font-size:16px">新建订单</span></div>`;
+$('old2').innerHTML = `<div style="padding:18px;background:#fafafa;font-family:'Noto Sans SC'"><div style="font-size:22px;color:#222;margin-bottom:9px;font-weight:700">个人资料</div><div style="font-size:14px;color:#555;margin-bottom:14px">修改后立即生效</div><div style="font-size:12px;color:#888;margin-bottom:6px">邮箱</div><div style="padding:9px 14px;border:1px solid #ddd;border-radius:6px;font-size:17px;color:#666">name@example.com</div><div style="font-size:12px;color:#e33;margin-top:6px">邮箱格式不正确</div><span style="display:inline-block;margin-top:24px;padding:8px 18px;background:#4a8af4;color:#fff;border-radius:8px;font-size:15px">保存</span><span style="display:inline-block;margin:24px 0 0 10px;padding:8px 18px;color:#aaa;font-size:15px">取消</span></div>`;
+const TOK = {
+  color: { '--color-text': '#1d2330', '--color-text-muted': '#5b6475', '--color-border': '#8a93a3', '--color-surface': '#ffffff', '--color-bg': '#f4f4f1', '--color-primary': '#2f6fdb', '--color-danger': '#b3261e', '--color-disabled-bg': '#e5e7eb' },
+  font: { '--font-12': 12, '--font-14': 14, '--font-16': 16, '--font-20': 20, '--font-24': 24 }, space: { '--space-4': 4, '--space-8': 8, '--space-12': 12, '--space-16': 16, '--space-24': 24, '--space-32': 32 } };
+const lumOf = rgb => { const [r, g, b] = rgb.slice(0, 3).map(v => v / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+const cr = (a, b) => { const [x, y] = [a, b].map(c => lumOf(c.startsWith('#') ? hexRgb(c) : parseRgb(c))).sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+const hexRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)), parseRgb = c => c.match(/[\d.]+/g).map(Number);
+function audit() {
+  const colors = new Set(), sizes = new Set(), space = new Set();
+  document.querySelectorAll('.legacy *').forEach(el => { const cs = getComputedStyle(el); [cs.color, cs.backgroundColor, parseFloat(cs.borderTopWidth) ? cs.borderTopColor : null].forEach(c => c && !/rgba\(0, 0, 0, 0\)/.test(c) && colors.add(c)); sizes.add(parseFloat(cs.fontSize)); ['marginTop', 'marginBottom', 'marginLeft', 'paddingTop', 'paddingLeft'].forEach(k => { const v = parseFloat(cs[k]); if (v > 0) space.add(v); }); });
+  const near = (v, list) => list.reduce((a, b) => Math.abs(b - v) < Math.abs(a - v) ? b : a);
+  const dist = (a, b) => Math.hypot(...a.map((x, i) => x - b[i]));
+  const tc = Object.values(TOK.color).map(hexRgb), maxC = Math.max(...[...colors].map(c => Math.min(...tc.map(t => dist(parseRgb(c).slice(0, 3), t)))));
+  const tf = Object.values(TOK.font), ts = Object.values(TOK.space);
+  const out = { colors: colors.size, sizes: sizes.size, space: space.size, maxF: Math.max(...[...sizes].map(v => Math.abs(near(v, tf) - v))), maxS: Math.max(...[...space].map(v => Math.abs(near(v, ts) - v))), maxC, sizeList: [...sizes].sort((a, b) => a - b), spaceList: [...space].sort((a, b) => a - b) };
+  $('tAudit').innerHTML = `<tr><th>类别</th><th>两个页面里的不同取值</th><th>令牌数</th><th>换成最接近的令牌，最大偏差</th></tr><tr><th>颜色</th><td>${out.colors} 种</td><td>${Object.keys(TOK.color).length}</td><td>RGB 距离 ${out.maxC.toFixed(0)}（浅灰文字 #aaa、#999 换成次要文字色，对比度从 ${cr('#aaaaaa', '#fafafa').toFixed(1)}、${cr('#999999', '#ffffff').toFixed(1)} 升到 ${cr('#5b6475', '#ffffff').toFixed(1)}）</td></tr><tr><th>字号</th><td>${out.sizes} 种：${out.sizeList.join('、')}</td><td>${tf.length}</td><td>${out.maxF} 像素</td></tr><tr><th>间距</th><td>${out.space} 种：${out.spaceList.join('、')}</td><td>${ts.length}</td><td>${out.maxS} 像素</td></tr>`;
+  $('tTokens').innerHTML = `<tr><th>令牌</th><th>值</th><th>用途</th></tr>` + [
+    ['--color-text', '#1d2330', '正文、标题'], ['--color-text-muted', '#5b6475', '说明文字、禁用文字'], ['--color-border', '#8a93a3', `输入框边框（与白底对比 ${cr('#8a93a3', '#ffffff').toFixed(1)}）`], ['--color-primary', '#2f6fdb', '主按钮、链接'], ['--color-primary-hover', '#2253b8', '主按钮悬浮'], ['--color-danger', '#b3261e', '错误'], ['--color-focus', '#c26a00', `焦点框（与白底对比 ${cr('#c26a00', '#ffffff').toFixed(1)}）`], ['--color-disabled-bg', '#e5e7eb', '禁用背景']].map(([k, v, u]) => `<tr><th><code>${k}</code></th><td><span class="sw" style="background:${v}"></span>${v}</td><td>${u}</td></tr>`).join('') +
+    `<tr><th>字号</th><td colspan="2">12、14、16、20、24 像素（--font-12 … --font-24，用 rem 写）</td></tr><tr><th>间距</th><td colspan="2">4、8、12、16、24、32 像素（--space-4 … --space-32）</td></tr><tr><th>圆角与线宽</th><td colspan="2">圆角 6、10 像素；细线 1 像素（--border-1）</td></tr>`;
+  return out;
+}
+// ---------- 3 组件 ----------
+const spin = '<span class="spin" aria-hidden="true"></span>';
+function gallery() {
+  const g = $('gallery'), cols = ['默认', '悬浮', '焦点', '禁用', '加载']; g.innerHTML = `<span></span>${cols.map(c => `<span class="lab">${c}</span>`).join('')}`;
+  const show = (lab, cells) => { g.insertAdjacentHTML('beforeend', `<span class="lab">${lab}</span>` + cells.map(c => `<div inert>${c}</div>`).join('')); };
+  show('初版按钮', ['<span class="old-btn">保存</span>', '<span class="old-btn">保存</span>', '<span class="old-btn">保存</span>', '<span class="old-btn disabled">保存</span>', `<span class="old-btn">${spin}</span>`]);
+  show('系统按钮', ['<button class="ds-btn">保存</button>', '<button class="ds-btn is-hover">保存</button>', '<button class="ds-btn is-focus">保存</button>', '<button class="ds-btn" disabled>保存</button>', `<button class="ds-btn" aria-busy="true" aria-disabled="true">${spin}保存中…</button>`]);
+  g.insertAdjacentHTML('beforeend', `<span></span>${['默认', '焦点', '禁用', '错误', ''].map(c => `<span class="lab">${c}</span>`).join('')}`);
+  show('初版输入框', ['<input class="old-inp" placeholder="邮箱">', '<input class="old-inp" placeholder="邮箱">', '<input class="old-inp" placeholder="邮箱" disabled>', '<input class="old-inp error" value="name@">', '']);
+  show('系统输入框', ['<div class="ds-field"><label>邮箱</label><input></div>', '<div class="ds-field"><label>邮箱</label><input class="is-focus"></div>', '<div class="ds-field"><label>邮箱</label><input disabled></div>', '<div class="ds-field"><label>邮箱</label><input aria-invalid="true" value="name@"><p class="err">邮箱格式不正确</p></div>', '']);
+}
+// 验收用的真实组件（每种状态一个）
+const CLICKS = {};
+function bench() {
+  const b = $('bench');
+  b.innerHTML = `
+    <span class="old-btn" id="a-btn">保存</span><span class="old-btn disabled" id="a-btn-dis">保存</span><span class="old-btn" id="a-btn-load">${spin}</span>
+    <div style="width:180px"><input class="old-inp" id="a-inp" placeholder="邮箱"></div><div style="width:180px"><input class="old-inp error" id="a-inp-err" value="name@"><div style="color:#e33;font-size:12px">邮箱格式不正确</div></div>
+    <button class="ds-btn" id="b-btn">保存</button><button class="ds-btn" id="b-btn-dis" disabled>保存</button><button class="ds-btn" id="b-btn-load" aria-busy="true" aria-disabled="true">${spin}保存中…</button>
+    <div class="ds-field" style="width:180px"><label for="b-inp">邮箱</label><input id="b-inp"></div><div class="ds-field" style="width:180px"><label for="b-inp-err">邮箱</label><input id="b-inp-err" aria-invalid="true" aria-describedby="b-err" value="name@"><p class="err" id="b-err">邮箱格式不正确</p></div>`;
+  ['a-btn', 'a-btn-dis', 'a-btn-load', 'b-btn', 'b-btn-dis', 'b-btn-load'].forEach(id => { CLICKS[id] = 0; $(id).addEventListener('click', e => { if (e.currentTarget.getAttribute('aria-disabled') === 'true') return; CLICKS[id]++; }); });   // 系统按钮在加载时忽略点击
+}
+// ---------- 4 采用页面 ----------
+function adoption() {
+  $('adoptAHost').innerHTML = `<div class="pageA"><h4>通知设置</h4><p>重要通知会发送到这个邮箱。</p><div style="display:grid;gap:4px;font-size:14px"><span>邮箱</span><input class="old-inp" value="name@example.com"></div><div class="row"><span class="old-btn">保存</span><span class="old-btn" style="background:#fff;color:#4a8af4;border:1px solid #4a8af4">取消</span></div></div>`;
+  $('adoptBHost').innerHTML = `<div class="pageB"><h4>通知设置</h4><p>重要通知会发送到这个邮箱。</p><div class="ds-field"><label for="ad-email">邮箱</label><input id="ad-email" value="name@example.com"></div><div class="row"><button class="ds-btn">保存</button><button class="ds-btn secondary">取消</button></div></div>`;
+  const raw = css => (css.replace(/:root\s*\{[^}]*\}/g, '').match(/#[0-9a-fA-F]{3,6}\b|rgba?\(|\b\d+(\.\d+)?px\b/g) || []).length;
+  const inline = host => [...$(host).querySelectorAll('[style]')].reduce((n, el) => n + (el.getAttribute('style').match(/#[0-9a-fA-F]{3,6}\b|\b\d+px\b/g) || []).length, 0);
+  const out = { A: raw($('adoptA').textContent) + inline('adoptAHost'), B: raw($('adoptB').textContent) + inline('adoptBHost') };
+  $('tLint').innerHTML = `<tr><th>检查</th><th>A 写死数值</th><th>B 令牌与组件</th></tr><tr><th>页面样式里直接写的颜色与像素值</th><td class="poor">${out.A} 处</td><td class="${out.B ? 'poor' : 'good'}">${out.B} 处</td></tr><tr><th>把主色从 #2f6fdb 改成别的颜色</th><td class="poor">要逐页查找、替换</td><td class="good">改一个令牌</td></tr><tr><th>按钮的悬浮、焦点、禁用、加载</th><td class="poor">每个页面各写各的（这里一个都没有）</td><td class="good">由组件提供</td></tr>`;
+  $('tRules').innerHTML = `<tr><th>规则</th><th>说明</th></tr><tr><th>一个视图只有一个主按钮</th><td>次要操作用 secondary；危险操作单独确认</td></tr><tr><th>禁用要说明原因</th><td>在按钮旁写出缺什么条件；能直接提示的情况不要禁用</td></tr><tr><th>加载时保留文字</th><td>“保存中…”；按钮宽度不变，重复点击无效</td></tr><tr><th>错误写在输入框下方</th><td>用 aria-describedby 关联，说明怎样改正</td></tr><tr><th>不要直接写颜色与像素</th><td>新需求先找现有令牌；确实缺少时提出新增，并写明用途</td></tr>`;
+  $('tTrial').innerHTML = `<tr><th>参与者</th><th>任务</th><th>难以理解的地方</th><th>无法覆盖的场景</th></tr><tr><td>未填写</td><td>按文档做一个“账单”页面</td><td>未填写</td><td>未填写</td></tr><tr><td colspan="4">这一项需要真实的同事按文档完成页面后填写，不能用脚本代替。</td></tr>`;
+  return out;
+}
+const audited = audit(); gallery(); bench(); const lint = adoption();
+window.__ds = { CLICKS, audited, lint, cr, fill(R, aria) {
+  const rows = [['Tab 键能到达', 'tab'], ['焦点可见', 'focus'], ['按 Enter 触发', 'enter'], ['悬浮时背景变化', 'hover'], ['禁用：点击无效且跳过 Tab', 'disabled'], ['加载：读屏读到的名称', 'loadName'], ['加载：重复点击无效', 'loadClick'], ['输入框有关联的标签', 'label'], ['错误：标记无效并关联说明', 'error'], ['各状态文字的最低对比度', 'contrast']];
+  $('tComp').innerHTML = `<tr><th>检查（脚本实际操作）</th><th>初版</th><th>完成版</th></tr>` + rows.map(([n, k]) => `<tr><th>${n}</th>${['A', 'B'].map(v => `<td class="${R[v][k].ok ? 'good' : 'poor'}">${R[v][k].text}</td>`).join('')}</tr>`).join('');
+  $('aria').textContent = aria; $('bench').style.display = 'none';
+} };
+</script>
+</body>
+</html>
