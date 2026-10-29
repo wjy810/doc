@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>验收检查：视觉内容与交互流程</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 3px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  table.t tr > th:first-child { white-space: nowrap; } table.t td.sec { background: #f6f7f9; font-weight: 700; color: var(--ink); }
+  .good { color: var(--ok); } .poor { color: var(--bad); }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+  .pair figure { margin: 0; font-size: 11.5px; color: var(--muted); } .pair img { display: block; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; } .pair b { color: var(--ink); }
+  body.done #live { display: none; }
+  /* ---------- 被检查的报名组件（A、B 两个实现） ---------- */
+  .w { --bg: #fff; --fg: #1d2330; --fg2: #5b6475; --note: #6b7280; --surface: #f6f7f9; --border: #dde1e7; --primary: #2f6fdb; --danger: #b3261e;
+       width: 520px; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: grid; gap: 10px; font: 14px/1.5 "Noto Sans SC", system-ui, sans-serif; position: relative; }
+  .w.dark { --bg: #1b1f27; --fg: #e8ebf1; --fg2: #aeb6c5; --surface: #262c38; --border: #3a4252; --primary: #3a6fd0; --danger: #f07167; }
+  .w.A.dark { --note: #555b66; } .w.B.dark { --note: #aeb6c5; --link: #8fb3f5; }
+  .w .card { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; }
+  .w .cover { width: 120px; height: 80px; border-radius: 8px; object-fit: cover; display: block; }
+  .w .cover-fb { width: 120px; height: 80px; border-radius: 8px; display: grid; place-items: center; background: linear-gradient(135deg, #c9d6ee, #e8eefb); color: #1f4fae; font-size: 12px; }
+  .w .info { min-width: 0; display: grid; gap: 2px; align-content: start; }
+  .w.A .title, .w.A .price, .w.A .desc, .w.A .note { font-size: 14px; font-weight: 400; }
+  .w.A .title { white-space: nowrap; }
+  .w.B .title { font-size: 18px; font-weight: 700; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .w.B .price { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .w.B .desc { font-size: 13px; color: var(--fg2); } .w.B .desc.empty { font-style: italic; }
+  .w .note { color: var(--note); } .w.B .note { font-size: 12px; }
+  .w .acts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+  .w button { font: inherit; font-size: 13px; border-radius: 6px; padding: 4px 12px; cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--fg); }
+  .w button.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .w button:disabled { opacity: .55; cursor: not-allowed; }
+  .w button:focus-visible, .w input:focus-visible, .w a:focus-visible { outline: 3px solid #f2a93b; outline-offset: 2px; }
+  .w .icon { width: 32px; height: 32px; padding: 0; display: grid; place-items: center; } .w.A .icon { width: 18px; height: 18px; font-size: 11px; border-radius: 4px; }
+  .w a.more { color: var(--link, var(--primary)); font-size: 13px; cursor: pointer; } .w.B a.more { display: inline-block; padding: 4px 2px; }
+  .w .steps { font-size: 12px; color: var(--fg2); display: flex; gap: 6px; align-items: center; }
+  .w .steps i { flex: 1; height: 4px; border-radius: 2px; background: var(--border); } .w .steps i.on { background: var(--primary); }
+  .w .tabs { display: flex; gap: 6px; } .w .tabs button[aria-selected="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .w .opts { display: grid; gap: 6px; min-height: 70px; } .w .opts .loading { color: var(--fg2); font-size: 13px; }
+  .w .opt { border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; cursor: pointer; display: flex; gap: 8px; align-items: center; }
+  .w .opt.sel { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+  .w.B .opt.sel::after { content: '✓ 已选'; margin-left: auto; color: var(--primary); font-size: 12px; }
+  .w label.f { display: grid; gap: 2px; font-size: 13px; } .w input[type=text], .w input[type=tel] { font: inherit; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; background: var(--bg); color: var(--fg); }
+  .w .row { display: flex; gap: 8px; justify-content: flex-end; }
+  .w .msg { font-size: 13px; border-radius: 8px; padding: 6px 10px; } .w .msg:empty { display: none; }
+  .w .msg.err { background: #fbe1de; color: #8c2a20; } .w .msg.ok { background: #e3f1e8; color: #1f5f3d; } .w .msg.info { background: #e8eefb; color: #1f4fae; }
+  .w .overlay { position: absolute; inset: 0; background: rgba(0, 0, 0, .35); display: grid; place-items: center; border-radius: 12px; }
+  .w .overlay .box, .w dialog { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 10px; padding: 12px; width: 360px; }
+  .w dialog::backdrop { background: rgba(0, 0, 0, .35); }
+  .w .dh { display: flex; justify-content: space-between; align-items: center; font-weight: 700; margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>同一个报名流程的两个实现，用同一组验收检查</h2>
+  <p class="sub">组件分三步：选班次、填信息、确认提交。服务器用页面里的计时器模拟，可以切换成“失败”，两个班次的返回时间不同（周末班 600 毫秒、晚班 150 毫秒）。下面的结果由测试脚本真实操作两个组件得到：用鼠标和键盘点击、双击、快速切换、重新挂载组件，再读取页面的布局、计算样式和焦点。课程与人物为演示而构造。</p>
+  <div class="pair" id="live"><div id="hostA"></div><div id="hostB"></div></div>
+  <div class="pair" id="shots"></div>
+</section>
+<section class="panel">
+  <h2>检查结果</h2>
+  <table class="t" id="res"></table><p class="m" id="mres"></p>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// ---------- 模拟服务器 ----------
+const SERVER = { mode: 'ok', log: [] };
+const SCHEDULES = { 周末班: ['周六 09:00—12:00', '周日 14:00—17:00'], 晚班: ['周二 19:00—21:00', '周四 19:00—21:00'] };
+const LAT = { 周末班: 600, 晚班: 150 };
+let orderNo = 2026100;
+function api(ver, path, arg) {
+  SERVER.log.push({ ver, path, arg, t: performance.now() });
+  const ms = path === '/schedules' ? LAT[arg] : 400;
+  return new Promise((res, rej) => setTimeout(() => {
+    if (path === '/orders' && SERVER.mode === 'fail') return rej(new Error('服务暂时不可用（500）'));
+    res(path === '/schedules' ? SCHEDULES[arg] : { no: ++orderNo });
+  }, ms));
+}
+// ---------- 课程数据：正常内容与极端内容 ----------
+function coverURL() { const c = document.createElement('canvas'); c.width = 240; c.height = 160; const g = c.getContext('2d'); const gr = g.createLinearGradient(0, 0, 240, 160); gr.addColorStop(0, '#2c5aa0'); gr.addColorStop(1, '#86a9e0'); g.fillStyle = gr; g.fillRect(0, 0, 240, 160); g.fillStyle = 'rgba(255,255,255,.75)'; for (let i = 0; i < 9; i++) g.fillRect(110 + i * 13, 140 - (i * 37 % 90) - 20, 9, (i * 37 % 90) + 20); return c.toDataURL(); }
+const NORMAL = { title: '数据可视化入门', price: 1299, desc: '12 周，每周两次课，用真实数据完成三件作品。', img: coverURL() };
+// 图片地址失效用一个无法解码的数据地址模拟
+const EXTREME = { title: '数据可视化入门：从表格、统计图到可交互的地图与网络图（含期末作品展与一对一点评）', price: 12345678.9, desc: '', img: 'data:image/png;base64,broken' };
+const money = n => '¥' + n.toLocaleString('zh-CN', { minimumFractionDigits: 2 });
+// 草稿：B 每次修改都保存，重新挂载时恢复（存储不可用时退回内存）
+const MEM = {};
+const store = { get: k => { try { return JSON.parse(sessionStorage.getItem(k)); } catch (e) { return MEM[k] || null; } }, set: (k, v) => { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch (e) { MEM[k] = v; } }, del: k => { try { sessionStorage.removeItem(k); } catch (e) { delete MEM[k]; } } };
+
+// ---------- 组件 ----------
+// A 与 B 共用结构；B 修掉了下面各项检查发现的问题
+const T = {
+  A: { buy: '立即报名', s2: '注册信息', s3: '确认报读', submit: '提交注册', done: '报读成功' },
+  B: { buy: '立即报名', s2: '填写报名信息', s3: '确认报名', submit: '提交报名', done: '报名成功' }
+};
+const W = {};
+function mount(ver, opts = {}) {
+  const host = $('host' + ver), B = ver === 'B', t = T[ver];
+  const draft = B ? store.get('draft-' + ver) : null;
+  // opts.state 是测试夹具：直接把组件放到某一步
+  const s = W[ver] = { ver, step: 1, tab: null, session: null, name: '', phone: '', pending: false, reqId: 0, theme: opts.theme || 'light', course: opts.course || NORMAL, list: null, ...(opts.state ? {} : draft || {}), ...(opts.state || {}), restored: !!draft && !opts.state };
+  host.innerHTML = `<div class="w ${ver} ${s.theme}" id="w${ver}" data-ver="${ver}"></div>`;
+  const el = host.firstChild, save = () => B && store.set('draft-' + ver, { step: s.step, tab: s.tab, session: s.session, name: s.name, phone: s.phone, list: s.list });
+  function card() {
+    const c = s.course, img = `<img class="cover" src="${c.img}" alt="课程封面">`;
+    return `<div class="card">${img}<div class="info"><div class="title" title="${esc(c.title)}">${esc(c.title)}</div><div class="price">${money(c.price)}</div>
+      <div class="desc ${c.desc ? '' : 'empty'}">${c.desc ? esc(c.desc) : B ? '暂无课程介绍' : ''}</div><div class="note">名额有限，开课前 7 天可全额退款</div>
+      <div class="acts">${B ? `<button class="primary" type="button">${t.buy}</button><button type="button">收藏</button><button class="icon" type="button" aria-label="分享">↗</button>` : `<button class="primary" type="button">${t.buy}</button><button class="primary" type="button">加入收藏</button><button class="primary" type="button">分享</button><button class="icon" type="button" aria-label="分享到其他平台">↗</button>`}
+      <a class="more" ${B ? 'href="#" role="button"' : ''}>课程说明</a></div></div></div>`;
+  }
+  function steps() { return B ? `<div class="steps">第 ${s.step} 步，共 3 步<i class="${s.step >= 1 ? 'on' : ''}"></i><i class="${s.step >= 2 ? 'on' : ''}"></i><i class="${s.step >= 3 ? 'on' : ''}"></i></div>` : ''; }
+  function body() {
+    if (s.step === 1) return `<div class="tabs" role="tablist">${Object.keys(SCHEDULES).map(k => `<button type="button" role="tab" aria-selected="${s.tab === k}" data-tab="${k}">${k}</button>`).join('')}</div>
+      <div class="opts" ${B ? 'role="radiogroup" aria-label="上课时间"' : ''}>${s.list ? s.list.map(o => B ? `<button type="button" class="opt ${s.session === o ? 'sel' : ''}" role="radio" aria-checked="${s.session === o}" tabindex="${s.session === o || (!s.session && o === s.list[0]) ? 0 : -1}" data-opt="${o}">${o}</button>` : `<div class="opt ${s.session === o ? 'sel' : ''}" data-opt="${o}">${o}</div>`).join('') : `<div class="loading">${s.tab ? '正在加载班次…' : '请先选择班型'}</div>`}</div>
+      <div class="row"><button class="primary" type="button" data-go="2" ${B && !s.session ? 'disabled' : ''}>下一步</button></div>`;
+    if (s.step === 2) return `<b>${t.s2}</b><label class="f">姓名<input type="text" data-k="name" value="${esc(s.name)}"></label><label class="f">手机号<input type="tel" data-k="phone" value="${esc(s.phone)}"></label>
+      <div class="row"><button type="button" data-go="1">上一步</button><button class="primary" type="button" data-go="3">下一步</button></div>`;
+    if (s.step === 3) return `<b>${t.s3}</b><div>${esc(s.session || '未选班次')} · ${esc(s.name || '未填写姓名')}</div>
+      <div class="row">${B ? '<button type="button" data-go="2">返回修改</button>' : ''}<button class="primary" type="button" data-submit ${s.pending && B ? 'disabled' : ''}>${s.pending ? '提交中…' : t.submit}</button></div>`;
+    return `<div class="msg ok" tabindex="-1">${t.done}，订单号 ${s.no}</div>`;
+  }
+  // B：重新渲染后把焦点放回同一个控件；控件不在了（换了步骤）就放到这一步的第一个控件上
+  const focusKey = e => e.dataset.tab ? `[data-tab="${e.dataset.tab}"]` : e.dataset.opt ? `[data-opt="${e.dataset.opt}"]` : e.dataset.k ? `[data-k="${e.dataset.k}"]` : e.dataset.go ? `[data-go="${e.dataset.go}"]` : e.hasAttribute('data-submit') ? '[data-submit]' : null;
+  function render(msg = '', kind = '') {
+    const key = B && el.contains(document.activeElement) ? focusKey(document.activeElement) : null, had = B && el.contains(document.activeElement);
+    el.innerHTML = card() + steps() + `<div class="body" style="display:grid;gap:8px">${body()}</div><div class="msg ${kind}" ${B ? 'role="status"' : ''}>${msg}</div>`;
+    const img = el.querySelector('.cover');
+    if (had) (key && el.querySelector('.body ' + key) || el.querySelector('.body button:not(:disabled), .body input, .body [tabindex]'))?.focus();
+    if (B) img.addEventListener('error', () => { img.replaceWith(Object.assign(document.createElement('div'), { className: 'cover-fb', textContent: '封面暂不可用' })); });
+  }
+  async function loadTab(k) {
+    s.tab = k; s.list = null; s.session = B ? null : s.session; render(); save();
+    const id = ++s.reqId, list = await api(ver, '/schedules', k);
+    if (B && id !== s.reqId) return;   // B：只采用最后一次请求的结果
+    s.list = list; render(); save();
+  }
+  async function submit() {
+    if (B && s.pending) return;
+    s.pending = true; render();
+    try { const r = await api(ver, '/orders', { session: s.session, name: s.name }); s.no = r.no; s.step = 4; s.pending = false; if (B) store.del('draft-' + ver); render(); }
+    catch (e) {
+      if (B) { s.pending = false; render(`提交没有成功：${esc(e.message)}。你填写的内容已保存。 <button type="button" data-submit>重试</button> <button type="button" data-go="2">返回修改</button>`, 'err'); }
+      // A：错误被吞掉，按钮一直显示“提交中…”
+    }
+  }
+  function openInfo(trigger) {
+    if (B) {
+      const d = document.createElement('dialog'); d.innerHTML = `<div class="dh">课程说明<button class="icon" type="button" aria-label="关闭">×</button></div><p style="margin:0;font-size:13px">每周二、四晚上或周末上课，课后有作业点评。</p>`;
+      el.append(d); d.addEventListener('close', () => { d.remove(); trigger.focus(); }); d.querySelector('button').onclick = () => d.close(); d.showModal();
+    } else {
+      const o = document.createElement('div'); o.className = 'overlay'; o.innerHTML = `<div class="box"><div class="dh">课程说明<button class="icon" type="button">×</button></div><p style="margin:0;font-size:13px">每周二、四晚上或周末上课，课后有作业点评。</p></div>`;
+      el.append(o); o.querySelector('button').onclick = () => o.remove();
+    }
+  }
+  el.addEventListener('click', e => {
+    const b = e.target.closest('[data-tab],[data-opt],[data-go],[data-submit],a.more'); if (!b) return;
+    if (b.matches('a.more')) { e.preventDefault(); return openInfo(b); }
+    if (b.dataset.tab) return loadTab(b.dataset.tab);
+    if (b.dataset.opt) { s.session = b.dataset.opt; render(); save(); return; }
+    if (b.dataset.go) { s.step = +b.dataset.go; render(); save(); return; }
+    if (b.hasAttribute('data-submit')) return submit();
+  });
+  el.addEventListener('input', e => { const k = e.target.dataset.k; if (k) { s[k] = e.target.value; save(); } });
+  // B：单选组用方向键在选项间移动
+  el.addEventListener('keydown', e => { if (!B || !e.target.matches('.opt') || !['ArrowDown', 'ArrowUp'].includes(e.key)) return; const all = [...el.querySelectorAll('.opt')], i = all.indexOf(e.target); all[(i + (e.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length].focus(); e.preventDefault(); });
+  render(s.restored ? `已恢复上次填写的内容（第 ${s.step} 步）。` : '', 'info');
+  return s;
+}
+// ---------- 供测试脚本调用 ----------
+const FILLED = { step: 3, tab: '晚班', list: SCHEDULES.晚班, session: SCHEDULES.晚班[0], name: '林同学', phone: '13800000000' };
+window.__ac = {
+  W, SERVER, EXTREME,
+  reset: ver => { store.del('draft-' + ver); SERVER.mode = 'ok'; mount(ver); },
+  remount: ver => { mount(ver); },
+  jump: (ver, step) => { store.del('draft-' + ver); mount(ver, { state: { ...FILLED, step } }); },
+  stress: ver => mount(ver, { theme: 'dark', course: EXTREME, state: { tab: '晚班', list: SCHEDULES.晚班, session: SCHEDULES.晚班[0] } }),
+  shot: html => { $('shots').insertAdjacentHTML('beforeend', html); },
+  render: (html, note) => { $('res').innerHTML = html; $('mres').innerHTML = note; document.body.classList.add('done'); }
+};
+mount('A'); mount('B');
+</script>
+</body>
+</html>
