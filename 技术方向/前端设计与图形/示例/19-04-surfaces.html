@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>表面与光影：渐变文字、磨砂玻璃、聚光灯与倾斜卡片</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; } .tag { font-size: 11px; color: var(--muted); margin: 0 0 2px; }
+  .stage { border: 1px solid var(--line); border-radius: 8px; height: 150px; position: relative; overflow: hidden; }
+  .shots { display: flex; gap: 8px; flex-wrap: wrap; } .shots figure { margin: 0; font-size: 11px; color: var(--muted); } .shots img { display: block; border: 1px solid var(--line); border-radius: 6px; }
+  /* ---------- 1 渐变文字 ---------- */
+  .gt { font: 700 34px/1.2 "Noto Sans SC", system-ui, sans-serif; padding: 34px 14px; }
+  .gA { background: linear-gradient(90deg, #ff9a9e, #fad0c4, #a1c4fd, #ff9a9e); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shine 4s linear infinite; }
+  @keyframes shine { to { background-position: 300% 0; } }
+  /* B：深色渐变保证对比度；不支持文字裁切时退回纯色；只有在用户没要求减少动态效果时才流动 */
+  .gB { color: #3b2a8f; }
+  @supports ((-webkit-background-clip: text) or (background-clip: text)) { .gB { background: linear-gradient(90deg, #2340a8, #6a1fb5, #a3165a, #2340a8); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; } }
+  @media (prefers-reduced-motion: no-preference) { .gB { animation: shine 6s linear infinite; } }
+  /* ---------- 2 磨砂玻璃 ---------- */
+  .scene { position: absolute; inset: -40px; background: linear-gradient(90deg, #fffbe8 0 40%, #1d2a5a 40% 70%, #f2f4f7 70%); }
+  .glass { position: absolute; left: 14px; right: 14px; top: 40px; height: 70px; border-radius: 12px; padding: 10px 14px; font-weight: 700; font-size: 15px; display: grid; align-content: center; gap: 6px; }
+  .glass.A { background: rgba(255, 255, 255, .15); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); color: #fff; }
+  .glass.B { background: rgba(20, 24, 33, .62); -webkit-backdrop-filter: blur(10px) saturate(1.2); backdrop-filter: blur(10px) saturate(1.2); color: #fff; }
+  @media (prefers-reduced-transparency: reduce) { .glass.B { background: #141821; -webkit-backdrop-filter: none; backdrop-filter: none; } }
+  .glass .blank { height: 14px; }
+  /* ---------- 3 鼠标聚光灯 ---------- */
+  .spot { position: absolute; inset: 0; padding: 14px; display: grid; gap: 4px; align-content: center; background: #11162a; color: #e8ebf1; }
+  .spot h3 { margin: 0; font-size: 16px; } .spot p { margin: 0; font-size: 12.5px; }
+  .spot::before { content: ''; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(160px circle at var(--x, -999px) var(--y, -999px), rgba(120, 170, 255, .35), transparent 70%); }
+  /* A：文字只在光圈下面才看得见 */
+  .spot.A .reveal { -webkit-mask-image: radial-gradient(120px circle at var(--x, -999px) var(--y, -999px), #000 40%, transparent 70%); mask-image: radial-gradient(120px circle at var(--x, -999px) var(--y, -999px), #000 40%, transparent 70%); }
+  /* B：光圈只是装饰；没有悬停能力的设备上不显示光圈 */
+  @media (hover: none) { .spot.B::before { display: none; } }
+  /* ---------- 4 倾斜卡片 ---------- */
+  .tiltwrap { position: absolute; inset: 0; display: grid; place-items: center; perspective: 600px; }
+  .card { width: 200px; height: 110px; border-radius: 12px; background: linear-gradient(135deg, #2c5aa0, #86a9e0); color: #fff; padding: 12px; transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transform-style: preserve-3d; box-shadow: 0 10px 24px rgba(0, 0, 0, .2); }
+  .card h3 { margin: 0; font-size: 16px; } .card p { margin: 4px 0 0; font-size: 12px; }
+  .card.B .txt { transform: translateZ(18px); }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div><h2>1 渐变文字：对比度与静态回退</h2><p class="sub">A 用浅粉、浅蓝的渐变并一直流动；B 用深色渐变，不支持文字裁切时退回纯色，用户要求减少动态效果时不流动。对比度由脚本截图后逐列找出文字最实的像素，与白底比较。</p><div class="pair"><div><p class="tag">A</p><div class="stage" id="gA"><div class="gt gA">听见城市</div></div></div><div><p class="tag">B</p><div class="stage" id="gB"><div class="gt gB">听见城市</div></div></div></div><table class="t" id="tG"></table></div>
+    <div><h2>2 磨砂玻璃：背后内容变化与绘制成本</h2><p class="sub">玻璃面板背后有浅色、深色两种区域。A 几乎透明、模糊半径 24 像素；B 加深色底、模糊 10 像素，并在用户要求减少透明效果时改为不透明。读数由截图测得；绘制成本是背景移动时的帧时间。</p><div class="pair"><div><p class="tag">A</p><div class="stage" id="sA"><div class="scene"></div><div class="glass A"><span>下次课 周四 19:00</span><span class="blank" aria-hidden="true"></span></div></div></div><div><p class="tag">B</p><div class="stage" id="sB"><div class="scene"></div><div class="glass B"><span>下次课 周四 19:00</span><span class="blank" aria-hidden="true"></span></div></div></div></div><table class="t" id="tS"></table></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>3 鼠标聚光灯：触屏替代与事件频率</h2><p class="sub">指针位置写进 CSS 变量，作为径向渐变的圆心。A 每次 pointermove 都读布局、写样式，而且课程说明只在光圈下面才看得见；B 每帧最多更新一次，光圈只是装饰。右侧小图是同一页面在触屏手机上的样子（测试脚本用触屏设备模拟打开）。</p><div class="pair"><div><p class="tag">A</p><div class="stage" id="pA"><div class="spot A"><h3>数据可视化入门</h3><p class="reveal">12 周，每周两次课，用真实数据完成三件作品。</p><p class="reveal">报名截止：11 月 15 日</p></div></div></div><div><p class="tag">B</p><div class="stage" id="pB"><div class="spot B"><h3>数据可视化入门</h3><p>12 周，每周两次课，用真实数据完成三件作品。</p><p>报名截止：11 月 15 日</p></div></div></div></div><div class="shots" id="touch"></div><table class="t" id="tP"></table></div>
+    <div><h2>4 立体倾斜卡片：文字稳定与减少动态效果</h2><p class="sub">指针位置映射成绕 X、Y 轴的旋转角度。A 最大 25 度；B 最大 8 度，文字层略微抬起，用户要求减少动态效果时不倾斜。表中是指针移到卡片角上时测得的角度与文字移动距离。</p><div class="pair"><div><p class="tag">A</p><div class="stage" id="cA"><div class="tiltwrap"><div class="card A"><div class="txt"><h3>可访问性实践</h3><p>6 周 · 王老师</p></div></div></div></div></div><div><p class="tag">B</p><div class="stage" id="cB"><div class="tiltwrap"><div class="card B"><div class="txt"><h3>可访问性实践</h3><p>6 周 · 王老师</p></div></div></div></div></div></div><table class="t" id="tC"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const lin = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }, L = (r, g, b) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b), cr = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+async function pixels(b64) { const img = new Image(); img.src = 'data:image/png;base64,' + b64; await img.decode(); const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; const g = c.getContext('2d'); g.drawImage(img, 0, 0); return g.getImageData(0, 0, c.width, c.height); }
+// 渐变文字：每一列里与白底差别最大的像素就是笔画中心；所有列里最低的那个对比度就是渐变最浅处的对比度
+async function gradientContrast(b64) {
+  const d = await pixels(b64), w = d.width, h = d.height, cols = [];
+  // 只统计笔画中心：这一列里接近最大值的像素至少有 3 个，排除抗锯齿的边缘列
+  for (let x = 0; x < w; x++) { const cs = []; for (let y = 0; y < h; y++) { const i = (y * w + x) * 4; cs.push(cr(L(d.data[i], d.data[i + 1], d.data[i + 2]), 1)); } const best = Math.max(...cs); if (best > 1.15 && cs.filter(c => c >= best * 0.92).length >= 3) cols.push(best); }
+  cols.sort((a, b) => a - b);
+  return { min: cols[Math.floor(cols.length * 0.05)], median: cols[cols.length >> 1] };
+}
+// 玻璃：取玻璃上没有文字的一块，量背景亮度的范围，再与白字比较
+async function glassContrast(b64) {
+  const d = await pixels(b64); let lo = 1, hi = 0;
+  for (let i = 0; i < d.data.length; i += 4) { const l = L(d.data[i], d.data[i + 1], d.data[i + 2]); lo = Math.min(lo, l); hi = Math.max(hi, l); }
+  return { worst: cr(1, hi), best: cr(1, lo), spread: cr(hi, lo) };
+}
+// 绘制成本：背景左右移动 1 秒，统计帧时间
+async function moveCost(stage) {
+  const sc = stage.querySelector('.scene'), ts = []; let last = 0; const t0 = performance.now();
+  await new Promise(res => { const step = now => { if (last) ts.push(now - last); last = now; sc.style.transform = `translateX(${Math.sin((now - t0) / 200) * 40}px)`; if (now - t0 < 1000) requestAnimationFrame(step); else res(); }; requestAnimationFrame(step); });
+  sc.style.transform = ''; ts.sort((a, b) => a - b); return { p50: ts[ts.length >> 1], p95: ts[Math.floor(ts.length * 0.95)] };
+}
+// 聚光灯：记录处理次数与样式写入次数
+const SPOT = { A: { events: 0, writes: 0 }, B: { events: 0, writes: 0 } };
+function setupSpot() {
+  const a = document.querySelector('#pA .spot'), b = document.querySelector('#pB .spot');
+  a.addEventListener('pointermove', e => { SPOT.A.events++; const r = a.getBoundingClientRect(); a.style.setProperty('--x', e.clientX - r.left + 'px'); a.style.setProperty('--y', e.clientY - r.top + 'px'); SPOT.A.writes++; });
+  let pending = null;
+  b.addEventListener('pointermove', e => { SPOT.B.events++; if (!pending) requestAnimationFrame(() => { const r = b.getBoundingClientRect(); b.style.setProperty('--x', pending.x - r.left + 'px'); b.style.setProperty('--y', pending.y - r.top + 'px'); SPOT.B.writes++; pending = null; }); pending = { x: e.clientX, y: e.clientY }; }, { passive: true });
+}
+// 倾斜卡片
+const TILT = { A: 25, B: 8 };
+function setupTilt() {
+  for (const v of ['A', 'B']) {
+    const st = $('c' + v), card = st.querySelector('.card');
+    st.addEventListener('pointermove', e => {
+      const reduce = v === 'B' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const r = card.getBoundingClientRect(), nx = Math.max(-1, Math.min(1, ((e.clientX - r.left) / r.width - 0.5) * 2)), ny = Math.max(-1, Math.min(1, ((e.clientY - r.top) / r.height - 0.5) * 2));
+      card.style.setProperty('--ry', (reduce ? 0 : nx * TILT[v]) + 'deg'); card.style.setProperty('--rx', (reduce ? 0 : -ny * TILT[v]) + 'deg');
+    });
+    st.addEventListener('pointerleave', () => { card.style.setProperty('--rx', '0deg'); card.style.setProperty('--ry', '0deg'); });
+  }
+}
+// 同一帧里连续收到 120 次移动事件（高频鼠标、触控笔或 pointerrawupdate 都可能这样）
+function spotBurst(v) {
+  const el = document.querySelector(`#p${v} .spot`), r = el.getBoundingClientRect(); SPOT[v].events = 0; SPOT[v].writes = 0;
+  const t0 = performance.now();
+  for (let i = 0; i < 120; i++) el.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: r.left + 10 + i * (r.width - 20) / 119, clientY: r.top + 75 }));
+  const ms = performance.now() - t0;
+  return new Promise(res => requestAnimationFrame(() => requestAnimationFrame(() => res({ ...SPOT[v], ms }))));
+}
+setupSpot(); setupTilt();
+window.__sf = { gradientContrast, glassContrast, moveCost, SPOT, spotBurst, fill: (id, html) => { $(id).innerHTML = html; }, shot: (id, html) => $(id).insertAdjacentHTML('beforeend', html) };
+</script>
+</body>
+</html>
