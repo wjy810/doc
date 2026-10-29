@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>项目 03 完整资料上传流程：状态表、取消、断网、重试与空结果</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --warn: #a15c00; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .note { max-width: 1140px; margin: 0 0 10px; padding: 6px 12px; border-radius: 8px; background: #fff6e0; border: 1px solid #f0d9a8; font-size: 12px; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; } table.t tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 16px; align-items: start; }
+  /* 上传组件 */
+  .up { width: 340px; border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 10px; background: #fbfaf7; }
+  .drop { display: grid; place-items: center; height: 72px; border: 2px dashed #b9c0cc; border-radius: 10px; color: var(--muted); cursor: pointer; }
+  .drop input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .drop:focus-within { outline: 3px solid #f2a93b; outline-offset: 2px; }
+  .file { display: flex; gap: 8px; align-items: baseline; min-height: 20px; } .file .size { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .bar { height: 6px; border-radius: 3px; background: #e5e7eb; overflow: hidden; } .bar i { display: block; height: 100%; width: 0; background: var(--accent); }
+  .status { margin: 0; min-height: 21px; } .status.err { color: var(--bad); } .status.ok { color: var(--ok); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; } .actions button { font: inherit; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--accent); background: #fff; color: var(--accent); cursor: pointer; } .actions button[hidden] { display: none; } .actions button:disabled { opacity: .45; cursor: not-allowed; }
+  .result { margin: 0; padding-left: 18px; } .result:empty { display: none; }
+  .vB .file .name { overflow-wrap: anywhere; }
+  .vA .file .name { white-space: nowrap; }
+</style>
+</head>
+<body>
+<p class="note">服务器是页面里的模拟程序（模拟数据）：上传每 80 毫秒前进 10%，分析需要 400 毫秒；“断网”时请求既不成功也不失败，一直挂起。文件名含 empty 的文件分析后没有结果。</p>
+<section class="panel">
+  <div class="two">
+    <div><h2 id="ver"></h2><div class="up" id="up">
+      <label class="drop">点击选择文件（PDF、PNG、JPG）<input type="file" id="file"></label>
+      <div class="file"><span class="name" id="fname"></span><span class="size" id="fsize"></span></div>
+      <div class="bar"><i id="bar"></i></div>
+      <p class="status" id="status" role="status"></p>
+      <div class="actions"><button id="start" type="button">开始上传</button><button id="cancel" type="button">取消</button><button id="retry" type="button">重试</button><button id="reset" type="button">重新选择</button></div>
+      <ol class="result" id="result"></ol>
+    </div></div>
+    <div><h2>状态表</h2><table class="t" id="tState"></table></div>
+  </div>
+</section>
+<section class="panel" id="accPanel" hidden>
+  <h2>验收：同一组操作，初版与完成版</h2><p class="sub">每项检查都重新打开页面，由脚本用真实的点击与文件选择完成。</p><table class="t" id="tAcc"></table>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const V = new URLSearchParams(location.search).get('v') === 'a' ? 'A' : 'B';
+$('up').classList.add('v' + V); $('ver').textContent = V === 'A' ? '初版' : '完成版：上传组件';
+// ---------- 模拟服务器 ----------
+const SERVER = { uploads: 0, aborted: 0, completed: 0 }, NET = { offline: false };
+function fakeUpload(file, { signal, onProgress } = {}) {
+  SERVER.uploads++;
+  return new Promise((res, rej) => {
+    let pct = 0, id = 0;
+    const tick = () => { if (NET.offline) return; pct += 10; onProgress?.(pct); if (pct >= 100) { SERVER.completed++; res({ id: SERVER.uploads }); } else id = setTimeout(tick, 80); };   // 断网：不再前进，也不报错
+    id = setTimeout(tick, 80);
+    signal?.addEventListener('abort', () => { clearTimeout(id); SERVER.aborted++; rej(signal.reason ?? new DOMException('已取消', 'AbortError')); });
+  });
+}
+function fakeAnalyze(file, { signal } = {}) {
+  return new Promise((res, rej) => {
+    const id = setTimeout(() => res(/empty/i.test(file.name) ? [] : ['第 1 页：标题与 2 段正文', '第 2 页：1 个表格（4 列 × 12 行）', '第 3 页：2 张图片']), 400);
+    signal?.addEventListener('abort', () => { clearTimeout(id); rej(signal.reason); });
+  });
+}
+const kb = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+// ---------- 完成版：状态机 ----------
+const STATES = {
+  idle: { text: () => '请选择 PDF、PNG 或 JPG 文件，最大 20 MB。', buttons: [] },
+  selected: { text: () => '已选择 1 个文件，点“开始上传”。', buttons: ['start', 'reset'] },
+  invalid: { text: s => `不支持的文件类型（${s.ext}）。请选择 PDF、PNG 或 JPG。`, cls: 'err', buttons: ['reset'] },
+  uploading: { text: s => `第 1 步／共 2 步：上传中 ${s.pct}%`, buttons: ['cancel'] },
+  analyzing: { text: () => '第 2 步／共 2 步：分析中……', buttons: ['cancel'] },
+  done: { text: s => `完成：识别到 ${s.items.length} 项内容。`, cls: 'ok', buttons: ['reset'] },
+  empty: { text: () => '分析完成，但没有识别到内容。可能是扫描件太模糊，换一个文件试试。', buttons: ['reset'] },
+  failed: { text: s => `上传失败：${s.error}。文件仍在，点“重试”继续。`, cls: 'err', buttons: ['retry', 'reset'] },
+  canceled: { text: () => '已取消，没有上传任何内容。', buttons: ['start', 'reset'] } };
+let S = { s: 'idle', file: null, pct: 0, items: [], error: '', ext: '' }, ctrl = null;
+const shortName = n => n.length > 36 ? n.slice(0, 22) + '…' + n.slice(-10) : n;   // 保留开头和扩展名
+function renderB() {
+  const st = STATES[S.s];
+  $('fname').textContent = S.file ? shortName(S.file.name) : ''; $('fname').title = S.file?.name ?? ''; $('fsize').textContent = S.file ? kb(S.file.size) : '';
+  $('bar').style.width = (S.s === 'uploading' ? S.pct : ['analyzing', 'done', 'empty'].includes(S.s) ? 100 : 0) + '%';
+  $('status').textContent = st.text(S); $('status').className = 'status ' + (st.cls || '');
+  const busy = S.s === 'uploading' || S.s === 'analyzing';
+  for (const b of ['start', 'cancel', 'retry', 'reset']) $(b).hidden = !st.buttons.includes(b);
+  $('start').hidden = !(st.buttons.includes('start') || busy); $('start').disabled = busy;   // 上传中按钮留在原位并禁用，“取消”不会移到指针下面
+  $('result').innerHTML = S.s === 'done' ? S.items.map(i => `<li>${i}</li>`).join('') : '';
+}
+const set = patch => { S = { ...S, ...patch }; renderB(); };
+async function runB() {
+  ctrl = new AbortController(); const my = ctrl; let watchdog = 0;
+  const arm = () => { clearTimeout(watchdog); watchdog = setTimeout(() => my.abort('timeout'), 3000); };   // 3 秒没有进展视为网络中断
+  try {
+    set({ s: 'uploading', pct: 0 }); arm();
+    await fakeUpload(S.file, { signal: my.signal, onProgress: p => { arm(); if (ctrl === my) set({ pct: p }); } });
+    clearTimeout(watchdog); set({ s: 'analyzing' });
+    const items = await fakeAnalyze(S.file, { signal: my.signal });
+    if (ctrl === my) set({ s: items.length ? 'done' : 'empty', items });
+  } catch (e) {
+    clearTimeout(watchdog);
+    if (ctrl !== my) return;
+    if (my.signal.reason === 'timeout') set({ s: 'failed', error: '网络连接中断' });
+    else if (my.signal.reason === 'user') set({ s: 'canceled', pct: 0 });
+    else set({ s: 'failed', error: String(e?.message || e) });
+  }
+}
+// ---------- 初版：直接调用，没有状态机 ----------
+let fileA = null;
+function initA() {
+  $('retry').hidden = true; $('reset').hidden = true;
+  $('start').onclick = async () => {
+    if (!fileA) return;
+    $('bar').style.width = '0%'; $('result').innerHTML = '';
+    await fakeUpload(fileA, { onProgress: p => $('bar').style.width = p + '%' });
+    const items = await fakeAnalyze(fileA);
+    $('result').innerHTML = items.map(i => `<li>${i}</li>`).join('');
+  };
+  $('cancel').onclick = () => { $('bar').style.width = '0%'; };   // 只是把进度条清零
+  $('file').onchange = e => { fileA = e.target.files[0]; $('fname').textContent = fileA.name; $('fsize').textContent = kb(fileA.size); };
+}
+function initB() {
+  $('file').onchange = e => {
+    const f = e.target.files[0]; if (!f) return; ctrl?.abort('replaced'); ctrl = null;
+    const ext = (f.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
+    set({ file: f, ext, items: [], pct: 0, s: ['.pdf', '.png', '.jpg', '.jpeg'].includes(ext) ? (f.size > 20 * 1048576 ? 'invalid' : 'selected') : 'invalid' });
+  };
+  $('start').onclick = () => { if (S.s === 'selected' || S.s === 'canceled') runB(); };   // 上传中按钮已禁用，重复点击也不会再发请求
+  $('cancel').onclick = () => ctrl?.abort('user');
+  $('retry').onclick = () => runB();
+  $('reset').onclick = () => { ctrl?.abort('replaced'); ctrl = null; $('file').value = ''; set({ s: 'idle', file: null, items: [], pct: 0 }); };
+  renderB();
+}
+V === 'A' ? initA() : initB();
+// ---------- 状态表 ----------
+$('tState').innerHTML = `<tr><th>状态</th><th>提示文字</th><th>可用操作</th><th>离开的方式</th></tr>` + [
+  ['空闲', 'idle', '选择文件 → 已选择／校验失败'], ['已选择', 'selected', '开始上传 → 上传中；重新选择 → 空闲'], ['校验失败', 'invalid', '重新选择 → 空闲'], ['上传中', 'uploading', '完成 → 分析中；取消 → 已取消；3 秒无进展 → 失败'],
+  ['分析中', 'analyzing', '有结果 → 完成；无结果 → 空结果；取消 → 已取消'], ['完成', 'done', '重新选择 → 空闲'], ['空结果', 'empty', '重新选择 → 空闲'], ['失败', 'failed', '重试 → 上传中（文件保留）'], ['已取消', 'canceled', '开始上传 → 上传中']]
+  .map(([n, k, out]) => `<tr><th>${n}</th><td>${STATES[k].text({ ext: '.exe', pct: 40, items: [1, 2, 3], error: '网络连接中断' })}</td><td>${(['uploading', 'analyzing'].includes(k) ? ['startOff', ...STATES[k].buttons] : STATES[k].buttons).map(b => ({ start: '开始上传', startOff: '开始上传（禁用）', cancel: '取消', retry: '重试', reset: '重新选择' })[b]).join('、') || '选择文件'}</td><td>${out}</td></tr>`).join('');
+window.__up = { V, SERVER, NET, state: () => ({ status: $('status').textContent, result: $('result').innerText.trim(), bar: $('bar').style.width }),
+  overflow: () => { const up = $('up'), n = $('fname'); return Math.max(0, Math.round(n.getBoundingClientRect().right - up.getBoundingClientRect().right + 14)); },
+  report(R) {
+    const tests = [['重复提交：连点“开始上传”3 次', 'dup'], ['断网：4 秒后界面说明了什么', 'offline'], ['断网恢复后重试', 'retry'], ['超长文件名：超出组件的宽度', 'long'], ['取消后等待：旧结果是否出现', 'cancel'], ['空结果：界面说明了什么', 'empty'], ['不支持的文件（setup.exe）', 'invalid'], ['上传中能读到进度文字', 'progress']];
+    $('tAcc').innerHTML = `<tr><th>检查</th><th>初版</th><th>完成版</th></tr>` + tests.map(([n, k]) => `<tr><th>${n}</th>${['A', 'B'].map(v => `<td class="${R[v][k].ok ? 'good' : 'poor'}">${R[v][k].text}</td>`).join('')}</tr>`).join('');
+    $('accPanel').hidden = false;
+  } };
+</script>
+</body>
+</html>
