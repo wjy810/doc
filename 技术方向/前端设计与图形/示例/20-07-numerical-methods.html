@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>数值方法：时间步进、稳定性、帧率无关与约束求解</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; } .row figure { margin: 0; font-size: 11px; color: var(--muted); } .row canvas { display: block; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  .key { display: inline-block; width: 10px; height: 3px; vertical-align: middle; margin: 0 3px 0 8px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div><h2>1 时间步进：同一个弹簧，四种算法</h2><p class="sub">没有阻尼的弹簧（质量 1，劲度 40），从 x = 1 静止释放，每秒 60 步，模拟 10 秒。准确解是 x = cos(ωt)，能量应该一直不变。图中画前 3 秒，灰线是准确解。</p><div class="row" id="step"></div><table class="t" id="tStep"></table></div>
+    <div><h2>2 稳定性：弹簧变硬以后</h2><p class="sub">步长固定为 1/60 秒，逐步加大劲度 k。ω·Δt 是“每一步转过的角度”（弧度）。表中能量越过初始值的 10 倍记为发散。</p><table class="t" id="tStab"></table></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>3 帧率无关：帧时间不稳定时</h2><p class="sub">有阻尼的弹簧把滑块从 0 拉到 1。同一段 2 秒的动画跑两遍：一遍每帧 16.7 毫秒；另一遍每帧 8～50 毫秒随机。A 每帧用这一帧的实际时间直接积分；B 用固定的 1/120 秒小步，把帧时间累积起来，够一步就走一步，画面在两步之间插值。</p><div class="row" id="fps"></div><table class="t" id="tFps"></table></div>
+    <div><h2>4 约束求解：绳子的长度</h2><p class="sub">20 个点连成的绳子，左端固定，从水平位置在重力下落下。每一步先按速度移动各点，再逐段把相邻两点的距离拉回原长（基于位置的动力学）。迭代次数是每一步把所有约束处理几遍。</p><div class="row" id="rope"></div><table class="t" id="tRope"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const fig = (host, cv, cap) => { const f = document.createElement('figure'); f.append(cv); f.insertAdjacentHTML('beforeend', `<figcaption>${cap}</figcaption>`); host.append(f); };
+const canvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); return c; };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+// 四种步进方法；acc(x, v) 返回加速度
+const STEP = {
+  '显式欧拉': (x, v, dt, acc) => [x + v * dt, v + acc(x, v) * dt],
+  '半隐式欧拉': (x, v, dt, acc) => { const v1 = v + acc(x, v) * dt; return [x + v1 * dt, v1]; },
+  '速度 Verlet': (x, v, dt, acc) => { const a = acc(x, v), x1 = x + v * dt + 0.5 * a * dt * dt; return [x1, v + 0.5 * (a + acc(x1, v)) * dt]; },
+  'RK4': (x, v, dt, acc) => { const k1x = v, k1v = acc(x, v), k2x = v + k1v * dt / 2, k2v = acc(x + k1x * dt / 2, k2x), k3x = v + k2v * dt / 2, k3v = acc(x + k2x * dt / 2, k3x), k4x = v + k3v * dt, k4v = acc(x + k3x * dt, k4x); return [x + (k1x + 2 * k2x + 2 * k3x + k4x) * dt / 6, v + (k1v + 2 * k2v + 2 * k3v + k4v) * dt / 6]; } };
+const COLORS = { '显式欧拉': '#b3261e', '半隐式欧拉': '#2f6fdb', '速度 Verlet': '#1f7a4d', 'RK4': '#a15c00' };
+// ---------- 1 时间步进 ----------
+function stepping() {
+  const k = 40, w = Math.sqrt(k), dt = 1 / 60, N = 600, acc = x => -k * x, E = (x, v) => 0.5 * v * v + 0.5 * k * x * x, E0 = E(1, 0), out = {};
+  const c = canvas(520, 130), g = c.getContext('2d'), X = t => 10 + t / 3 * 500, Y = x => 65 - x * 45;
+  g.strokeStyle = '#c9ced6'; g.lineWidth = 3; g.beginPath(); for (let i = 0; i <= 180; i++) { const t = i * dt; i ? g.lineTo(X(t), Y(Math.cos(w * t))) : g.moveTo(X(t), Y(1)); } g.stroke(); g.lineWidth = 1.2;
+  for (const [name, f] of Object.entries(STEP)) {
+    let x = 1, v = 0, maxErr = 0; g.strokeStyle = COLORS[name]; g.beginPath(); g.moveTo(X(0), Y(1));
+    for (let i = 1; i <= N; i++) { [x, v] = f(x, v, dt, acc); maxErr = Math.max(maxErr, Math.abs(x - Math.cos(w * i * dt))); if (i <= 180) g.lineTo(X(i * dt), Y(Math.max(-1.4, Math.min(1.4, x)))); }
+    g.stroke(); out[name] = { ratio: E(x, v) / E0, maxErr, evals: name === 'RK4' ? 4 : name === '速度 Verlet' ? 2 : 1 };
+  }
+  fig($('step'), c, Object.keys(STEP).map(n => `<span class="key" style="background:${COLORS[n]}"></span>${n}`).join(''));
+  $('tStep').innerHTML = `<tr><th>方法</th><th>10 秒后能量／初始能量</th><th>位置的最大误差</th><th>每步计算加速度的次数</th></tr>` + Object.entries(out).map(([n, o]) => `<tr><th>${n}</th><td class="num ${Math.abs(o.ratio - 1) > 0.05 ? 'poor' : 'good'}">${o.ratio.toFixed(4)}</td><td class="num">${o.maxErr.toExponential(1)}</td><td class="num">${o.evals}</td></tr>`).join('') + `<tr><td colspan="4">显式欧拉每一步都在增加能量，弹簧越摆越大；半隐式欧拉只调换了两行的顺序，能量就在一个小范围内来回而不再增长。</td></tr>`;
+  return out;
+}
+// ---------- 2 稳定性 ----------
+function stability() {
+  const dt = 1 / 60, ks = [40, 900, 8100, 17424, 32400], out = {};
+  for (const k of ks) {
+    const acc = x => -k * x, E = (x, v) => 0.5 * v * v + 0.5 * k * x * x; out[k] = { wdt: Math.sqrt(k) * dt };
+    for (const [name, f] of Object.entries(STEP)) { let x = 1, v = 0, max = 1; for (let i = 0; i < 2000 && Math.abs(x) < 1e12; i++) { [x, v] = f(x, v, dt, acc); max = Math.max(max, E(x, v) / E(1, 0)); } out[k][name] = { max, end: E(x, v) / E(1, 0) }; }
+  }
+  const cell = r => r.max > 10 ? '<td class="num poor">发散</td>' : `<td class="num ${r.end < 0.5 ? 'poor' : 'good'}">${r.max.toFixed(2)}／${r.end < 1e-3 ? '≈0' : r.end.toFixed(2)}</td>`;
+  $('tStab').innerHTML = `<tr><th>劲度 k</th><th>ω·Δt</th>${Object.keys(STEP).map(n => `<th>${n}</th>`).join('')}</tr>` + ks.map(k => `<tr><th class="num">${k}</th><td class="num">${out[k].wdt.toFixed(2)}</td>${Object.keys(STEP).map(n => cell(out[k][n])).join('')}</tr>`).join('') + `<tr><td colspan="6">表中是 2000 步内能量的最大值与最终值（都除以初始能量）。半隐式欧拉与速度 Verlet 在 ω·Δt &lt; 2 时不会发散，但步长越大，能量的来回摆动越大；RK4 的界限约为 2.8，接近界限时能量会被吃掉，弹簧慢慢停下。碰撞、硬约束和很硬的弹簧会让 ω 变大：减小步长、把一帧拆成几小步，或换用隐式方法。</td></tr>`;
+  return out;
+}
+// ---------- 3 帧率无关 ----------
+function frameIndependence() {
+  const k = 200, c = 6, acc = (x, v) => k * (1 - x) - c * v, semi = STEP['半隐式欧拉'], R = rng(11), out = {};
+  const steady = [], jitter = []; for (let i = 0; i < 120; i++) steady.push(1 / 60);
+  for (let t = 0; t < 2 - 1e-9;) { const next = (Math.floor(t * 4 + 1e-9) + 1) / 4, d = Math.min(0.008 + R() * 0.042, next - t); jitter.push(d); t += d; }   // 每 0.25 秒的检查点上一定有一帧
+  const runA = frames => { let x = 0, v = 0; const tr = [[0, 0]]; let t = 0; for (const d of frames) { [x, v] = semi(x, v, d, acc); t += d; tr.push([t, x]); } return tr; };
+  const runB = frames => { const h = 1 / 120; let x = 0, v = 0, px = 0, acc_t = 0, t = 0; const tr = [[0, 0]]; for (const d of frames) { acc_t += d; t += d; while (acc_t >= h - 1e-9) { px = x; [x, v] = semi(x, v, h, acc); acc_t -= h; } const a = acc_t / h; tr.push([t, px + (x - px) * a]); } return tr; };
+  const cv = canvas(250, 130), g = cv.getContext('2d'), X = t => 8 + t / 2 * 236, Y = x => 120 - x * 70;
+  for (const [v, run, col] of [['A', runA, '#b3261e'], ['B', runB, '#2f6fdb']]) {
+    const s = run(steady), j = run(jitter);
+    // 在每 0.25 秒的检查点上比较两遍的位置
+    const at = (tr, t) => tr.reduce((a, b) => Math.abs(b[0] - t) < Math.abs(a[0] - t) ? b : a)[1];
+    const diffs = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(t => Math.abs(at(s, t) - at(j, t)));
+    out[v] = { maxDiff: Math.max(...diffs), endDiff: Math.abs(s[s.length - 1][1] - j[j.length - 1][1]), peakS: Math.max(...s.map(p => p[1])), peakJ: Math.max(...j.map(p => p[1])) };
+    if (v === 'A') { g.strokeStyle = '#c9ced6'; g.lineWidth = 3; g.beginPath(); s.forEach(([t, x], i) => i ? g.lineTo(X(t), Y(x)) : g.moveTo(X(t), Y(x))); g.stroke(); }
+    g.strokeStyle = col; g.lineWidth = 1.2; g.beginPath(); j.forEach(([t, x], i) => i ? g.lineTo(X(t), Y(x)) : g.moveTo(X(t), Y(x))); g.stroke();
+  }
+  out.frames = { steady: steady.length, jitter: jitter.length };
+  fig($('fps'), cv, '<span class="key" style="background:#c9ced6"></span>每帧 16.7 毫秒 <span class="key" style="background:#b3261e"></span>A 帧时间随机 <span class="key" style="background:#2f6fdb"></span>B 帧时间随机');
+  $('tFps').innerHTML = `<tr><th></th><th>8 个检查点上两遍的最大差别</th><th>2 秒时的差别</th><th>最高点（稳定／随机）</th></tr>` + ['A', 'B'].map(v => { const o = out[v]; return `<tr><th>${v}</th><td class="num ${o.maxDiff > 0.01 ? 'poor' : 'good'}">${o.maxDiff < 1e-6 ? o.maxDiff.toExponential(0) : o.maxDiff.toFixed(4)}</td><td class="num">${o.endDiff < 1e-12 ? '0' : o.endDiff.toExponential(1)}</td><td class="num">${o.peakS.toFixed(3)}／${o.peakJ.toFixed(3)}</td></tr>`; }).join('') + `<tr><td colspan="4">两遍分别有 ${out.frames.steady} 帧与 ${out.frames.jitter} 帧；随机的那一遍在每 0.25 秒处一定有一帧，便于对照。B 的物理状态只取决于经过的时间，回放、联机同步和测试截图都能得到相同的结果。</td></tr>`;
+  return out;
+}
+// ---------- 4 约束求解 ----------
+function rope() {
+  const n = 20, rest = 4, dt = 1 / 60, gy = 900, T = 1.5, out = {};
+  for (const iters of [1, 4, 16]) {
+    let p = Array.from({ length: n }, (_, i) => [83 + i * rest, 12]), prev = p.map(q => [...q]); let worst = 0, sum = 0, cnt = 0;
+    for (let s = 0; s < T / dt; s++) {
+      const next = p.map((q, i) => i === 0 ? [...q] : [q[0] + (q[0] - prev[i][0]) * 0.999, q[1] + (q[1] - prev[i][1]) * 0.999 + gy * dt * dt]);
+      prev = p; p = next;
+      for (let it = 0; it < iters; it++) for (let i = 0; i < n - 1; i++) {
+        const a = p[i], b = p[i + 1], dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy), diff = (d - rest) / d;
+        if (i === 0) { b[0] -= dx * diff; b[1] -= dy * diff; } else { a[0] += dx * diff / 2; a[1] += dy * diff / 2; b[0] -= dx * diff / 2; b[1] -= dy * diff / 2; }
+      }
+      const len = p.slice(1).reduce((s2, q, i) => s2 + Math.hypot(q[0] - p[i][0], q[1] - p[i][1]), 0); const st = len / (rest * (n - 1)) - 1; worst = Math.max(worst, st); sum += st; cnt++;
+    }
+    const c = canvas(166, 175), g = c.getContext('2d'); g.strokeStyle = '#dde1e7'; g.beginPath(); g.arc(83, 12, rest * (n - 1), 0, Math.PI); g.stroke();
+    g.strokeStyle = '#2f6fdb'; g.lineWidth = 1.5; g.beginPath(); p.forEach((q, i) => i ? g.lineTo(...q) : g.moveTo(...q)); g.stroke(); g.fillStyle = '#1d2330'; p.forEach(q => { g.beginPath(); g.arc(...q, 1.6, 0, 7); g.fill(); });
+    fig($('rope'), c, `每步迭代 ${iters} 次`);
+    const len = p.slice(1).reduce((s2, q, i) => s2 + Math.hypot(q[0] - p[i][0], q[1] - p[i][1]), 0), segs = p.slice(1).map((q, i) => Math.hypot(q[0] - p[i][0], q[1] - p[i][1]) / rest - 1);
+    out[iters] = { mean: sum / cnt, worst, endStretch: len / (rest * (n - 1)) - 1, maxSeg: Math.max(...segs) };
+  }
+  $('tRope').innerHTML = `<tr><th>每步迭代</th><th>总长度平均比原长多出</th><th>过程中最多多出</th><th>1.5 秒时（图中）</th></tr>` + Object.entries(out).map(([k, o]) => `<tr><th>${k} 次</th><td class="num ${o.mean > 0.05 ? 'poor' : 'good'}">${(o.mean * 100).toFixed(1)}%</td><td class="num ${o.worst > 0.1 ? 'poor' : 'good'}">${(o.worst * 100).toFixed(1)}%</td><td class="num">${(o.endStretch * 100).toFixed(1)}%</td></tr>`).join('') + `<tr><td colspan="4">灰色圆弧是绳子保持原长时末端能到的范围。迭代次数少，绳子像橡皮筋；迭代越多越接近不可伸长，但每一步的计算量成比例增加。也可以把一帧拆成几个小步，每小步迭代一次。</td></tr>`;
+  return out;
+}
+window.__nm = { run: () => ({ stepping: stepping(), stability: stability(), frame: frameIndependence(), rope: rope() }) };
+</script>
+</body>
+</html>
