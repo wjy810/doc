@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>从效果库学习：拆解、复现、改造与记录来源</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --warn: #a15c00; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); } .mid { color: var(--warn); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; } .tag { font-size: 11px; color: var(--muted); margin: 0 0 2px; }
+  .stage { border: 1px solid var(--line); border-radius: 8px; height: 150px; display: grid; place-items: center; background: #11162a; position: relative; }
+  pre.code { margin: 0; font: 10.5px/1.45 ui-monospace, Menlo, Consolas, monospace; background: #f6f7f9; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; }
+  /* 效果库里的原始片段（为演示而构造） */
+  .mag-orig { border: 0; outline: none; background: #ff4fd8; color: #fff; font: 700 15px "Noto Sans SC", system-ui; padding: 10px 26px; border-radius: 30px; cursor: pointer; }
+  /* 改造后：自己的内容与样式 */
+  .mag { border: 0; background: #ffd34d; color: #1d2330; font: 700 15px "Noto Sans SC", system-ui; padding: 10px 26px; border-radius: 10px; cursor: pointer; }
+  .mag:focus-visible { outline: 3px solid #f2a93b; outline-offset: 3px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div>
+      <h2>1 观察与拆解：它解决什么表达任务</h2>
+      <p class="sub">“磁吸按钮”：指针靠近时按钮被轻轻吸过去。表达任务是把注意力引到主要操作上，并给出“可以点”的手感。拆成四部分：</p>
+      <table class="t"><tr><th>部分</th><th>原始片段里是什么</th></tr>
+        <tr><th>输入</th><td>指针在按钮周围 100 像素内的位置</td></tr>
+        <tr><th>状态</th><td>按钮当前的偏移（x、y）</td></tr>
+        <tr><th>更新</th><td>每一帧把偏移向“指针方向的 40%”靠近 15%</td></tr>
+        <tr><th>绘制</th><td><code>transform: translate()</code></td></tr></table>
+      <p class="m">最小复现只需要这四部分；其余（颜色、圆角、阴影）都是可以替换的外观。</p>
+    </div>
+    <div>
+      <h2>2 最小复现与改造</h2>
+      <div class="pair"><div><p class="tag">原样拷贝</p><div class="stage" id="sO"><button class="mag-orig" type="button">Get Started</button></div></div><div><p class="tag">替换内容并加入适配</p><div class="stage" id="sN"><button class="mag" type="button">开始学习</button></div></div></div>
+      <pre class="code" id="code"></pre>
+    </div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>3 异常处理与适配：实测</h2><table class="t" id="tA"></table></div>
+    <div><h2>改了哪些地方</h2><p class="m">偏移设上限（8 像素），按钮不会从指针下面跑开；只在需要时启动动画循环，停稳后结束；没有悬停能力的设备、用户要求减少动态效果时不移动；保留键盘焦点框；外观（颜色、文字、圆角）换成自己的。每一项都对应左表的一行测量。</p></div>
+  </div>
+</section>
+<section class="panel">
+  <h2>4 来源、依赖与使用条件</h2><p class="sub">把用到的代码与素材记下来：来源、版本、许可、改了什么。检查器对照项目的用途（商业网站）判断每一项能不能用、要做什么。条目为演示而构造。</p><table class="t" id="tL"></table>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+// ---------- 原样拷贝：一直在跑的动画循环，没有任何适配 ----------
+const LOOP = { orig: 0, ours: 0 };
+function magnetOrig(btn) {
+  let tx = 0, ty = 0, x = 0, y = 0;
+  btn.parentElement.addEventListener('pointermove', e => { const r = btn.getBoundingClientRect(), dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2); if (Math.hypot(dx, dy) < 100) { tx = dx * 0.4; ty = dy * 0.4; } else { tx = 0; ty = 0; } });
+  const loop = () => { LOOP.orig++; x += (tx - x) * 0.15; y += (ty - y) * 0.15; btn.style.transform = `translate(${x}px, ${y}px)`; requestAnimationFrame(loop); };
+  loop();
+  return () => ({ x, y });
+}
+// ---------- 改造后 ----------
+function magnet(btn, { max = 8, radius = 80 } = {}) {
+  let tx = 0, ty = 0, x = 0, y = 0, raf = 0;
+  const canHover = matchMedia('(hover: hover) and (pointer: fine)'), reduce = matchMedia('(prefers-reduced-motion: reduce)');
+  const run = () => { if (raf) return; const step = () => { LOOP.ours++; x += (tx - x) * 0.2; y += (ty - y) * 0.2; btn.style.transform = `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px)`; if (Math.abs(tx - x) + Math.abs(ty - y) > 0.05) raf = requestAnimationFrame(step); else { raf = 0; } }; raf = requestAnimationFrame(step); };
+  btn.parentElement.addEventListener('pointermove', e => {
+    if (!canHover.matches || reduce.matches || e.pointerType !== 'mouse') return;   // 触屏、减少动态效果时不移动
+    const r = btn.getBoundingClientRect(), dx = e.clientX - (r.left + r.width / 2 - x), dy = e.clientY - (r.top + r.height / 2 - y), d = Math.hypot(dx, dy);
+    const k = d < radius ? Math.min(1, d / radius) * max / (d || 1) : 0; tx = dx * k; ty = dy * k; run();   // 偏移不超过 max 像素
+  });
+  btn.parentElement.addEventListener('pointerleave', () => { tx = 0; ty = 0; run(); });
+  return () => ({ x, y });
+}
+const pos = { orig: magnetOrig(document.querySelector('.mag-orig')), ours: magnet(document.querySelector('.mag')) };
+$('code').textContent = `// 改造后的核心（节选）
+if (!canHover.matches || reduce.matches || e.pointerType !== 'mouse') return;
+const k = d < radius ? Math.min(1, d / radius) * max / d : 0;   // 最多偏移 ${8} 像素
+tx = dx * k; ty = dy * k; run();   // 只在需要时启动动画循环，停稳后结束`;
+// ---------- 来源与使用条件 ----------
+const USE = '商业网站';
+const DEPS = [
+  { name: '磁吸按钮片段', kind: '代码', source: 'https://example.com/effects/magnetic-button', version: '2024-05 版', license: 'MIT', changed: '改写更新函数，加入偏移上限、触屏与减少动态效果判断' },
+  { name: '按钮背景的噪点纹理', kind: '素材', source: 'https://example.com/textures/grain-03', version: '—', license: 'CC BY-NC 4.0', changed: '未使用（已换成纯色）' },
+  { name: '标题字体', kind: '字体', source: 'Noto Sans SC（fontsource 5.3.1）', version: '5.3.1', license: 'OFL-1.1', changed: '未修改' },
+  { name: '演示视频里的背景音乐', kind: '素材', source: '同学提供，来源未知', version: '—', license: '未知', changed: '—' }];
+const RULES = {
+  'MIT': { ok: true, need: '保留原版权与许可声明' },
+  'OFL-1.1': { ok: true, need: '可以嵌入使用；不能单独出售字体文件，改名后才能发布修改版' },
+  'CC BY-NC 4.0': { ok: false, need: '禁止商业用途；商业网站不能使用' },
+  '未知': { ok: false, need: '来源与许可不明，不能使用，需要找到原作者或换成有明确许可的素材' } };
+function licenseTable() {
+  return `<tr><th>名称</th><th>来源与版本</th><th>许可</th><th>用于${USE}</th><th>改了什么</th></tr>` + DEPS.map(d => { const r = RULES[d.license] || { ok: false, need: '未登记的许可，需要人工核对' }, used = !/未使用/.test(d.changed); return `<tr><th>${d.name}（${d.kind}）</th><td>${d.source.startsWith('http') ? `<code>${d.source}</code>` : d.source}；${d.version}</td><td>${d.license}</td><td class="${r.ok ? 'good' : used ? 'poor' : 'mid'}">${r.ok ? '可以：' : used ? '不可以：' : '已不使用：'}${r.need}</td><td>${d.changed}</td></tr>`; }).join('');
+}
+$('tL').innerHTML = licenseTable();
+window.__lf = { LOOP, pos, fill: (id, h) => { $(id).innerHTML = h; } };
+</script>
+</body>
+</html>
