@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>项目 11 AI 资料与职业探索工作台：资料、进度、来源、纠错、版本与导出</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .note { max-width: 1140px; margin: 0 0 10px; padding: 6px 12px; border-radius: 8px; background: #fff6e0; border: 1px solid #f0d9a8; font-size: 12px; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 6px 0 2px; } .sub { color: var(--muted); margin: 0; font-size: 12px; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; } table.t tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .poor { color: var(--bad); }
+  .ws { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 14px; align-items: start; }
+  .mats label { display: flex; gap: 6px; align-items: flex-start; margin: 2px 0; } .mats details { font-size: 12px; color: var(--muted); margin-left: 22px; } .mats ol { margin: 2px 0; padding-left: 18px; }
+  button, select { font: inherit; } .bar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .status { margin: 0; font-size: 12px; color: var(--muted); min-height: 20px; }
+  .item { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 6px; align-items: start; border-bottom: 1px solid var(--line); padding: 4px 0; }
+  .tag { font-size: 11px; border-radius: 10px; padding: 0 6px; text-align: center; } .tag.user { background: #d7efe3; color: #1f5e40; } .tag.model { background: #dbe6fb; color: #1d4a99; } .tag.verify { background: #fde9c9; color: #7a4a00; }
+  .item [contenteditable] { outline: none; border-radius: 4px; } .item [contenteditable]:focus { box-shadow: 0 0 0 2px #c26a00; }
+  .item .src { display: block; font-size: 11px; color: var(--muted); } .item.wrong .txt { text-decoration: line-through; color: var(--muted); } .item .fix { font-size: 11px; color: var(--bad); }
+  .item button { font-size: 11px; padding: 0 6px; }
+  .blob { white-space: pre-wrap; border: 1px solid var(--line); border-radius: 8px; padding: 8px; min-height: 60px; }
+  .versions { font-size: 12px; } pre.exp { margin: 0; font: 11px/1.5 ui-monospace, monospace; background: #f6f7f9; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; max-height: 180px; overflow: auto; }
+</style>
+</head>
+<body>
+<p class="note">本页的“模型”是按固定规则生成文字的模拟程序，不调用任何真实的 AI 服务；简历与岗位说明为演示而构造，不对应任何真实的人或公司。</p>
+<section class="panel">
+  <h2 id="ver"></h2>
+  <div class="ws">
+    <div class="mats" id="mats"></div>
+    <div><div class="bar" id="bar"></div><p class="status" id="status" role="status"></p><div id="out"></div><div class="versions" id="versions"></div></div>
+  </div>
+</section>
+<section class="panel"><div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start"><div><h2>任务说明与导出内容</h2><table class="t" id="tTask"></table><pre class="exp" id="exp"></pre></div><div><h2>验收：初版与完成版运行同一组检查</h2><table class="t" id="tAcc"></table></div></div></section>
+<script>
+const $ = id => document.getElementById(id);
+const V = new URLSearchParams(location.search).get('v') === 'a' ? 'A' : 'B';
+$('ver').textContent = (V === 'A' ? '初版' : '完成版') + '：岗位能力匹配工作台';
+// ---------- 资料（为演示而构造） ----------
+const RESUME = ['示例求职者，前端开发 2 年。', '熟悉 HTML、CSS、JavaScript 与 React。', '做过数据可视化项目：用 D3 绘制交互图表。', '了解 Canvas 2D，写过粒子效果的小实验。', '参与过设计系统的组件开发与文档。'];
+const JD = [['熟练使用 JavaScript 与一个主流框架', /React|Vue/, 2], ['有数据可视化经验', /D3|可视化/, 3], ['掌握 WebGL 或 three.js', /WebGL|three/, 0], ['了解着色器', /着色器|shader/i, 0], ['能与设计师协作，维护组件库', /设计系统|组件/, 5]];
+const PORTFOLIO = ['城市骑行数据工作台（项目 06）', '生成式海报（项目 07）'];
+$('mats').innerHTML = `<h3>资料</h3><label><input type="checkbox" data-m="resume" checked><span>简历（示例）</span></label><details><summary>查看</summary><ol>${RESUME.map(l => `<li>${l}</li>`).join('')}</ol></details><label><input type="checkbox" data-m="jd" checked><span>岗位说明（示例）：前端图形开发</span></label><details><summary>查看</summary><ol>${JD.map(r => `<li>${r[0]}</li>`).join('')}</ol></details><label><input type="checkbox" data-m="pf" checked><span>作品集链接</span></label><details><summary>查看</summary><ol>${PORTFOLIO.map(l => `<li>${l}</li>`).join('')}</ol></details>` + (V === 'B' ? `<p class="sub">只有勾选的资料会被使用；结果里每一条都注明来自哪份资料。</p>` : '');
+const mats = () => Object.fromEntries([...document.querySelectorAll('[data-m]')].map(c => [c.dataset.m, c.checked]));
+// ---------- 模拟的生成过程 ----------
+function itemsFor(m) {   // 完成版：用户资料、模型建议、待验证三类分开，每条注明来源
+  const out = [];
+  JD.forEach(([req, re, line], i) => {
+    const hit = m.resume && RESUME.findIndex(l => re.test(l));
+    if (m.resume && hit >= 0) out.push({ sec: '能力', type: 'user', text: `符合“${req}”：${RESUME[hit].replace(/。$/, '')}`, src: `简历第 ${hit + 1} 行` + (m.pf && i === 1 ? `；作品集：${PORTFOLIO[0]}` : '') });
+    else out.push({ sec: '能力', type: 'model', text: `缺少“${req}”：资料里没有提到`, src: `岗位说明第 ${i + 1} 条` });
+  });
+  out.push({ sec: '学习', type: 'model', text: '先学向量与矩阵、相机，再做三维产品展示项目', src: '根据缺少的第 3、4 条要求推荐' });
+  out.push({ sec: '学习', type: 'verify', text: '大约 6 周可以补齐三维与着色器的要求', src: '估计，取决于每周可投入的时间；资料中没有依据' });
+  out.push({ sec: '行动', type: 'model', text: '第 1—2 周：三维基础与 three.js 场景；第 3—4 周：着色器入门；第 5—6 周：整理作品集', src: '根据学习建议排出' });
+  return out;
+}
+const STEPS = ['读取所选资料', '提取岗位要求', '逐条对照', '整理学习与行动建议'];
+let run = null, versions = [], corrections = [], blob = '';
+function stream(onStep, onChunk, signal) {   // 每 120 毫秒产出一段，共约 2.4 秒
+  return new Promise((res, rej) => {
+    let k = 0; const total = 20;
+    const id = setInterval(() => { if (signal?.aborted) { clearInterval(id); rej(new DOMException('已取消', 'AbortError')); return; } k++; onStep(Math.min(STEPS.length - 1, Math.floor(k / 5)), k / total); onChunk(k); if (k >= total) { clearInterval(id); res(); } }, 120);
+  });
+}
+// ---------- 初版：聊天式的一整段文字 ----------
+const A_TEXT = '你非常适合这个岗位！你熟悉 JavaScript 和 React，有 3 年 WebGL 经验，也做过数据可视化。建议再学一下着色器，2 周就能掌握。';
+function startA() { $('status').textContent = '生成中……'; $('out').innerHTML = '<div class="blob" id="blob" contenteditable="true"></div>'; blob = ''; stream(() => { }, k => { blob = A_TEXT.slice(0, Math.round(A_TEXT.length * k / 20)); $('blob').textContent = blob; }).then(() => { $('status').textContent = ''; }); }
+// ---------- 完成版 ----------
+const LABEL = { user: '用户资料', model: '模型建议', verify: '待验证' };
+function renderItems(list, live) {
+  const secs = { 能力: '能力匹配', 学习: '学习建议', 行动: '行动安排' };
+  $('out').innerHTML = Object.entries(secs).map(([k, n]) => { const its = list.map((it, i) => [it, i]).filter(([it]) => it.sec === k); return its.length ? `<h3>${n}</h3>` + its.map(([it, i]) => `<div class="item${it.wrong ? ' wrong' : ''}" data-i="${i}"><span class="tag ${it.type}">${LABEL[it.type]}</span><div><span class="txt" ${live ? '' : 'contenteditable="true"'}>${it.text}</span><span class="src">来源：${it.src}</span>${it.wrong ? `<span class="fix">已标记为错误：${it.wrong}</span>` : ''}</div>${live ? '' : '<button type="button" data-act="wrong">标记错误</button>'}</div>`).join('') : ''; }).join('');
+}
+async function startB() {
+  run?.abort(); const ctrl = new AbortController(); run = ctrl; refreshButtons(); const m = mats(), all = itemsFor(m), shown = [];   // 开始时就启用“取消”
+  try {
+    await stream(step => { $('status').textContent = `第 ${step + 1} 步／共 ${STEPS.length} 步：${STEPS[step]}……（可以随时取消）`; }, k => { const n = Math.round(all.length * k / 20); if (n > shown.length) { shown.push(...all.slice(shown.length, n)); renderItems(shown, true); } }, ctrl.signal);
+    versions.push({ n: versions.length + 1, items: all.map(x => ({ ...x })), mats: m }); renderVersion(versions.length - 1);
+    $('status').textContent = `完成：第 ${versions.length} 版。正文可以直接修改；有问题的条目点“标记错误”。`;
+  } catch (e) {
+    if (e.name !== 'AbortError') throw e;
+    $('status').textContent = `已取消：保留了已经生成的 ${shown.length} 条（不完整，未保存为版本）。`;
+  } finally { if (run === ctrl) run = null; refreshButtons(); }
+}
+let cur = -1;
+function renderVersion(i) { cur = i; renderItems(versions[i].items, false); $('versions').innerHTML = versions.length > 1 ? `版本：${versions.map((v, j) => `<button type="button" data-ver="${j}" ${j === i ? 'disabled' : ''}>第 ${v.n} 版</button>`).join(' ')} ${diffText()}` : ''; refreshButtons(); }
+function diffText() { if (versions.length < 2) return ''; const a = versions[versions.length - 2].items, b = versions[versions.length - 1].items, d = b.filter((it, i) => !a[i] || a[i].text !== it.text || !!a[i].wrong !== !!it.wrong).length; return `｜最后两版之间有 ${d} 条不同`; }
+function refreshButtons() { if (V !== 'B') return; $('cancel').disabled = !run; $('start').disabled = !!run; $('regen').disabled = !!run || !versions.length; $('export').disabled = !versions.length; }
+$('out').addEventListener('input', e => { const it = e.target.closest('.item'); if (V === 'B' && it && cur >= 0) versions[cur].items[+it.dataset.i].text = e.target.textContent; });   // 修改直接写进当前版本
+$('out').addEventListener('click', e => { if (e.target.dataset.act !== 'wrong') return; const i = +e.target.closest('.item').dataset.i, it = versions[cur].items[i], why = '用户标记：与实际情况不符（导出前可以补充原因）'; it.wrong = why; corrections.push({ version: cur + 1, item: it.text, why }); renderVersion(cur); });
+$('versions').addEventListener('click', e => { if (e.target.dataset.ver) renderVersion(+e.target.dataset.ver); });
+function exportText() {
+  if (V === 'A') return blob;
+  const v = versions[cur], lines = [`# 岗位能力匹配（第 ${v.n} 版）`, '', '> 由模拟程序生成，不是真实 AI 的输出；“待验证”的内容需要自己核实。', '', `使用的资料：${Object.entries(v.mats).filter(([, on]) => on).map(([k]) => ({ resume: '简历', jd: '岗位说明', pf: '作品集' })[k]).join('、')}`];
+  for (const [k, n] of [['能力', '能力匹配'], ['学习', '学习建议'], ['行动', '行动安排']]) { lines.push('', `## ${n}`); v.items.filter(it => it.sec === k).forEach(it => lines.push(`- [${LABEL[it.type]}] ${it.wrong ? '~~' + it.text + '~~（已标记为错误：' + it.wrong + '）' : it.text}（来源：${it.src}）`)); }
+  if (corrections.length) lines.push('', '## 纠错记录', ...corrections.map(c => `- 第 ${c.version} 版：“${c.item}”——${c.why}`));
+  return lines.join('\n');
+}
+if (V === 'A') { $('bar').innerHTML = '<button id="start" type="button">开始匹配</button><button id="cancel" type="button">取消</button><button id="export" type="button">复制结果</button>'; $('start').onclick = startA; $('cancel').onclick = () => { $('status').textContent = ''; }; $('export').onclick = () => { $('exp').textContent = exportText(); }; }   // 初版的取消只是清掉提示
+else { $('bar').innerHTML = '<button id="start" type="button">开始匹配</button><button id="cancel" type="button" disabled>取消</button><button id="regen" type="button" disabled>重新生成（保留旧版本）</button><button id="export" type="button" disabled>导出 Markdown</button>'; $('start').onclick = startB; $('cancel').onclick = () => run?.abort(); $('regen').onclick = startB; $('export').onclick = () => { $('exp').textContent = exportText(); }; }
+$('tTask').innerHTML = `<tr><th>任务</th><td>对照岗位说明，逐条判断简历是否满足，并给出学习建议与行动安排</td></tr><tr><th>输入</th><td>勾选的资料（简历、岗位说明、作品集链接）</td></tr><tr><th>输出</th><td>三组条目：能力匹配、学习建议、行动安排；每条标明“用户资料／模型建议／待验证”和来源</td></tr><tr><th>用户可以</th><td>随时取消；直接修改条目；标记错误并写明原因；重新生成时保留旧版本并比较；导出 Markdown</td></tr><tr><th>不做的事</th><td>不替用户编造经历；不给出无法核实的承诺（例如“2 周就能掌握”），估计一律标为待验证</td></tr>`;
+window.__ai = { V, versions: () => versions, corrections: () => corrections, exportText, outText: () => $('out').innerText, status: () => $('status').textContent,
+  report(R) { const rows = [['生成到一半点“取消”，2 秒后', 'cancel'], ['进度说明', 'progress'], ['标明来源的条目', 'sources'], ['区分用户资料、模型建议、待验证', 'labels'], ['资料里没有的说法', 'invented'], ['修改第 1 条后重新生成', 'edit'], ['标记错误', 'wrong'], ['导出内容', 'export']];
+    $('tAcc').innerHTML = `<tr><th>检查</th><th>初版</th><th>完成版</th></tr>` + rows.map(([n, k]) => `<tr><th>${n}</th>${['A', 'B'].map(v => `<td class="${R[v][k].ok ? 'good' : 'poor'}">${R[v][k].text}</td>`).join('')}</tr>`).join(''); } };
+refreshButtons();
+</script>
+</body>
+</html>
