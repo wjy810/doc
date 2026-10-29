@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>插值与曲线：缓动、打断、路径与参数过渡</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; } .row figure { margin: 0; font-size: 11px; color: var(--muted); } .row canvas { display: block; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  .key { display: inline-block; width: 10px; height: 3px; vertical-align: middle; margin: 0 3px 0 8px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div><h2>1 缓动：同样从 0 到 1，速度怎样变化</h2><p class="sub">横轴是时间（0 到 1），纵轴是位置。表中的速度以“匀速”为 1：开始和结束的速度、最大速度、超过终点多少。速度用相邻采样点的差除以时间间隔求得。</p><div class="row" id="ease"></div><table class="t" id="tEase"></table></div>
+    <div><h2>2 打断：动画进行到一半，目标变了</h2><p class="sub">方块用缓入缓出曲线在 0.6 秒内移动 200 像素；0.3 秒时用户反悔，目标改回 0。A 从当前位置重新开始一段同样的缓动；B 从当前位置和当前速度出发，用三次埃尔米特曲线在 0.6 秒内到达新目标、结束时速度为 0。曲线是位置随时间的变化，竖线是打断的时刻；每秒 60 帧。</p><div class="row" id="intr"></div><table class="t" id="tIntr"></table></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>3 路径：沿曲线匀速移动</h2><p class="sub">一条三次贝塞尔曲线上放 30 个点。A 让参数 t 均匀增加；B 先算出曲线长度表，再按长度均匀取点（弧长参数化）。点与点的间距就是物体每帧走的距离。</p><div class="row" id="path"></div><table class="t" id="tPath"></table></div>
+    <div><h2>4 参数过渡：颜色与角度</h2><p class="sub">蓝色到橙色之间取 11 级。A 直接混合 sRGB 的红绿蓝三个数；B 在 OKLCH（明度、彩度、色相）里插值，色相走较短的一边。下表用 OKLCH 测量每一级。最后一行是角度：从 350° 转到 10°。</p><div class="row" id="col"></div><table class="t" id="tCol"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const fig = (host, cv, cap) => { const f = document.createElement('figure'); f.append(cv); f.insertAdjacentHTML('beforeend', `<figcaption>${cap}</figcaption>`); host.append(f); };
+const fx = (x, n) => x.toFixed(n).replace(/^-(0(\.0+)?)$/, '$1');   // 不显示“-0”
+const canvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); return c; };
+// ---------- 1 缓动 ----------
+const EASE = {
+  '匀速': t => t,
+  '缓入缓出（三次）': t => t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2,
+  '回弹（easeOutBack）': t => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * (t - 1) ** 3 + c1 * (t - 1) ** 2; },
+  '弹簧（阻尼比 0.5）': t => { const z = 0.5, w0 = 10, wd = w0 * Math.sqrt(1 - z * z); return 1 - Math.exp(-z * w0 * t) * (Math.cos(wd * t) + z * w0 / wd * Math.sin(wd * t)); } };
+const COLORS = ['#9aa2b1', '#2f6fdb', '#b3261e', '#1f7a4d'];
+function easing() {
+  const c = canvas(250, 160), g = c.getContext('2d'), X = t => 14 + t * 226, Y = y => 140 - y * 110, out = {};
+  g.strokeStyle = '#dde1e7'; g.beginPath(); g.moveTo(X(0), Y(0)); g.lineTo(X(1), Y(0)); g.moveTo(X(0), Y(1)); g.lineTo(X(1), Y(1)); g.stroke();
+  Object.entries(EASE).forEach(([name, f], i) => {
+    g.strokeStyle = COLORS[i]; g.lineWidth = 1.6; g.beginPath(); for (let k = 0; k <= 200; k++) { const t = k / 200; k ? g.lineTo(X(t), Y(f(t))) : g.moveTo(X(t), Y(f(t))); } g.stroke();
+    const h = 1e-4, v = t => (f(Math.min(1, t + h)) - f(Math.max(0, t - h))) / (Math.min(1, t + h) - Math.max(0, t - h));
+    let vmax = 0, ymax = 0; for (let k = 0; k <= 1000; k++) { const t = k / 1000; vmax = Math.max(vmax, Math.abs(v(t))); ymax = Math.max(ymax, f(t)); }
+    out[name] = { v0: v(0), v1: v(1), vmax, over: ymax - 1, end: f(1) };
+  });
+  fig($('ease'), c, Object.keys(EASE).map((n, i) => `<span class="key" style="background:${COLORS[i]}"></span>${n}`).join(''));
+  const cls = (x, bad) => bad ? 'poor' : 'good';
+  $('tEase').innerHTML = `<tr><th>曲线</th><th>开始速度</th><th>结束速度</th><th>最大速度</th><th>超过终点</th><th>t = 1 时的位置</th></tr>` + Object.entries(out).map(([n, o]) => `<tr><th>${n}</th><td class="num">${fx(o.v0, 2)}</td><td class="num">${fx(o.v1, 2)}</td><td class="num">${o.vmax.toFixed(2)}</td><td class="num">${o.over > 1e-3 ? (o.over * 100).toFixed(1) + '%' : '无'}</td><td class="num ${cls(0, Math.abs(o.end - 1) > 1e-3)}">${o.end.toFixed(3)}</td></tr>`).join('') + `<tr><td colspan="6">匀速在开始和结束时速度从 0 突然变成 1、再突然变回 0；回弹曲线一开始就以 4.7 倍的速度出发，适合响应用户操作的进入动画；弹簧没有固定的结束时间，在 t = 1 时还在摆动，需要按“速度和距离都足够小”判断停止。</td></tr>`;
+  return out;
+}
+// ---------- 2 打断 ----------
+function interrupt() {
+  const dt = 1 / 60, D = 200, dur = 0.6, iCut = 18, T = 1.2, out = {}, ease = EASE['缓入缓出（三次）'];
+  const c = canvas(250, 160), g = c.getContext('2d'), X = t => 14 + t / T * 226, Y = x => 140 - x / D * 110;
+  g.strokeStyle = '#dde1e7'; g.beginPath(); g.moveTo(X(iCut * dt), 10); g.lineTo(X(iCut * dt), 150); g.stroke();
+  const hermite = (x0, v0, x1, v1, d, s) => (2 * s ** 3 - 3 * s * s + 1) * x0 + (s ** 3 - 2 * s * s + s) * d * v0 + (-2 * s ** 3 + 3 * s * s) * x1 + (s ** 3 - s * s) * d * v1;
+  for (const v of ['A', 'B']) {
+    const xs = []; let plan = t => D * ease(Math.min(1, t / dur));
+    for (let i = 0; i * dt <= T + 1e-9; i++) {
+      if (i === iCut) {   // 打断：新计划从上一帧的位置（和速度）出发
+        const x0 = xs[i - 1], v0 = (xs[i - 1] - xs[i - 2]) / dt, t0 = (i - 1) * dt;
+        plan = v === 'A' ? t => x0 + (0 - x0) * ease(Math.min(1, (t - t0) / dur)) : t => { const s = Math.min(1, (t - t0) / dur); return hermite(x0, v0, 0, 0, dur, s); };
+      }
+      xs.push(plan(i * dt));
+    }
+    const vs = xs.slice(1).map((x1, i) => (x1 - xs[i]) / dt), jumps = vs.slice(1).map((v1, i) => Math.abs(v1 - vs[i]));
+    let stop = iCut - 1; while (stop < vs.length && vs[stop] > 0) stop++;   // 速度降到 0 以下（开始往回走）的那一帧
+    out[v] = { vBefore: vs[iCut - 2], vAfter: vs[iCut - 1], jumpAtCut: jumps[iCut - 2], maxJump: Math.max(...jumps), peak: Math.max(...xs), stopMs: (stop - (iCut - 1)) * dt * 1000 };
+    g.strokeStyle = v === 'A' ? '#b3261e' : '#2f6fdb'; g.lineWidth = 1.6; g.beginPath(); xs.forEach((x, i) => i ? g.lineTo(X(i * dt), Y(x)) : g.moveTo(X(0), Y(x))); g.stroke();
+  }
+  fig($('intr'), c, '<span class="key" style="background:#b3261e"></span>A：重新开始缓动 <span class="key" style="background:#2f6fdb"></span>B：保留速度');
+  $('tIntr').innerHTML = `<tr><th></th><th>打断前的速度</th><th>打断后第一帧的速度</th><th>一帧内的速度变化</th><th>从打断到开始往回走</th><th>最远到达</th></tr>` + ['A', 'B'].map(v => { const o = out[v]; return `<tr><th>${v}</th><td class="num">${o.vBefore.toFixed(0)} 像素/秒</td><td class="num">${fx(o.vAfter, 0)} 像素/秒</td><td class="num ${o.jumpAtCut > 300 ? 'poor' : 'good'}">${o.jumpAtCut.toFixed(0)} 像素/秒${o.jumpAtCut > 300 ? '（突然停住）' : ''}</td><td class="num">${o.stopMs.toFixed(0)} 毫秒</td><td class="num">${o.peak.toFixed(0)} 像素</td></tr>`; }).join('') + `<tr><td colspan="6">A 在一帧之内从全速变成几乎静止，再从 0 慢慢加速往回走，看起来像卡了一下。B 先减速再往回走，位置和速度都连续，代价是会多走一段。弹簧动画在改目标时同样保留当前速度。</td></tr>`;
+  return out;
+}
+// ---------- 3 路径 ----------
+const P = [[16, 130], [40, -40], [150, 190], [234, 20]];
+const bez = t => { const u = 1 - t; return [0, 1].map(k => u ** 3 * P[0][k] + 3 * u * u * t * P[1][k] + 3 * u * t * t * P[2][k] + t ** 3 * P[3][k]); };
+function arcTable(n = 400) { const L = [0]; let prev = bez(0); for (let i = 1; i <= n; i++) { const p = bez(i / n); L.push(L[i - 1] + Math.hypot(p[0] - prev[0], p[1] - prev[1])); prev = p; } return L; }
+function tAtLength(L, s) { let lo = 0, hi = L.length - 1; while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (L[mid] < s) lo = mid; else hi = mid; } const f = (s - L[lo]) / (L[hi] - L[lo] || 1); return (lo + f) / (L.length - 1); }
+function path() {
+  const N = 30, L = arcTable(), total = L[L.length - 1], out = {};
+  for (const v of ['A', 'B']) {
+    const c = canvas(250, 160), g = c.getContext('2d');
+    g.strokeStyle = '#dde1e7'; g.beginPath(); for (let i = 0; i <= 200; i++) { const p = bez(i / 200); i ? g.lineTo(...p) : g.moveTo(...p); } g.stroke();
+    const pts = []; for (let i = 0; i < N; i++) pts.push(bez(v === 'A' ? i / (N - 1) : tAtLength(L, total * i / (N - 1))));
+    g.fillStyle = v === 'A' ? '#b3261e' : '#2f6fdb'; pts.forEach(p => { g.beginPath(); g.arc(...p, 2.4, 0, 7); g.fill(); });
+    fig($('path'), c, v === 'A' ? 'A：t 均匀增加' : 'B：按弧长均匀取点');
+    const d = pts.slice(1).map((p, i) => Math.hypot(p[0] - pts[i][0], p[1] - pts[i][1])), mean = d.reduce((a, b) => a + b, 0) / d.length, sd = Math.sqrt(d.reduce((a, b) => a + (b - mean) ** 2, 0) / d.length);
+    out[v] = { min: Math.min(...d), max: Math.max(...d), cv: sd / mean };
+  }
+  out.total = total;
+  $('tPath').innerHTML = `<tr><th></th><th>最短间距</th><th>最长间距</th><th>最长／最短</th><th>间距的变异系数</th></tr>` + ['A', 'B'].map(v => { const o = out[v]; return `<tr><th>${v}</th><td class="num">${o.min.toFixed(1)} 像素</td><td class="num">${o.max.toFixed(1)} 像素</td><td class="num ${o.max / o.min > 1.1 ? 'poor' : 'good'}">${(o.max / o.min).toFixed(2)} 倍</td><td class="num ${o.cv > 0.05 ? 'poor' : 'good'}">${(o.cv * 100).toFixed(1)}%</td></tr>`; }).join('') + `<tr><td colspan="5">曲线全长 ${total.toFixed(0)} 像素；长度表用 400 段折线近似，用二分查找把“走过的长度”换成 t。</td></tr>`;
+  return out;
+}
+// ---------- 4 颜色与角度 ----------
+const toLin = c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4, toGam = c => c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055;
+function rgb2oklab([r, g, b]) { [r, g, b] = [r, g, b].map(toLin); const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b), m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b), s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b); return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s, 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s]; }
+function oklab2rgb([L, a, b]) { const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3, m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3, s = (L - 0.0894841775 * a - 1.2914855480 * b) ** 3; return [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s].map(toGam); }
+const lch = lab => [lab[0], Math.hypot(lab[1], lab[2]), (Math.atan2(lab[2], lab[1]) * 180 / Math.PI + 360) % 360];
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255);
+const shortHue = (h1, h2, t) => { let d = ((h2 - h1 + 540) % 360) - 180; return (h1 + d * t + 360) % 360; };
+function colors() {
+  const c1 = hex('#2f6fdb'), c2 = hex('#f2a93b'), N = 11, out = {};
+  const L1 = lch(rgb2oklab(c1)), L2 = lch(rgb2oklab(c2));
+  for (const v of ['A', 'B']) {
+    const steps = []; let clipped = 0;
+    for (let i = 0; i < N; i++) {
+      const t = i / (N - 1); let rgb;
+      if (v === 'A') rgb = c1.map((x, k) => x + (c2[k] - x) * t);
+      else { const L = L1[0] + (L2[0] - L1[0]) * t, C = L1[1] + (L2[1] - L1[1]) * t, h = shortHue(L1[2], L2[2], t) * Math.PI / 180; rgb = oklab2rgb([L, C * Math.cos(h), C * Math.sin(h)]); if (rgb.some(x => x < -1e-4 || x > 1 + 1e-4)) clipped++; rgb = rgb.map(x => Math.min(1, Math.max(0, x))); }
+      steps.push(rgb);
+    }
+    const cv = canvas(250, 34), g = cv.getContext('2d'); steps.forEach((rgb, i) => { g.fillStyle = `rgb(${rgb.map(x => Math.round(x * 255)).join(',')})`; g.fillRect(i * 250 / N, 0, 250 / N + 1, 34); });
+    fig($('col'), cv, v === 'A' ? 'A：混合 sRGB 数值' : 'B：在 OKLCH 里插值');
+    const m = steps.map(rgb => lch(rgb2oklab(rgb))), dL = m.slice(1).map((x, i) => x[0] - m[i][0]);
+    out[v] = { minC: Math.min(...m.map(x => x[1])), endC: Math.min(L1[1], L2[1]), dLmin: Math.min(...dL), dLmax: Math.max(...dL), clipped, midHue: m[5][2] };
+  }
+  const a1 = 350, a2 = 10, naive = a2 - a1, short = ((a2 - a1 + 540) % 360) - 180;
+  out.angle = { naive, short };
+  $('tCol').innerHTML = `<tr><th></th><th>最低彩度（两端较低者 ${out.A.endC.toFixed(3)}）</th><th>相邻两级明度差的范围</th><th>超出屏幕色域的级数</th></tr>` + ['A', 'B'].map(v => { const o = out[v]; return `<tr><th>${v}</th><td class="num ${o.minC < o.endC * 0.5 ? 'poor' : 'good'}">${o.minC.toFixed(3)}${o.minC < o.endC * 0.5 ? '（中间发灰）' : ''}</td><td class="num">${o.dLmin.toFixed(3)} ～ ${o.dLmax.toFixed(3)}</td><td class="num">${o.clipped}</td></tr>`; }).join('') + `<tr><th>角度</th><td colspan="3">直接相减走 ${naive}°（绕了一大圈）；取较短的一边走 ${short}°：<code>((b − a + 540) % 360) − 180</code>。</td></tr>`;
+  return out;
+}
+window.__ic = { run: () => ({ easing: easing(), interrupt: interrupt(), path: path(), colors: colors() }) };
+</script>
+</body>
+</html>
