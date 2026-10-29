@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>视觉检查：可复现的截图、主题与宽度、组件状态</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 4px 0 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } table.t tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .col { display: grid; gap: 6px; align-content: start; }
+  .shots { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
+  .shots figure { margin: 0; font-size: 11px; color: var(--muted); }
+  .shots img { display: block; border: 1px solid var(--line); border-radius: 6px; max-width: 100%; }
+  #stageWrap { position: absolute; left: 0; top: 0; z-index: -1; opacity: 0; pointer-events: none; }
+  #stageWrap.show { position: static; opacity: 1; pointer-events: auto; z-index: auto; }
+  /* 被检查的组件：课程卡片 */
+  .cc { border-radius: 10px; padding: 10px 12px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; font-size: 13px; }
+  .cc.light { background: #fff; color: #1d2330; border: 1px solid #dde1e7; } .cc.dark { background: #1c2230; color: #e8ebf1; border: 1px solid #343b4b; }
+  .cc .row { display: flex; gap: 8px; align-items: center; }
+  .cc .avatar { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 12px; flex: none; }
+  .cc .title { font-weight: 700; }
+  .cc .live { width: 8px; height: 8px; border-radius: 50%; background: #1f7a4d; flex: none; animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: 0.2; transform: scale(1.6); } }
+  .cc.paused .live { animation: none; }
+  .cc .tags span { display: inline-block; font-size: 11px; padding: 0 7px; border-radius: 9px; background: #e8eefb; color: #1f4fae; margin-right: 4px; }
+  .cc .meta { font-size: 12px; color: #444b57; }
+  .cc .foot { display: flex; gap: 10px; align-items: center; white-space: nowrap; }
+  .cc .price { font-size: 18px; font-weight: 700; min-width: 140px; }
+  .cc .buy { font: inherit; border: 0; border-radius: 6px; padding: 6px 18px; background: #2f6fdb; color: #fff; min-width: 170px; }
+  .cc .buy:hover { background: #2457b8; } .cc .buy:focus-visible { outline: 3px solid #f2a93b; outline-offset: 2px; }
+  .cc.fallback, .cc.fallback * { font-family: serif !important; }
+  /* 修正后的版本 */
+  .cc.fixed .foot { flex-wrap: wrap; white-space: normal; } .cc.fixed .price, .cc.fixed .buy { min-width: 0; }
+  .cc.fixed.dark .meta { color: #aeb6c5; } .cc.fixed .buy:disabled { background: #9aa2b1; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 截图比较的前提：同样的输入，每次得到同样的画面</h2>
+  <p class="sub">测试脚本对同一个组件连拍两张（间隔约 1 秒），把截图交给本页逐像素比较（任一通道差超过 24 算不同）。上面是不控制时的差异图（红色为不同的像素），下面的表是控制前后的差异像素数。</p>
+  <div class="shots" id="diffs"></div>
+  <table class="t" id="repro"></table><p class="m" id="mrepro"></p>
+</section>
+<section class="panel">
+  <div class="two">
+    <div class="col"><h2>2 主题 × 宽度：内容边界与对比度</h2><div class="shots" id="matrix"></div><table class="t" id="bounds"></table><p class="m" id="mbounds"></p></div>
+    <div class="col"><h2>3 组件状态：每个状态都要看得出来</h2><div class="shots" id="states"></div><table class="t" id="stateT"></table><p class="m" id="mstates"></p></div>
+  </div>
+</section>
+<div id="stageWrap"><div id="stage"></div></div>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ok = (b, y = '✓', n = '✗') => b ? `<span class="good">${y}</span>` : `<span class="poor">${n}</span>`;
+const mulberry32 = a => () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+const R = {};
+// ---------- 被检查的组件 ----------
+const COLORS = ['#c77700', '#2f6fdb', '#7b5ea7', '#0f766e', '#b3261e'];
+const TAGS = ['数据', '可视化', '入门', '12 周'];
+function render(o = {}) {
+  const { theme = 'light', width = 380, font = 'loaded', clock = 'real', seed = null, anim = 'run', fixed = false, disabled = false } = o;
+  const rnd = seed == null ? Math.random : mulberry32(seed);
+  const now = clock === 'fixed' ? new Date('2026-10-28T09:30:00') : new Date();
+  const tags = [...TAGS].sort(() => rnd() - 0.5);
+  const hh = n => String(n).padStart(2, '0');
+  $('stage').innerHTML = `<div class="cc ${theme} ${font === 'fallback' ? 'fallback' : ''} ${anim === 'paused' ? 'paused' : ''} ${fixed ? 'fixed' : ''}" style="width:${width}px" id="card">
+    <div class="row"><span class="avatar" style="background:${COLORS[Math.floor(rnd() * COLORS.length)]}">林</span><span class="title">数据可视化入门：从表格到交互图表</span><span class="live" title="正在直播"></span></div>
+    <div class="tags">${tags.map(t => `<span>${t}</span>`).join('')}</div>
+    <div class="meta">更新于 ${hh(now.getHours())}:${hh(now.getMinutes())}:${hh(now.getSeconds())}</div>
+    <div class="foot"><span class="price">¥1,299.00</span><button class="buy" ${disabled ? 'disabled' : ''}>立即报名</button></div></div>`;
+}
+// ---------- 内容边界与对比度（读浏览器的布局与计算样式） ----------
+const lin = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+const L = c => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+const rgb = s => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+function inspect() {
+  const card = $('card'), box = card.getBoundingClientRect(), cs = getComputedStyle(card), out = [], low = [];
+  // 内容边界 = 卡片减去边框与内边距；内容不能伸进内边距，更不能伸出卡片
+  const right = box.right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight), left = box.left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft);
+  for (const el of card.querySelectorAll('*')) { const r = el.getBoundingClientRect(); if (r.width && (r.right > right + 0.5 || r.left < left - 0.5)) out.push(`${el.className || el.tagName.toLowerCase()}（超出 ${Math.round(Math.max(r.right - right, left - r.left))} 像素）`); }
+  const bg = rgb(getComputedStyle(card).backgroundColor);
+  for (const el of card.querySelectorAll('.title, .meta, .price, .tags span')) { const own = getComputedStyle(el), b = own.backgroundColor.includes('rgba(0, 0, 0, 0)') ? bg : rgb(own.backgroundColor), f = rgb(own.color); const cr = (Math.max(L(f), L(b)) + 0.05) / (Math.min(L(f), L(b)) + 0.05); if (cr < 4.5) low.push(`${el.className || '标签'} ${cr.toFixed(2)}`); }
+  return { overflow: [...new Set(out)], low, h: Math.round(box.height) };
+}
+// ---------- 像素比较 ----------
+async function decode(b64) { const img = new Image(); img.src = 'data:image/png;base64,' + b64; await img.decode(); const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; const g = c.getContext('2d'); g.drawImage(img, 0, 0); return g.getImageData(0, 0, c.width, c.height); }
+async function diff(a64, b64, draw = false) {
+  const A = await decode(a64), B = await decode(b64), w = Math.min(A.width, B.width), h = Math.min(A.height, B.height);
+  let n = 0; const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'), out = g.createImageData(w, h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * A.width + x) * 4, j = (y * B.width + x) * 4, k = (y * w + x) * 4;
+    const d = Math.max(Math.abs(A.data[i] - B.data[j]), Math.abs(A.data[i + 1] - B.data[j + 1]), Math.abs(A.data[i + 2] - B.data[j + 2]));
+    if (d > 24) { n++; out.data.set([220, 30, 30, 255], k); } else { const v = 235 + (A.data[i] + A.data[i + 1] + A.data[i + 2]) / 3 * 0.08; out.data.set([v, v, v, 255], k); }
+  }
+  g.putImageData(out, 0, 0);
+  return { n, size: A.width === B.width && A.height === B.height ? null : `${A.width}×${A.height} 对 ${B.width}×${B.height}`, url: draw ? c.toDataURL() : null };
+}
+window.__vd = { render, inspect, diff, R, show: (id, html) => { $(id).innerHTML = html; }, fill: (id, html) => { $(id).innerHTML = html; } };
+render();
+</script>
+</body>
+</html>
