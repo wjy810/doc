@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>项目 01 响应式个人作品页：首页、项目列表、详情与验收</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  /* 验收报告（测试结束后才显示，不参与测量） */
+  .report { display: none; font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; color: #1d2330; background: #f4f4f1; padding: 16px 20px 4px; }
+  .report.on { display: block; }
+  .report section { background: #fff; border: 1px solid #dde1e7; border-radius: 12px; padding: 12px 14px; max-width: 1140px; margin-bottom: 12px; display: grid; gap: 6px; }
+  .report h2 { font-size: 14px; margin: 0; } .report .sub { color: #5b6475; margin: 0; font-size: 12px; }
+  .report table { border-collapse: collapse; width: 100%; font-size: 11.5px; } .report th, .report td { border-bottom: 1px solid #dde1e7; padding: 2px 5px; text-align: left; vertical-align: top; } .report th { color: #5b6475; font-weight: 400; } .report tr > th:first-child { white-space: nowrap; }
+  .report .good { color: #1f7a4d; } .report .poor { color: #b3261e; } .report .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; border: 1px solid #0002; }
+</style>
+<style id="vB">
+  /* 完成版：rem 单位、流式网格、预留图片比例、焦点可见 */
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --accent: #2f6fdb; --bg: #fbfaf7; --s1: .5rem; --s2: 1rem; --s3: 1.5rem; --s4: 2.5rem; }
+  #site { font: 1rem/1.7 "Noto Sans SC", system-ui, sans-serif; color: var(--ink); background: var(--bg); padding: var(--s3) var(--s2); }
+  #site * { box-sizing: border-box; }
+  #site nav { display: flex; gap: var(--s2); flex-wrap: wrap; align-items: center; max-width: 72rem; margin: 0 auto var(--s3); }
+  #site nav .brand { font-weight: 700; margin-right: auto; }
+  #site a { color: var(--accent); } #site a:focus-visible, #site button:focus-visible { outline: 3px solid #f2a93b; outline-offset: 2px; }
+  #site main, #site footer { max-width: 72rem; margin: 0 auto; }
+  #site h1 { font-size: clamp(1.6rem, 4vw, 2.4rem); line-height: 1.25; margin: 0 0 var(--s1); }
+  #site h2 { font-size: 1.25rem; margin: var(--s4) 0 var(--s2); }
+  #site .lead { color: var(--muted); max-width: 36em; margin: 0; }
+  #site .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(15rem, 100%), 1fr)); gap: var(--s3); list-style: none; padding: 0; margin: 0; }
+  #site .card a { display: block; text-decoration: none; color: inherit; border-radius: .5rem; }
+  #site .cover { width: 100%; height: auto; display: block; border-radius: .5rem; background: #e9e6df; object-fit: cover; }
+  #site .cover.missing { aspect-ratio: 4 / 3; display: grid; place-items: center; color: var(--muted); font-size: .875rem; }
+  #site .card h3 { font-size: 1.05rem; line-height: 1.4; margin: var(--s1) 0 0; overflow-wrap: anywhere; }
+  #site .meta { color: var(--muted); font-size: .875rem; margin: .25rem 0 0; }
+  #site .detail { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr)); gap: var(--s3); align-items: start; }
+  #site .detail h1 { overflow-wrap: anywhere; }
+  #site footer { margin-top: var(--s4); padding-top: var(--s2); border-top: 1px solid var(--line); color: var(--muted); }
+  #site footer a { overflow-wrap: anywhere; }   /* 邮箱地址在大字号下也能换行 */
+</style>
+<style id="vA" media="not all">
+  /* 初版：固定像素、固定宽度、标题不换行、去掉焦点框 */
+  #site { font: 15px/1.6 "Noto Sans SC", system-ui, sans-serif; color: #1d2330; background: #fbfaf7; padding: 24px; }
+  #site *:focus { outline: none; }
+  #site nav { display: flex; gap: 24px; width: 1100px; margin-bottom: 24px; } #site nav .brand { font-weight: 700; margin-right: auto; }
+  #site .nav-item { color: #2f6fdb; cursor: pointer; }
+  #site h1 { font-size: 36px; margin: 0 0 8px; white-space: nowrap; } #site h2 { font-size: 20px; margin: 40px 0 16px; } #site .lead { color: #5b6475; width: 640px; margin: 0; }
+  #site .grid { display: flex; flex-wrap: wrap; gap: 24px; width: 1100px; list-style: none; padding: 0; margin: 0; }
+  #site .card { width: 340px; } #site .card a { color: inherit; text-decoration: none; }
+  #site .cover { width: 100%; display: block; border-radius: 8px; }
+  #site .card h3 { font-size: 17px; margin: 8px 0 0; white-space: nowrap; overflow: hidden; }
+  #site .meta { color: #5b6475; font-size: 14px; margin: 4px 0 0; }
+  #site .detail { display: flex; gap: 24px; width: 1100px; } #site .detail > * { width: 538px; flex: none; }
+  #site footer { margin-top: 40px; color: #5b6475; }
+</style>
+</head>
+<body style="margin:0">
+<div class="report" id="report">
+  <section><h2>项目 01 验收：同一份内容、同一组检查，初版与完成版</h2><p class="sub">检查由脚本完成：三种宽度下的横向溢出、被裁掉的文字、页面上出现的 undefined／null；图片延迟 600 毫秒到达时的布局偏移；只用 Tab 键能到达哪些链接、焦点是否可见；把浏览器默认字号放大到 200% 后的表现。作品内容为演示而构造。</p><table id="tAcc"></table></section>
+  <section><div class="two"><div><h2>简短视觉规范</h2><table id="tSpec"></table></div><div><h2>内容边界记录</h2><table id="tEdge"></table></div></div></section>
+</div>
+<div id="site"></div>
+<script>
+const V = new URLSearchParams(location.search).get('v') === 'a' ? 'A' : 'B';
+if (V === 'A') { document.getElementById('vB').media = 'not all'; document.getElementById('vA').media = 'all'; }
+// 作品内容（为演示而构造）：包含长标题、不连续的长英文词、缺失年份、缺失封面与摘要、四种图片比例
+const WORKS = [
+  { title: '城市步行地图', year: 2025, role: '交互设计、前端', ratio: [16, 9], color: '#c9d8f2', summary: '把步行路线、补水点与遮阴路段放在同一张地图上。' },
+  { title: '可持续包装重新设计：从材料选择到回收标识的一整套视觉与交互系统（课程项目）', year: 2024, role: '视觉设计', ratio: [3, 4], color: '#d9e8d2', summary: '为一家茶饮品牌重做包装与回收说明。' },
+  { title: '声音日记', year: null, role: '创意编程', ratio: [1, 1], color: '#f2dcc9', summary: '每天录一段环境声，生成一张波形明信片。' },
+  { title: 'Typography-Specimen-for-a-Variable-Font-With-An-Extremely-Long-Name', year: 2023, role: '字体排印', ratio: [21, 9], color: '#e6d9f0', summary: '可变字体的样张网站。' },
+  { title: '社区菜园预约', year: 2022, role: 'UX 研究', ratio: null, color: null, summary: '' }];
+const svgCover = (w, i) => 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${w.ratio[0] * 40}" height="${w.ratio[1] * 40}"><rect width="100%" height="100%" fill="${w.color}"/><text x="50%" y="50%" font-size="${w.ratio[1] * 6}" text-anchor="middle" fill="#1d2330" opacity=".55">${w.ratio.join(':')}</text></svg>`);
+const yearText = w => V === 'A' ? w.year : (w.year ?? '年份未填写');
+function cover(w, i) {
+  if (!w.ratio) return V === 'A' ? `<div class="cover"></div>` : `<div class="cover missing">暂无封面</div>`;
+  const size = V === 'B' ? `width="${w.ratio[0] * 40}" height="${w.ratio[1] * 40}"` : '';   // 写明宽高，浏览器先按比例留出位置
+  return `<img class="cover" alt="${V === 'B' ? w.title + '的封面' : ''}" ${size} data-src="${svgCover(w, i)}">`;
+}
+function card(w, i) {
+  const meta = V === 'A' ? `${w.year} · ${w.role}` : [w.year ?? '年份未填写', w.role].join(' · ');
+  const summary = V === 'A' ? `<p class="meta">${w.summary || undefined}</p>` : (w.summary ? `<p class="meta">${w.summary}</p>` : '');
+  const link = V === 'A' ? `<div onclick="location.hash='#detail'">` : `<a href="#detail">`;
+  return `<li class="card">${link}${cover(w, i)}<h3>${w.title}</h3><p class="meta">${meta}</p>${summary}${V === 'A' ? '</div>' : '</a>'}</li>`;
+}
+const nav = V === 'A'
+  ? `<nav><span class="brand">示例作者</span><span class="nav-item">首页</span><span class="nav-item">项目</span><span class="nav-item">联系</span></nav>`
+  : `<nav aria-label="主导航"><span class="brand">示例作者</span><a href="#home">首页</a><a href="#work">项目</a><a href="#contact">联系</a></nav>`;
+const d = WORKS[1];
+document.getElementById('site').innerHTML = nav + `<main>
+  <section id="home"><h1>做能用、也耐看的界面</h1><p class="lead">交互设计与前端开发。下面是精选的三个项目，以及全部作品列表。</p><h2>精选项目</h2><ul class="grid">${WORKS.slice(0, 3).map(card).join('')}</ul></section>
+  <section id="work"><h2>全部项目</h2><ul class="grid">${WORKS.map(card).join('')}</ul></section>
+  <section id="detail"><h2>项目详情</h2><div class="detail">${cover(d, 1)}<div><h1>${d.title}</h1><p class="meta">${yearText(d)} · ${d.role}</p><p>${d.summary}项目从调研门店回收点开始，确定三类材料与对应的回收标识，再统一包装上的信息层级。</p>${V === 'A' ? '<span class="nav-item">← 返回列表</span>' : '<a href="#work">← 返回列表</a>'}</div></div></section>
+</main><footer id="contact">联系：<a href="mailto:example@example.com">example@example.com</a></footer>`;
+// 慢速资源：封面在 600 毫秒后才到达
+setTimeout(() => document.querySelectorAll('img[data-src]').forEach(img => img.src = img.dataset.src), 600);
+// ---------- 报告（由验收脚本填入数据） ----------
+window.__pf = {
+  V,
+  measure() {   // 在当前宽度下测量 #site 内的问题
+    const site = document.getElementById('site'), W = document.documentElement.clientWidth;
+    let right = 0, clipped = 0; site.querySelectorAll('*').forEach(el => { const r = el.getBoundingClientRect(); if (r.width) right = Math.max(right, r.right); const cs = getComputedStyle(el); if (/hidden|clip/.test(cs.overflowX) && el.scrollWidth > el.clientWidth + 1) clipped++; });
+    const bad = (site.innerText.match(/\b(undefined|null|NaN)\b/g) || []).length;
+    return { overflow: Math.max(0, Math.round(right - W)), clipped, bad };
+  },
+  report(R) {
+    const cell = (x, ok) => `<td class="${ok ? 'good' : 'poor'}">${x}</td>`, rows = [
+      ['360 宽：横向溢出', v => `${R[v].w360.overflow} 像素`, v => R[v].w360.overflow === 0],
+      ['768 宽：横向溢出', v => `${R[v].w768.overflow} 像素`, v => R[v].w768.overflow === 0],
+      ['1280 宽：横向溢出', v => `${R[v].w1280.overflow} 像素`, v => R[v].w1280.overflow === 0],
+      ['被裁掉的文字（三种宽度合计）', v => R[v].w360.clipped + R[v].w768.clipped + R[v].w1280.clipped, v => R[v].w360.clipped + R[v].w768.clipped + R[v].w1280.clipped === 0],
+      ['页面上的 undefined／null', v => R[v].w1280.bad, v => R[v].w1280.bad === 0],
+      ['图片到达时的布局偏移（CLS）', v => R[v].cls.toFixed(3), v => R[v].cls < 0.1],
+      ['Tab 键能到达的链接', v => `${R[v].tab.stops} 个（导航 ${R[v].tab.nav} 个）`, v => R[v].tab.nav >= 3],
+      ['焦点可见', v => `${R[v].tab.visible} / ${R[v].tab.stops}`, v => R[v].tab.stops > 0 && R[v].tab.visible === R[v].tab.stops],
+      ['默认字号放大到 200%：正文字号', v => `${R[v].zoom.before} → ${R[v].zoom.after} 像素`, v => R[v].zoom.after >= R[v].zoom.before * 1.9],
+      ['默认字号放大到 200%：360 宽横向溢出', v => `${R[v].zoom.overflow} 像素`, v => R[v].zoom.overflow === 0]];
+    document.getElementById('tAcc').innerHTML = `<tr><th>检查</th><th>初版</th><th>完成版</th></tr>` + rows.map(([n, f, ok]) => `<tr><th>${n}</th>${cell(f('A'), ok('A'))}${cell(f('B'), ok('B'))}</tr>`).join('');
+    document.getElementById('tSpec').innerHTML = `<tr><th>项目</th><th>规则</th></tr><tr><th>字号</th><td>正文 1rem；标题 clamp(1.6rem, 4vw, 2.4rem)；说明 0.875rem。全部用 rem，跟随用户的默认字号</td></tr><tr><th>间距</th><td>0.5、1、1.5、2.5rem 四级</td></tr><tr><th>颜色</th><td><span class="swatch" style="background:#1d2330"></span>正文 <span class="swatch" style="background:#5b6475"></span>次要 <span class="swatch" style="background:#2f6fdb"></span>链接 <span class="swatch" style="background:#f2a93b"></span>焦点框</td></tr><tr><th>网格</th><td>每列最小 15rem，自动换行；详情页两栏，窄屏变一栏</td></tr><tr><th>图片</th><td>写明宽高，按原比例显示；没有封面时显示“暂无封面”占位</td></tr>`;
+    document.getElementById('tEdge').innerHTML = `<tr><th>内容边界</th><th>处理方式</th></tr><tr><th>长标题（40 字）</th><td>标题换行，不截断</td></tr><tr><th>不能断开的长英文词</th><td><code>overflow-wrap: anywhere</code></td></tr><tr><th>缺少年份</th><td>显示“年份未填写”</td></tr><tr><th>缺少封面与摘要</th><td>封面用 4:3 占位；摘要整段省略</td></tr><tr><th>图片比例 21:9 到 3:4</th><td>按原比例显示，不裁切</td></tr><tr><th>图片到达较慢</th><td>宽高写在标签上，先留出位置</td></tr>`;
+    document.getElementById('report').classList.add('on');
+  } };
+</script>
+</body>
+</html>
