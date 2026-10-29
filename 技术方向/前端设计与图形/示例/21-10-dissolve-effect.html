@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>项目 09 可控的实时特效：溶解效果的原理、参数、预设与检查</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; } table.t tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .stage { position: relative; width: 100%; max-width: 520px; aspect-ratio: 16 / 10; background: #1d2330; border-radius: 8px; overflow: hidden; }
+  .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .msg { position: absolute; left: 8px; bottom: 8px; right: 8px; background: #fff6e0; color: #6b4a00; font-size: 12px; padding: 2px 8px; border-radius: 6px; }
+  .msg:empty { display: none; }
+  .ctrls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; } .ctrls button, .ctrls select { font: inherit; } .ctrls label { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; }
+  @media (max-width: 700px) { .stage { aspect-ratio: 4 / 3; } .two { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div><h2 id="ver"></h2><div class="stage" id="stage"><canvas id="cv" width="512" height="320"></canvas><p class="msg" id="msg" role="status"></p></div>
+      <div class="ctrls" id="ctrls"><button id="play" type="button">暂停</button><button id="reset" type="button">重置</button><label>进度 <input id="prog" type="range" min="0" max="1" step="0.01" value="0"></label><label>预设 <select id="preset"><option value="soft">柔和</option><option value="burn">灼烧</option><option value="pixel">像素</option></select></label></div></div>
+    <div><h2>最小原理演示：每个位置一个噪声值，与“进度”比较</h2><p class="sub">噪声值大于进度的位置保留（蓝），比进度小的位置消失（空）；刚好在进度附近一小段（边缘宽度）的位置画成发光的边（橙）。进度从 0 走到 1，图像就一点点“溶解”。</p><canvas id="demo" width="560" height="150"></canvas>
+      <h2>参数与预设</h2><table class="t" id="tParams"></table></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>验收：初版与完成版运行同一组检查</h2><table class="t" id="tAcc"></table></div>
+    <div><h2>性能对比：同一个溶解，在显卡着色器与 JavaScript 逐像素计算</h2><table class="t" id="tPerf"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const Q = new URLSearchParams(location.search), V = Q.get('v') === 'a' ? 'A' : 'B';
+$('ver').textContent = (V === 'A' ? '初版' : '完成版') + '：图片溶解';
+const PRESETS = { soft: { scale: 4, edge: 0.10, color: [1.0, 0.75, 0.35], pixel: 0 }, burn: { scale: 9, edge: 0.04, color: [1.0, 0.35, 0.05], pixel: 0 }, pixel: { scale: 6, edge: 0.06, color: [0.4, 0.8, 1.0], pixel: 24 } };
+$('tParams').innerHTML = `<tr><th>参数</th><th>范围</th><th>作用</th></tr><tr><th>进度</th><td>0—1</td><td>0 为完整图片，1 为完全消失</td></tr><tr><th>噪声尺度</th><td>2—12</td><td>溶解斑块的大小：越大斑块越细碎</td></tr><tr><th>边缘宽度</th><td>0—0.2</td><td>发光边的宽度（按噪声值计）</td></tr><tr><th>边缘颜色</th><td>RGB</td><td>发光边的颜色</td></tr><tr><th>像素化</th><td>0 或格数</td><td>把噪声取到格子上，得到方块状的溶解</td></tr><tr><th>预设</th><td>柔和、灼烧、像素</td><td>${Object.entries(PRESETS).map(([k, p]) => `${({ soft: '柔和', burn: '灼烧', pixel: '像素' })[k]}：尺度 ${p.scale}、边缘 ${p.edge}${p.pixel ? '、' + p.pixel + ' 格' : ''}`).join('；')}</td></tr>`;
+// ---------- 噪声（与着色器相同的公式，用于原理演示和 CPU 版本） ----------
+const fract = x => x - Math.floor(x), hash2 = (x, y) => fract(Math.sin(x * 127.1 + y * 311.7) * 43758.5453);
+function vnoise(x, y) { const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy, ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy); const a = hash2(ix, iy), b = hash2(ix + 1, iy), c = hash2(ix, iy + 1), d = hash2(ix + 1, iy + 1); return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy; }
+(function demo() { const g = $('demo').getContext('2d'), N = 64, prog = 0.45, edge = 0.08, Y = v => 135 - v * 120; g.fillStyle = '#fff'; g.fillRect(0, 0, 560, 150);
+  for (let i = 0; i < N; i++) { const n = vnoise(i * 0.12, 0.5), x = 10 + i * 7; g.fillStyle = n < prog ? '#eef0f3' : n < prog + edge ? '#f2a93b' : '#2f6fdb'; g.fillRect(x, Y(n), 5, n * 120); }
+  g.strokeStyle = '#b3261e'; g.beginPath(); g.moveTo(8, Y(prog)); g.lineTo(456, Y(prog)); g.stroke(); g.strokeStyle = '#a15c00'; g.setLineDash([4, 3]); g.beginPath(); g.moveTo(8, Y(prog + edge)); g.lineTo(456, Y(prog + edge)); g.stroke(); g.setLineDash([]);
+  g.font = '11px "Noto Sans SC"'; g.fillStyle = '#a15c00'; g.fillText('边缘上限 0.53', 462, Y(prog + edge) + 4); g.fillStyle = '#b3261e'; g.fillText('进度 0.45', 462, Y(prog) + 8); })();
+// ---------- 输入图片 ----------
+function placeholder() { const c = document.createElement('canvas'); c.width = 512; c.height = 320; const g = c.getContext('2d'); const gr = g.createLinearGradient(0, 0, 512, 320); gr.addColorStop(0, '#2f7f73'); gr.addColorStop(1, '#f2a93b'); g.fillStyle = gr; g.fillRect(0, 0, 512, 320); g.fillStyle = '#ffffffcc'; g.font = '700 40px "Noto Sans SC"'; g.fillText('湖边樱花步道', 120, 175); return c; }
+const imgSrc = Q.get('img') === 'missing' ? 'missing-photo.png' : 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="512" height="320"><defs><linearGradient id="s" x2="0" y2="1"><stop offset="0" stop-color="#9cc9e8"/><stop offset="1" stop-color="#f6e3d3"/></linearGradient></defs><rect width="512" height="320" fill="url(#s)"/><circle cx="400" cy="80" r="36" fill="#f2a93b"/><path d="M0 230 L120 150 L230 220 L340 130 L512 240 L512 320 L0 320 Z" fill="#2f7f73"/><path d="M0 270 Q256 230 512 280 L512 320 L0 320 Z" fill="#1e3a3a"/></svg>');
+// ---------- WebGL ----------
+const cv = $('cv'), gl = cv.getContext('webgl', { preserveDrawingBuffer: true });
+const vs = 'attribute vec2 p; varying vec2 uv; void main(){ uv = p * 0.5 + 0.5; gl_Position = vec4(p, 0.0, 1.0); }';
+const fs = `precision highp float; varying vec2 uv; uniform sampler2D img; uniform float prog, scale, edge, pix, aspect; uniform vec3 ecol;
+float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float n(vec2 p){ vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f); float a = h(i), b = h(i + vec2(1, 0)), c = h(i + vec2(0, 1)), d = h(i + vec2(1, 1)); return a + (b - a) * u.x + (c - a) * u.y + (a - b - c + d) * u.x * u.y; }
+void main(){ vec2 q = vec2(uv.x * aspect, uv.y) * scale; if (pix > 0.0) q = floor(q * pix / scale) / pix * scale; float v = n(q); vec4 c = texture2D(img, vec2(uv.x, 1.0 - uv.y));
+  if (v < prog) discard; float e = 1.0 - smoothstep(prog, prog + edge, v); gl_FragColor = vec4(mix(c.rgb, ecol, e * step(0.001, prog)), 1.0); }`;
+function sh(type, src) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; }
+const prog = gl.createProgram(); gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(prog); gl.useProgram(prog);
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+const loc = gl.getAttribLocation(prog, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+const U = k => gl.getUniformLocation(prog, k), tex = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, tex); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+const upload = src => { gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src); };
+let P = { prog: 0, preset: 'soft', playing: true }, frames = 0, raf = 0, last = 0;
+function draw() {
+  const pr = PRESETS[P.preset]; gl.viewport(0, 0, cv.width, cv.height); gl.clearColor(0.11, 0.14, 0.19, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.uniform1f(U('prog'), P.prog); gl.uniform1f(U('scale'), pr.scale); gl.uniform1f(U('edge'), pr.edge); gl.uniform1f(U('pix'), pr.pixel); gl.uniform3fv(U('ecol'), pr.color);
+  gl.uniform1f(U('aspect'), V === 'A' ? 1.6 : cv.width / cv.height);   // 初版把宽高比写死
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); frames++;
+}
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function tick(t) { const dt = last ? (t - last) / 1000 : 0; last = t; if (V === 'A' || P.playing) { if (P.playing) { P.prog = (P.prog + dt * 0.25) % 1; $('prog').value = P.prog; } draw(); } if (V === 'A' || P.playing) raf = requestAnimationFrame(tick); else raf = 0; }   // 初版暂停后仍每帧重画
+function start() { if (!raf) { last = 0; raf = requestAnimationFrame(tick); } }
+const img = new Image();
+img.onload = () => { upload(img); if (V === 'B' && reduce) { P.playing = false; $('play').textContent = '播放'; $('msg').textContent = '已按系统设置减少动态效果：拖动“进度”查看溶解，或点“播放”。'; draw(); } else start(); };
+img.onerror = () => { if (V === 'B') { upload(placeholder()); $('msg').textContent = '图片没有加载成功，暂时用占位图案代替。'; } start(); };   // 初版：纹理是空的，画面全黑
+img.src = imgSrc;
+// ---------- 控件 ----------
+$('play').onclick = () => { P.playing = !P.playing; $('play').textContent = P.playing ? '暂停' : '播放'; if (P.playing) start(); };
+$('reset').onclick = () => { if (V === 'A') { $('prog').value = 0; return; } P.prog = 0; $('prog').value = 0; draw(); };   // 初版只把滑块拨回 0
+$('prog').oninput = e => { P.prog = +e.target.value; if (V === 'B') draw(); };
+$('preset').onchange = e => { P.preset = e.target.value; if (V === 'B') draw(); };
+if (V === 'B') new ResizeObserver(() => { const r = cv.getBoundingClientRect(), d = Math.min(devicePixelRatio, 2); cv.width = Math.round(r.width * d); cv.height = Math.round(r.height * d); draw(); }).observe(cv);   // 绘图缓冲跟随显示尺寸
+// ---------- 测量接口 ----------
+function hashCanvas() { const px = new Uint8Array(cv.width * cv.height * 4); gl.readPixels(0, 0, cv.width, cv.height, gl.RGBA, gl.UNSIGNED_BYTE, px); let hh = 2166136261; for (let i = 0; i < px.length; i += 13) { hh ^= px[i]; hh = Math.imul(hh, 16777619); } return (hh >>> 0).toString(16); }
+function centerPixel() { const px = new Uint8Array(4); gl.readPixels(cv.width >> 1, cv.height >> 2, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); return [...px.slice(0, 3)]; }
+function cpuFrame(w, h, progv) { const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'), src = placeholder(), sd = src.getContext('2d').getImageData(0, 0, 512, 320).data, out = g.createImageData(w, h), pr = PRESETS.soft, t0 = performance.now();
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const u = x / w, v = 1 - y / h, n = vnoise(u * (w / h) * pr.scale, v * pr.scale), k = (y * w + x) * 4; if (n < progv) { out.data[k + 3] = 0; continue; } const e = 1 - Math.min(1, Math.max(0, (n - progv) / pr.edge)), si = (Math.floor(v * 319) * 512 + Math.floor(u * 511)) * 4; for (let j = 0; j < 3; j++) out.data[k + j] = sd[si + j] * (1 - e) + pr.color[j] * 255 * e; out.data[k + 3] = 255; }
+  g.putImageData(out, 0, 0); return performance.now() - t0; }
+function gpuFrame(n) { const t0 = performance.now(); for (let i = 0; i < n; i++) { P.prog = 0.3 + i * 0.001; draw(); } gl.finish(); const px = new Uint8Array(4); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); return (performance.now() - t0) / n; }
+window.__dv = { V, P, frames: () => frames, hashCanvas, centerPixel, cpuFrame, gpuFrame, draw, size: () => ({ bw: cv.width, bh: cv.height, cw: cv.clientWidth, ch: cv.clientHeight }), msg: () => $('msg').textContent,
+  report(R, perf) {
+    const rows = [['暂停 1 秒内重画的帧数', 'pause'], ['暂停后点“重置”', 'reset'], ['窄屏（4:3）时的画面比例', 'resize'], ['图片加载失败', 'missing'], ['系统要求减少动态效果', 'reduced']];
+    $('tAcc').innerHTML = `<tr><th>检查</th><th>初版</th><th>完成版</th></tr>` + rows.map(([n, k]) => `<tr><th>${n}</th>${['A', 'B'].map(v => `<td class="${R[v][k].ok ? 'good' : 'poor'}">${R[v][k].text}</td>`).join('')}</tr>`).join('');
+    $('tPerf').innerHTML = `<tr><th>做法</th><th>每帧耗时（${perf.w} × ${perf.h}）</th><th>说明</th></tr><tr><th>WebGL 片元着色器</th><td>${perf.gpu.toFixed(2)} 毫秒</td><td>每个像素并行计算；这里是软件模拟的显卡，真实显卡更快</td></tr><tr><th>JavaScript 逐像素</th><td>${perf.cpu.toFixed(1)} 毫秒</td><td>同一个公式，在主线程逐个像素算，再写回画布</td></tr><tr><td colspan="3">两者相差 ${(perf.cpu / perf.gpu).toFixed(0)} 倍。JavaScript 版本超过一帧的预算（16.7 毫秒）时，会卡住页面上的其他交互。</td></tr>`;
+  } };
+</script>
+</body>
+</html>
