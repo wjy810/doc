@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>图论、几何算法与优化：寻路、自动布局、参数估计与逆向渲染</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; } .row figure { margin: 0; font-size: 11px; color: var(--muted); } .row canvas { display: block; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div><h2>1 地图寻路：图上的最短路径</h2><p class="sub">40 × 24 的格子地图，黑色是障碍，只能上下左右走。把每个格子看成图的节点、相邻格子之间连一条边。A“每步走向离终点最近的相邻格”；B1 Dijkstra 从起点按距离一圈圈向外搜索；B2 A* 在 Dijkstra 的基础上加上“到终点的估计距离”优先搜索。浅色是搜索过的格子。</p><div class="row" id="path"></div><table class="t" id="tPath"></table></div>
+    <div><h2>2 自动布局与连线：减少交叉</h2><p class="sub">一个 3 × 4 的网格图（12 个节点、17 条边，可以画成没有交叉）。A 随机摆放；B 用力导向布局：相连的节点互相吸引、所有节点互相排斥，逐步降低“温度”。交叉数用线段相交测试统计（几何算法里最常用的空间关系判断之一）。</p><div class="row" id="lay"></div><table class="t" id="tLay"></table></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>3 参数估计：从录下来的运动反推弹簧参数</h2><p class="sub">一段 1 秒、每秒 60 个采样的位置记录（模拟数据：由角频率 12、阻尼比 0.35 的弹簧生成，加了标准差 0.02 的噪声）。目标是找到让模型曲线与记录最接近的参数：最小化误差平方和。用 Nelder–Mead 单纯形法，从两个不同的初值出发；再试一次只用前 6 个采样的数据。</p><div class="row" id="fit"></div><table class="t" id="tFit"></table></div>
+    <div><h2>4 逆向渲染（最小版）：从图像反推光照方向</h2><p class="sub">一个漫反射球（亮度 = 反照率 × max(0, 法线·光照方向)，加噪声）。正向渲染是“已知光照算图像”；逆向是“已知图像求光照”。A 取最亮像素的法线当光照方向；B 用球上所有亮像素做线性最小二乘。右边两幅是按估计结果重新渲染的图。</p><div class="row" id="inv"></div><table class="t" id="tInv"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const fig = (host, cv, cap) => { const f = document.createElement('figure'); f.append(cv); f.insertAdjacentHTML('beforeend', `<figcaption>${cap}</figcaption>`); host.append(f); };
+const canvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); return c; };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const normal = R => Math.sqrt(-2 * Math.log(1 - R())) * Math.cos(2 * Math.PI * R());
+// ---------- 1 寻路 ----------
+const GW = 40, GH = 24, start = [4, 12], goal = [35, 12];
+const wall = new Set(); const W = (x, y) => wall.add(y * GW + x);
+for (let y = 5; y <= 19; y++) W(16, y); for (let x = 8; x <= 16; x++) { W(x, 5); W(x, 19); }   // 开口朝向起点的 U 形
+for (let y = 0; y <= 9; y++) W(26, y); for (let y = 14; y <= 23; y++) W(30, y);
+const nb = i => { const x = i % GW, y = (i / GW) | 0, r = []; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx >= 0 && ny >= 0 && nx < GW && ny < GH && !wall.has(ny * GW + nx)) r.push(ny * GW + nx); } return r; };
+const man = (i, j) => Math.abs(i % GW - j % GW) + Math.abs(((i / GW) | 0) - ((j / GW) | 0));
+function greedy(s, t) { const seen = new Set([s]), path = [s]; let c = s; for (let k = 0; k < 2000 && c !== t; k++) { const n = nb(c).filter(j => !seen.has(j)).sort((a, b) => man(a, t) - man(b, t))[0]; if (n === undefined) break; seen.add(n); path.push(n); c = n; } return { path, seen, reached: c === t }; }
+function search(s, t, h) {   // h = 0 时就是 Dijkstra
+  const g = new Map([[s, 0]]), prev = new Map(), open = [[h(s), s]], closed = new Set();
+  while (open.length) {
+    let bi = 0; for (let k = 1; k < open.length; k++) if (open[k][0] < open[bi][0]) bi = k;   // 简化的优先队列：线性查找最小值
+    const [, c] = open.splice(bi, 1)[0]; if (closed.has(c)) continue; closed.add(c); if (c === t) break;
+    for (const n of nb(c)) { const ng = g.get(c) + 1; if (ng < (g.get(n) ?? Infinity)) { g.set(n, ng); prev.set(n, c); open.push([ng + h(n), n]); } }
+  }
+  const path = []; if (prev.has(t)) { for (let c = t; c !== undefined; c = prev.get(c)) path.unshift(c); }
+  return { path, seen: closed, reached: path.length > 0 };
+}
+function pathfinding() {
+  const s = start[1] * GW + start[0], t = goal[1] * GW + goal[0], out = {};
+  const runs = { 'A 贪心': greedy(s, t), 'B1 Dijkstra': search(s, t, () => 0), 'B2 A*': search(s, t, i => man(i, t)) };
+  for (const [name, r] of Object.entries(runs)) {
+    const c = canvas(GW * 4 + 2, GH * 4 + 2), g = c.getContext('2d'), cell = (i, col) => { g.fillStyle = col; g.fillRect(1 + (i % GW) * 4, 1 + ((i / GW) | 0) * 4, 4, 4); };
+    r.seen.forEach(i => cell(i, '#dbe6fb')); wall.forEach(i => cell(i, '#1d2330')); r.path.forEach(i => cell(i, name.startsWith('A') ? '#b3261e' : '#2f6fdb')); cell(s, '#1f7a4d'); cell(t, '#a15c00');
+    fig($('path'), c, name); out[name] = { reached: r.reached, len: r.path.length - 1, seen: r.seen.size };
+  }
+  $('tPath').innerHTML = `<tr><th></th><th>是否到达</th><th>路径长度（步）</th><th>搜索过的格子</th></tr>` + Object.entries(out).map(([n, o]) => `<tr><th>${n}</th><td class="${o.reached ? 'good' : 'poor'}">${o.reached ? '到达' : '卡在 U 形里'}</td><td class="num">${o.reached ? o.len : '—'}</td><td class="num">${o.seen}</td></tr>`).join('') + `<tr><td colspan="4">A* 的估计距离（曼哈顿距离）从不高估真实距离，所以找到的路径和 Dijkstra 一样短，但搜索的格子更少。连线工具的“绕开图形的折线”、地图导航都是同一类问题。</td></tr>`;
+  return out;
+}
+// ---------- 2 自动布局 ----------
+const NODES = 12, EDGES = []; for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) { const i = r * 4 + c; if (c < 3) EDGES.push([i, i + 1]); if (r < 2) EDGES.push([i, i + 4]); }
+const cross = (p1, p2, p3, p4) => { const d = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]); return d(p1, p2, p3) * d(p1, p2, p4) < 0 && d(p3, p4, p1) * d(p3, p4, p2) < 0; };
+const crossings = P => { let n = 0; for (let a = 0; a < EDGES.length; a++) for (let b = a + 1; b < EDGES.length; b++) { const [i, j] = EDGES[a], [k, l] = EDGES[b]; if (i === k || i === l || j === k || j === l) continue; if (cross(P[i], P[j], P[k], P[l])) n++; } return n; };
+function force(P, W, H, iters = 300) {
+  P = P.map(p => [...p]); const k = Math.sqrt(W * H / NODES) * 0.75; let temp = W / 8;
+  for (let it = 0; it < iters; it++) {
+    const D = P.map(() => [0, 0]);
+    for (let i = 0; i < NODES; i++) for (let j = 0; j < NODES; j++) if (i !== j) { const dx = P[i][0] - P[j][0], dy = P[i][1] - P[j][1], d = Math.hypot(dx, dy) || 0.01, f = k * k / d; D[i][0] += dx / d * f; D[i][1] += dy / d * f; }   // 排斥
+    for (const [i, j] of EDGES) { const dx = P[i][0] - P[j][0], dy = P[i][1] - P[j][1], d = Math.hypot(dx, dy) || 0.01, f = d * d / k; D[i][0] -= dx / d * f; D[i][1] -= dy / d * f; D[j][0] += dx / d * f; D[j][1] += dy / d * f; }   // 吸引
+    for (let i = 0; i < NODES; i++) { const l = Math.hypot(...D[i]) || 1, m = Math.min(l, temp); P[i][0] = Math.min(W - 10, Math.max(10, P[i][0] + D[i][0] / l * m)); P[i][1] = Math.min(H - 10, Math.max(10, P[i][1] + D[i][1] / l * m)); }
+    temp *= 0.985;
+  }
+  return P;
+}
+function layout() {
+  const W = 166, H = 140, R = rng(17), out = {}, rand = () => Array.from({ length: NODES }, () => [10 + R() * (W - 20), 10 + R() * (H - 20)]);
+  const P0 = rand(), starts = [P0, ...Array.from({ length: 7 }, rand)], results = starts.map(p => force(p, W, H)), single = results[0], worst = results.reduce((a, b) => crossings(b) > crossings(a) ? b : a);
+  const stats = P => { const L = EDGES.map(([i, j]) => Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1])), m = L.reduce((a, b) => a + b, 0) / L.length, sd = Math.sqrt(L.reduce((a, b) => a + (b - m) ** 2, 0) / L.length); let md = Infinity; for (let i = 0; i < NODES; i++) for (let j = i + 1; j < NODES; j++) md = Math.min(md, Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1])); return { cross: crossings(P), cv: sd / m, minD: md }; };
+  for (const [name, P] of [['A 随机摆放', P0], ['B 力导向（从 A 的位置出发）', single], ['B 力导向（另一个初始位置）', worst]]) {
+    const c = canvas(W, H), g = c.getContext('2d'); g.strokeStyle = '#9aa2b1'; EDGES.forEach(([i, j]) => { g.beginPath(); g.moveTo(...P[i]); g.lineTo(...P[j]); g.stroke(); });
+    g.fillStyle = name.startsWith('A') ? '#b3261e' : '#2f6fdb'; P.forEach(p => { g.beginPath(); g.arc(...p, 4, 0, 7); g.fill(); });
+    fig($('lay'), c, name.replace('（', '<br>（')); out[name] = stats(P);
+  }
+  out.allCross = results.map(crossings);
+  $('tLay').innerHTML = `<tr><th></th><th>边的交叉</th><th>边长的变异系数</th><th>最近两个节点的距离</th></tr>` + Object.entries(out).filter(([n]) => n !== 'allCross').map(([n, o]) => `<tr><th>${n}</th><td class="num ${o.cross ? 'poor' : 'good'}">${o.cross}</td><td class="num">${(o.cv * 100).toFixed(0)}%</td><td class="num">${o.minD.toFixed(1)} 像素</td></tr>`).join('') + `<tr><td colspan="4">8 个随机初始位置得到的交叉数：${out.allCross.join('、')}。力导向是在找能量的最低点，可能停在“扭了一下”的局部最低点（第三幅）；多换几个起点取最好的、或从一个好的初始布局出发，是常用的补救办法。</td></tr>`;
+  return out;
+}
+// ---------- 3 参数估计 ----------
+const springModel = (w, z, t) => { if (z >= 1 || w <= 0) return NaN; const wd = w * Math.sqrt(1 - z * z); return 1 - Math.exp(-z * w * t) * (Math.cos(wd * t) + z * w / wd * Math.sin(wd * t)); };
+function nelderMead(f, x0, steps, iters = 300) {
+  let S = [x0, ...x0.map((_, i) => x0.map((v, j) => j === i ? v + steps[i] : v))].map(x => ({ x, f: f(x) })); let it = 0;
+  for (; it < iters; it++) {
+    S.sort((a, b) => a.f - b.f); if (Math.abs(S[S.length - 1].f - S[0].f) < 1e-12) break;
+    const n = x0.length, c = x0.map((_, j) => S.slice(0, n).reduce((s, p) => s + p.x[j], 0) / n), w = S[n];
+    const at = k => c.map((cj, j) => cj + k * (w.x[j] - cj)), r = { x: at(-1) }; r.f = f(r.x);
+    if (r.f < S[0].f) { const e = { x: at(-2) }; e.f = f(e.x); S[n] = e.f < r.f ? e : r; }
+    else if (r.f < S[n - 1].f) S[n] = r;
+    else { const k = { x: at(r.f < w.f ? -0.5 : 0.5) }; k.f = f(k.x); if (k.f < Math.min(w.f, r.f)) S[n] = k; else S = S.map((p, i) => i === 0 ? p : (q => ({ x: q, f: f(q) }))(p.x.map((v, j) => S[0].x[j] + 0.5 * (v - S[0].x[j])))); }
+  }
+  S.sort((a, b) => a.f - b.f); return { x: S[0].x, f: S[0].f, it };
+}
+function fitting() {
+  const R = rng(8), T = Array.from({ length: 61 }, (_, i) => i / 60), data = T.map(t => springModel(12, 0.35, t) + 0.02 * normal(R));
+  const out = {};
+  const starts = { '初值 (8, 0.7)，全部数据': [[8, 0.7], 61], '初值 (30, 0.1)，全部数据': [[30, 0.1], 61], '初值 (8, 0.7)，只用前 6 个采样': [[8, 0.7], 6] };
+  const c = canvas(260, 150), g = c.getContext('2d'), X = t => 8 + t * 244, Y = x => 130 - x * 75;
+  g.fillStyle = '#1d2330'; data.forEach((x, i) => { g.beginPath(); g.arc(X(T[i]), Y(x), 1.6, 0, 7); g.fill(); });
+  Object.entries(starts).forEach(([name, [x0, m]], k) => {
+    const part = ([w, z]) =>   // 误差平方和（只算前 m 个采样）
+      { let s = 0; for (let i = 0; i < m; i++) { const v = springModel(w, z, T[i]); s += isFinite(v) ? (v - data[i]) ** 2 : 1e3; } return s; };
+    const r = nelderMead(part, x0, [2, 0.1]); out[name] = { start: x0, w: r.x[0], z: r.x[1], rms: Math.sqrt(part(r.x) / m), it: r.it, m };
+    if (k === 1) return;   // 与第一条曲线重合，不重复画
+    g.strokeStyle = ['#2f6fdb', '', '#b3261e'][k]; g.lineWidth = 1.5; g.beginPath(); for (let i = 0; i <= 120; i++) { const t = i / 120, y = springModel(r.x[0], r.x[1], t); i ? g.lineTo(X(t), Y(y)) : g.moveTo(X(t), Y(y)); } g.stroke();
+  });
+  fig($('fit'), c, '黑点：记录（模拟）　蓝：用全部数据的拟合（两个初值重合）　红：只用前 6 个采样的拟合');
+  $('tFit').innerHTML = `<tr><th></th><th>估计的角频率</th><th>估计的阻尼比</th><th>拟合所用数据上的误差（RMS）</th><th>迭代次数</th></tr>` + Object.entries(out).map(([n, o]) => { const ok = Math.abs(o.w - 12) < 0.5 && Math.abs(o.z - 0.35) < 0.05; return `<tr><th>${n}</th><td class="num ${ok ? 'good' : 'poor'}">${o.w.toFixed(2)}</td><td class="num ${ok ? 'good' : 'poor'}">${o.z.toFixed(3)}</td><td class="num">${o.rms.toFixed(4)}</td><td class="num">${o.it}</td></tr>`; }).join('') + `<tr><td colspan="5">真实值是 12 与 0.35，噪声的标准差是 0.02：用全部数据拟合后的误差接近 0.02，说明模型已经解释了除噪声以外的部分，两个初值也收敛到同一组参数。只用前 6 个采样时误差反而小于噪声，阻尼比却错得很远：阻尼要摆动几次以后才看得出来，数据必须覆盖参数起作用的范围。</td></tr>`;
+  return out;
+}
+// ---------- 4 逆向渲染 ----------
+function inverse() {
+  const R = rng(4), S = 90, rad = 38, L = (v => { const l = Math.hypot(...v); return v.map(x => x / l); })([-0.5, 0.6, 0.62]), albedo = 0.85, noiseSd = 0.03, px = [];
+  const render = (l, a, noisy) => { const c = canvas(S, S), g = c.getContext('2d'), img = g.getImageData(0, 0, S, S); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const nx = (x - S / 2 + 0.5) / rad, ny = -(y - S / 2 + 0.5) / rad, r2 = nx * nx + ny * ny; let v = 0.95; if (r2 <= 1) { const n = [nx, ny, Math.sqrt(1 - r2)]; v = a * Math.max(0, n[0] * l[0] + n[1] * l[1] + n[2] * l[2]); if (noisy) { v += noiseSd * normal(R); px.push({ n, v }); } } const k = (y * S + x) * 4, b = Math.round(Math.min(1, Math.max(0, v)) * 255); img.data[k] = img.data[k + 1] = img.data[k + 2] = b; img.data[k + 3] = 255; } g.putImageData(img, 0, 0); return c; };
+  fig($('inv'), render(L, albedo, true), '输入图像（模拟）');
+  // A：最亮像素的法线
+  const brightest = px.reduce((a, b) => b.v > a.v ? b : a), lA = brightest.n, aA = brightest.v;
+  // B：只用亮度明显大于 0 的像素（被照亮的一侧），解 3×3 正规方程 (NᵀN) g = Nᵀ I，g = 反照率 × 光照方向
+  const lit = px.filter(p => p.v > 0.1), M = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], b = [0, 0, 0];
+  lit.forEach(({ n, v }) => { for (let i = 0; i < 3; i++) { b[i] += n[i] * v; for (let j = 0; j < 3; j++) M[i][j] += n[i] * n[j]; } });
+  const det = m => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+  const D = det(M), gB = [0, 1, 2].map(k => det(M.map((row, i) => row.map((v, j) => j === k ? b[i] : v))) / D), aB = Math.hypot(...gB), lB = gB.map(x => x / aB);   // 克莱姆法则
+  fig($('inv'), render(lA, aA, false), 'A 重新渲染'); fig($('inv'), render(lB, aB, false), 'B 重新渲染');
+  const ang = l => Math.acos(Math.min(1, l[0] * L[0] + l[1] * L[1] + l[2] * L[2])) * 180 / Math.PI, out = { A: { err: ang(lA), albedo: aA }, B: { err: ang(lB), albedo: aB }, pixels: lit.length };
+  $('tInv').innerHTML = `<tr><th></th><th>光照方向的误差</th><th>估计的反照率（真实 ${albedo}）</th><th>用到的像素</th></tr><tr><th>A 最亮像素</th><td class="num ${out.A.err > 3 ? 'poor' : 'good'}">${out.A.err.toFixed(1)}°</td><td class="num">${out.A.albedo.toFixed(3)}</td><td class="num">1</td></tr><tr><th>B 最小二乘</th><td class="num ${out.B.err > 3 ? 'poor' : 'good'}">${out.B.err.toFixed(1)}°</td><td class="num">${out.B.albedo.toFixed(3)}</td><td class="num">${lit.length}</td></tr><tr><td colspan="4">只看一个像素，结果完全受噪声左右；用上所有可用的像素，噪声相互抵消。真实的逆向渲染要同时估计形状、材质和多个光源，常用可微渲染和梯度下降，但“写出误差、再让它变小”的思路相同。</td></tr>`;
+  return out;
+}
+window.__go = { run: () => ({ path: pathfinding(), layout: layout(), fit: fitting(), inverse: inverse() }) };
+</script>
+</body>
+</html>
