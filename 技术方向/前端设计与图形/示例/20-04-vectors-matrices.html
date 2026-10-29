@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>向量与矩阵：跟随、反弹、变换顺序与相机</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; } .row figure { margin: 0; font-size: 11px; color: var(--muted); } .row canvas { display: block; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  code { font-size: 11.5px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div><h2>1 跟随：方向与距离</h2><p class="sub">一个点追向目标，每帧最多走 2 像素。A 在 x、y 两个方向上各走 2（往目标那边）；B 先求出指向目标的方向向量，除以长度得到单位向量，再乘以速度，离目标 30 像素以内按距离减速。轨迹上每隔 5 帧画一个点。</p><div class="row" id="fol"></div><table class="t" id="tFol"></table></div>
+    <div><h2>2 反弹：斜墙上的反射</h2><p class="sub">小球以 (2, 1.2) 的速度撞上一面倾斜 45 度的墙。A 把竖直方向的速度取反（只适用于水平的墙）；B 用墙的法向量 n 计算反射：v′ = v − 2(v·n)n。入射角与反射角都相对于法线测量。</p><div class="row" id="bnc"></div><table class="t" id="tBnc"></table></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>3 变换顺序：绕自己的中心旋转</h2><p class="sub">把中心在 (120, 70) 的方块旋转 45 度。A 直接乘旋转矩阵（绕原点旋转）；B 先平移到原点、旋转、再平移回去：M = T(c) · R(θ) · T(−c)。矩阵乘法的顺序不能交换。</p><div class="row" id="ord"></div><table class="t" id="tOrd"></table></div>
+    <div><h2>4 相机：从“看向哪里”构造坐标轴</h2><p class="sub">相机的三个坐标轴由“看的方向”和“向上的方向”叉乘得到。A 固定用 (0, 1, 0) 当“向上”；B 在看的方向几乎与“向上”平行时（例如从正上方往下看）换一个参考方向。表中检查三个轴是否互相垂直、长度为 1。</p><table class="t" id="tCam"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const fig = (host, cv, cap) => { const f = document.createElement('figure'); f.append(cv); f.insertAdjacentHTML('beforeend', `<figcaption>${cap}</figcaption>`); host.append(f); };
+const canvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); return c; };
+const V = { add: (a, b) => [a[0] + b[0], a[1] + b[1]], sub: (a, b) => [a[0] - b[0], a[1] - b[1]], mul: (a, k) => [a[0] * k, a[1] * k], dot: (a, b) => a[0] * b[0] + a[1] * b[1], len: a => Math.hypot(a[0], a[1]) };
+// ---------- 1 跟随 ----------
+function follow() {
+  const out = {};
+  for (const v of ['A', 'B']) {
+    const c = canvas(260, 150), g = c.getContext('2d'), target = [231, 131]; let p = [20, 20]; const speeds = [], dists = [];
+    for (let f = 0; f < 200; f++) {
+      const d = V.sub(target, p), L = V.len(d); let step;
+      if (v === 'A') step = [Math.sign(d[0]) * 2, Math.sign(d[1]) * 2];
+      else step = L < 1e-9 ? [0, 0] : V.mul(d, Math.min(2, L / 15) / L);   // 单位向量 × 速度；30 像素内减速
+      const np = V.add(p, step); speeds.push(V.len(V.sub(np, p))); p = np; dists.push(V.len(V.sub(target, p)));
+      if (f % 5 === 0) { g.fillStyle = v === 'A' ? '#b3261e' : '#2f6fdb'; g.beginPath(); g.arc(p[0], p[1], 1.8, 0, 7); g.fill(); }
+    }
+    g.strokeStyle = '#1d2330'; g.beginPath(); g.arc(...target, 6, 0, 7); g.stroke();
+    fig($('fol'), c, v === 'A' ? 'A：x、y 各走一步' : 'B：单位向量 × 速度');
+    // 斜着走时的速度、到达后最后 20 帧的移动
+    const last = speeds.slice(-20).reduce((a, b) => a + b, 0), arriveAt = dists.findIndex(d => d < 0.5);
+    out[v] = { diag: Math.max(...speeds.slice(0, 30)), last, arriveAt };
+  }
+  $('tFol').innerHTML = `<tr><th></th><th>斜着走时每帧的距离</th><th>到达目标（0.5 像素内）的帧</th><th>到达后最后 20 帧的移动</th></tr>` + ['A', 'B'].map(v => `<tr><th>${v}</th><td class="num ${out[v].diag > 2.01 ? 'poor' : 'good'}">${out[v].diag.toFixed(2)} 像素${out[v].diag > 2.01 ? '（超过 2）' : ''}</td><td class="num">${out[v].arriveAt < 0 ? '没有到达' : '第 ' + out[v].arriveAt + ' 帧'}</td><td class="num ${out[v].last > 1 ? 'poor' : 'good'}">${out[v].last.toFixed(1)} 像素${out[v].last > 1 ? '（在目标附近来回抖）' : ''}</td></tr>`).join('') + `<tr><td colspan="4">A 先沿对角线走、再沿一条轴走，路线是折线；斜着走时每帧 2.83 像素，比规定的 2 快 41%。</td></tr>`;
+  return out;
+}
+// ---------- 2 反弹 ----------
+function bounce() {
+  const out = {}, ang = 45 * Math.PI / 180, wallDir = [Math.cos(ang), -Math.sin(ang)], n = [Math.sin(ang), Math.cos(ang)];   // 墙沿右上方倾斜，法线朝左上
+  const nUp = [-n[0], -n[1]];
+  for (const v of ['A', 'B']) {
+    const c = canvas(260, 150), g = c.getContext('2d'), P0 = [40, 120];
+    // 墙：过点 (150, 110)，方向 wallDir
+    const W0 = [150, 110]; g.strokeStyle = '#1d2330'; g.lineWidth = 2; g.beginPath(); g.moveTo(...V.add(W0, V.mul(wallDir, -110))); g.lineTo(...V.add(W0, V.mul(wallDir, 110))); g.stroke();
+    let p = [20, 30], vel = [2, 1.2], hit = null; const path = [p];
+    for (let f = 0; f < 160; f++) {
+      const np = V.add(p, vel), side = V.dot(V.sub(np, W0), nUp);
+      if (!hit && side < 0) { hit = { p: np, vin: vel }; vel = v === 'A' ? [vel[0], -vel[1]] : V.sub(vel, V.mul(nUp, 2 * V.dot(vel, nUp))); hit.vout = vel; }
+      p = V.add(p, vel); path.push(p);
+    }
+    g.strokeStyle = v === 'A' ? '#b3261e' : '#2f6fdb'; g.lineWidth = 1.5; g.beginPath(); path.forEach((q, i) => i ? g.lineTo(...q) : g.moveTo(...q)); g.stroke();
+    g.strokeStyle = '#9aa2b1'; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(...hit.p); g.lineTo(...V.add(hit.p, V.mul(nUp, 30))); g.stroke(); g.setLineDash([]);
+    fig($('bnc'), c, v === 'A' ? 'A：只把竖直速度取反' : 'B：v − 2(v·n)n');
+    const angTo = (u, nn) => Math.acos(Math.abs(V.dot(u, nn)) / V.len(u)) * 180 / Math.PI;
+    const inA = angTo(hit.vin, nUp), outA = angTo(hit.vout, nUp), goesBack = V.dot(hit.vout, nUp) > 0;
+    out[v] = { inA, outA, speed: V.len(hit.vout) / V.len(hit.vin), goesBack };
+  }
+  $('tBnc').innerHTML = `<tr><th></th><th>入射角</th><th>反射角</th><th>速度大小（反弹后／前）</th><th>是否离开墙面</th></tr>` + ['A', 'B'].map(v => { const o = out[v]; return `<tr><th>${v}</th><td class="num">${o.inA.toFixed(1)}°</td><td class="num ${Math.abs(o.inA - o.outA) > 0.1 ? 'poor' : 'good'}">${o.outA.toFixed(1)}°</td><td class="num">${o.speed.toFixed(3)}</td><td class="${o.goesBack ? 'good' : 'poor'}">${o.goesBack ? '是' : '否，穿进墙里'}</td></tr>`; }).join('');
+  return out;
+}
+// ---------- 3 变换顺序 ----------
+const M = { mul: (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]], T: (x, y) => [1, 0, 0, 1, x, y], R: t => [Math.cos(t), Math.sin(t), -Math.sin(t), Math.cos(t), 0, 0], apply: (m, p) => [m[0] * p[0] + m[2] * p[1] + m[4], m[1] * p[0] + m[3] * p[1] + m[5]] };
+function order() {
+  const out = {}, c0 = [120, 70], sq = [[-20, -20], [20, -20], [20, 20], [-20, 20]].map(q => V.add(q, c0)), th = Math.PI / 4;
+  for (const v of ['A', 'B']) {
+    const c = canvas(260, 150), g = c.getContext('2d'), m = v === 'A' ? M.R(th) : M.mul(M.T(...c0), M.mul(M.R(th), M.T(-c0[0], -c0[1])));
+    const poly = (pts, color, dash) => { g.strokeStyle = color; g.setLineDash(dash ? [3, 3] : []); g.beginPath(); pts.forEach((q, i) => i ? g.lineTo(...q) : g.moveTo(...q)); g.closePath(); g.stroke(); g.setLineDash([]); };
+    poly(sq, '#9aa2b1', true); const moved = sq.map(q => M.apply(m, q)); poly(moved, v === 'A' ? '#b3261e' : '#2f6fdb');
+    g.fillStyle = '#1d2330'; g.beginPath(); g.arc(0, 0, 3, 0, 7); g.fill(); g.font = '10px system-ui'; g.fillText('原点', 4, 12);
+    fig($('ord'), c, v === 'A' ? 'A：R(θ)' : 'B：T(c)·R(θ)·T(−c)');
+    const center = moved.reduce((a, q) => V.add(a, V.mul(q, 0.25)), [0, 0]);
+    out[v] = { shift: V.len(V.sub(center, c0)), center };
+  }
+  // 顺序交换：T·R 与 R·T 作用在同一个点上
+  const p = [10, 0], tr = M.apply(M.mul(M.T(50, 0), M.R(Math.PI / 2)), p), rt = M.apply(M.mul(M.R(Math.PI / 2), M.T(50, 0)), p);
+  out.swap = { tr, rt };
+  $('tOrd').innerHTML = `<tr><th></th><th>旋转后方块中心离原来的中心</th></tr>` + ['A', 'B'].map(v => `<tr><th>${v}</th><td class="num ${out[v].shift > 0.01 ? 'poor' : 'good'}">${out[v].shift.toFixed(1)} 像素${out[v].shift > 0.01 ? '（绕原点转走了）' : ''}</td></tr>`).join('') + `<tr><td colspan="2">点 (10, 0)：先旋转 90 度再平移 50 得到 (${out.swap.tr.map(x => x.toFixed(0)).join(', ')})；先平移再旋转得到 (${out.swap.rt.map(x => x.toFixed(0)).join(', ')})。</td></tr>`;
+  return out;
+}
+// ---------- 4 相机 ----------
+const V3 = { sub: (a, b) => a.map((x, i) => x - b[i]), cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], dot: (a, b) => a.reduce((s, x, i) => s + x * b[i], 0), norm: a => { const l = Math.hypot(...a); return a.map(x => x / l); } };
+function lookAt(eye, target, v) {
+  const f = V3.norm(V3.sub(target, eye)); let up = [0, 1, 0];
+  if (v === 'B' && Math.abs(V3.dot(f, up)) > 0.999) up = [0, 0, -1];   // 视线几乎与“向上”平行时换一个参考方向
+  const r = V3.norm(V3.cross(f, up)), u = V3.cross(r, f);
+  return { f, r, u };
+}
+function camera() {
+  const cases = [['斜着看', [3, 2, 4], [0, 0, 0]], ['水平看', [0, 1, 5], [0, 1, 0]], ['从正上方往下看', [0, 6, 0], [0, 0, 0]]], out = {};
+  const check = b => { const all = [b.f, b.r, b.u]; if (all.flat().some(x => !isFinite(x))) return { bad: true }; const orth = Math.max(Math.abs(V3.dot(b.f, b.r)), Math.abs(V3.dot(b.f, b.u)), Math.abs(V3.dot(b.r, b.u))), unit = Math.max(...all.map(a => Math.abs(Math.hypot(...a) - 1))); return { orth, unit }; };
+  $('tCam').innerHTML = `<tr><th>相机</th><th>A：固定“向上”为 (0, 1, 0)</th><th>B：平行时换参考方向</th></tr>` + cases.map(([n, eye, tg]) => { const a = check(lookAt(eye, tg, 'A')), b = check(lookAt(eye, tg, 'B')); out[n] = { a, b }; const cell = x => x.bad ? '<td class="poor">坐标轴出现无效数值（NaN），画面消失</td>' : `<td class="num ${x.orth < 1e-9 && x.unit < 1e-9 ? 'good' : 'poor'}">互相垂直的误差 ${x.orth.toExponential(0)}，长度误差 ${x.unit.toExponential(0)}</td>`; return `<tr><th>${n}</th>${cell(a)}${cell(b)}</tr>`; }).join('') + `<tr><td colspan="3">叉乘两个平行向量得到零向量，再除以它的长度（0）就成了 NaN。俯视图、地图和顶视角的相机最常遇到。</td></tr>`;
+  return out;
+}
+window.__vm = { run: () => ({ follow: follow(), bounce: bounce(), order: order(), camera: camera() }) };
+</script>
+</body>
+</html>
