@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>性能项目：三维作品展的四个观察点与画质分级</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } table.t tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .lab { display: grid; grid-template-columns: 560px minmax(0, 1fr); gap: 14px; align-items: start; }
+  #lab { width: 560px; height: 400px; border: 1px solid var(--line); border-radius: 8px; background: #f6f7f9; }
+  .col { display: grid; gap: 6px; align-content: start; }
+  .ctl { display: flex; gap: 6px; flex-wrap: wrap; } .ctl button { font: inherit; border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+  .ctl button:focus-visible { outline: 3px solid #f2a93b; outline-offset: 2px; }
+  body.done #labWrap { display: none; }
+  .shots { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .shots figure { margin: 0; font-size: 11px; color: var(--muted); } .shots img { display: block; width: 100%; border: 1px solid var(--line); border-radius: 6px; } .shots b { color: var(--ink); }
+  svg.strip { display: block; width: 100%; height: auto; } svg.strip text { font: 10.5px "Noto Sans SC", system-ui, sans-serif; fill: #5b6475; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>课程作品展：一个图片多、三维资源大的页面</h2>
+  <p class="sub">被测页面是 <a href="18-08-gallery.html?v=B">18-08-gallery.html</a>：一个有 12 件作品贴图和一个高精度雕塑的三维展厅。主要任务是“找到《城市噪声地图》并读到说明”。下载用固定带宽模拟（2 MB/s，一次一个文件），渲染是本机真实的帧时间；本机用软件渲染，相当于一台很弱的设备。作品与作者为演示而构造。</p>
+  <table class="t">
+    <tr><th></th><th>A 原始版</th><th>B 改进版</th><th>简化模式</th></tr>
+    <tr><th>先出现什么</th><td>“正在加载作品…”</td><td>作品列表（可以直接点）与场景底色</td><td>作品列表与缩略图骨架</td></tr>
+    <tr><th>三维资源</th><td>雕塑高精度模型 3 MB 与 12 张高清贴图全部下载完才生成场景</td><td>房间与低精度雕塑 0.15 MB 先到，12 张小贴图逐张替换；选中的作品优先下载高清图</td><td>不加载三维库，只下载 12 张缩略图</td></tr>
+    <tr><th>画质</th><td>固定最高：像素比 2、抗锯齿、2048 阴影</td><td>从低档开始，按实测帧时间升降；降级时换回低精度资源</td><td>—</td></tr>
+    <tr><th>完成任务的方式</th><td>在三维画面里找到并点击作品</td><td>点列表（镜头会转过去）或点画面</td><td>点列表或缩略图</td></tr>
+  </table>
+  <div class="lab" id="labWrap">
+    <iframe id="lab" title="被测页面" src="about:blank"></iframe>
+    <div class="col">
+      <div class="ctl"><button type="button" data-q="v=A">A 原始版</button><button type="button" data-q="v=B">B 改进版</button><button type="button" data-q="v=S">简化模式</button><button type="button" data-q="v=B&amp;tier=high">固定高档</button><button type="button" data-q="v=B&amp;tier=mid">固定中档</button><button type="button" data-q="v=B&amp;tier=low">固定低档</button></div>
+      <p class="m">点按钮加载被测页面，右上角显示当前画质。测试脚本会对每种配置记录首次内容、可操作时机、完成任务的时间，以及之后 4 秒的帧时间与贴图估算显存。</p>
+    </div>
+  </div>
+</section>
+<section class="panel">
+  <h2>画面</h2>
+  <div class="shots" id="shots"></div>
+</section>
+<section class="panel">
+  <h2>四个观察点（时间从页面开始导航算起；脚本在页面可操作的那一刻立即操作，真实用户只会更慢）</h2>
+  <table class="t" id="obs"></table><p class="m" id="mobs"></p>
+</section>
+<section class="panel">
+  <h2>持续运行：完成任务后 4 秒的帧时间</h2>
+  <table class="t" id="sus"></table>
+  <svg class="strip" id="strip" role="img" aria-label="各配置的帧时间条"></svg>
+  <p class="m" id="msus"></p>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const sec = ms => ms == null ? '—' : (ms / 1000).toFixed(2) + ' 秒';
+const msf = ms => ms == null ? '—' : (ms < 100 ? ms.toFixed(1) : Math.round(ms)) + ' 毫秒';
+function load(q) { $('lab').src = q ? `18-08-gallery.html?${q}` : 'about:blank'; }
+document.querySelectorAll('.ctl button').forEach(b => { b.onclick = () => load(b.dataset.q); });
+
+// ---------- 结果呈现（由测试脚本在全部运行之后调用） ----------
+function renderAll(R, shots) {
+  const A = R.A, B = R.B, S = R.S, m = (x, k) => x.rep.marks[k];
+  $('shots').innerHTML = [
+    [shots.A1, `<b>A · ${sec(shots.A1t)}</b>：只有加载提示，三维画面 ${sec(m(A, '首个三维画面'))} 才出现`],
+    [shots.A2, `<b>A · 完成任务后</b>：${sec(m(A, '任务完成'))} 才能点到作品`],
+    [shots.B1, `<b>B · ${sec(shots.B1t)}</b>：说明已经打开（${sec(m(B, '任务完成'))}），${B.rep.tierLog.length ? '画质正在按帧时间调整' : '画质 ' + esc(B.rep.tier) + '档'}`],
+    [shots.S, `<b>简化模式</b>：不加载三维库，${sec(m(S, '任务完成'))} 完成任务`]
+  ].map(([u, c]) => `<figure><img src="${u}" alt=""><figcaption>${c}</figcaption></figure>`).join('');
+  const lcp = x => x.rep.lcp ? `${sec(x.rep.lcp.t)}（${esc(x.rep.lcp.el)}）` : '—';
+  const row = (n, how, a, b, s) => `<tr><th>${n}</th><td>${how}</td><td class="num">${a}</td><td class="num">${b}</td><td class="num">${s}</td></tr>`;
+  $('obs').innerHTML = `<tr><th>观察点</th><th>怎样测</th><th>A 原始版</th><th>B 改进版</th><th>简化模式</th></tr>`
+    + row('首次内容', '浏览器的首次内容绘制（FCP）', sec(A.rep.fcp), sec(B.rep.fcp), sec(S.rep.fcp))
+    + row('作品第一次可见', '第一张三维画面；简化模式为缩略图全部到达', sec(m(A, '首个三维画面')), sec(m(B, '首个三维画面')), sec(m(S, '全部加载')))
+    + row('可操作时机', '能点到作品或列表的最早时刻', sec(m(A, '可操作')), `列表 ${sec(m(B, '可操作（列表）'))}<br>画面 ${sec(m(B, '可操作（三维）'))}`, `列表 ${sec(m(S, '可操作（列表）'))}`)
+    + row('关键任务完成', '找到《城市噪声地图》并显示说明', `<b>${sec(m(A, '任务完成'))}</b>`, `<b>${sec(m(B, '任务完成'))}</b>`, `<b>${sec(m(S, '任务完成'))}</b>`)
+    + row('选中作品的清晰图', '1024 像素贴图显示出来', sec(m(A, '首个三维画面')), sec(m(B, '清晰图')), '缩略图 192 像素')
+    + row('全部加载', '下载队列清空', `${sec(m(A, '全部加载'))}<br>${(A.rep.bytes / 1e6).toFixed(1)} MB`, `${sec(m(B, '全部加载'))}<br>${(B.rep.bytes / 1e6).toFixed(1)} MB`, `${sec(m(S, '全部加载'))}<br>${(S.rep.bytes / 1e6).toFixed(2)} MB`)
+    + row('持续运行', '之后 4 秒帧时间中位数／第 95 百分位；贴图估算显存', `${msf(A.win.p50)}／${msf(A.win.p95)}<br>${A.rep.mem.texMB.toFixed(1)} MB`, `${msf(B.win.p50)}／${msf(B.win.p95)}<br>${B.rep.mem.texMB.toFixed(1)} MB`, `不渲染三维<br>${S.rep.mem.texMB.toFixed(1)} MB`)
+    + row('浏览器记录的 LCP', '最大内容绘制（不统计画布）', lcp(A), lcp(B), lcp(S));
+  $('mobs').innerHTML = `LCP 只看图片、视频和文字，不看 &lt;canvas&gt;：A 的 LCP 是 ${lcp(A)}，看起来很快，但用户要到 ${sec(m(A, '首个三维画面'))} 才看到作品。三维页面要在代码里自己打点（例如 performance.mark），记录“作品可见”“可操作”“任务完成”。`;
+  // 持续运行
+  const CFG = [['A 原始版（高＋抗锯齿）', A], [`B 自动（最终：${B.rep.tier}档）`, B], ['固定高档', R.high], ['固定中档', R.mid], ['固定低档', R.low]];
+  const cls = p95 => p95 <= 20 ? 'good' : p95 <= 33.4 ? 'mid' : 'poor';
+  $('sus').innerHTML = `<tr><th>配置</th><th>像素比</th><th>阴影</th><th>每帧三角形</th><th>绘制调用</th><th>贴图估算</th><th>帧数</th><th>中位数</th><th>第 95 百分位</th><th>最长</th><th>超过 33 毫秒</th><th>长任务</th></tr>`
+    + CFG.map(([n, x]) => `<tr><th>${n}</th><td class="num">${x.rep.mem.pr}</td><td class="num">${x.rep.mem.shadow || '无'}</td><td class="num">${x.rep.mem.triangles.toLocaleString('zh-CN')}</td><td class="num">${x.rep.mem.calls}</td><td class="num">${x.rep.mem.texMB.toFixed(1)} MB${x.rep.mem.shadowMB ? ` ＋阴影 ${x.rep.mem.shadowMB.toFixed(1)}` : ''}</td><td class="num">${x.win.n}</td><td class="num ${cls(x.win.p50)}">${msf(x.win.p50)}</td><td class="num ${cls(x.win.p95)}">${msf(x.win.p95)}</td><td class="num">${msf(x.win.max)}</td><td class="num">${x.win.over33}／${x.win.n}</td><td class="num">${x.win.longtasks}</td></tr>`).join('')
+    + `<tr><th>简化模式</th><td colspan="4">不渲染三维</td><td class="num">${S.rep.mem.texMB.toFixed(1)} MB</td><td colspan="6">没有持续的绘制开销</td></tr>`;
+  // 帧时间条：每一帧画成一个矩形，宽度和高度都等于这一帧用的时间
+  const W = 1110, LX = 150, X = t => LX + t / 4000 * (W - LX - 10), RH = 30, top = 16, ymax = 300;
+  let g = '';
+  for (let t = 0; t <= 4000; t += 500) g += `<line x1="${X(t)}" x2="${X(t)}" y1="${top - 4}" y2="${top + CFG.length * RH}" stroke="#eef0f3"/><text x="${X(t)}" y="10" text-anchor="middle">${t / 1000} 秒</text>`;
+  CFG.forEach(([n, x], k) => {
+    const y0 = top + (k + 1) * RH - 4, h = ms => Math.min(RH - 6, ms / ymax * (RH - 6) * 3);
+    g += `<text x="0" y="${y0 - 6}">${n}</text><line x1="${LX}" x2="${W - 10}" y1="${y0}" y2="${y0}" stroke="#dde1e7"/><line x1="${LX}" x2="${W - 10}" y1="${y0 - h(33.3)}" y2="${y0 - h(33.3)}" stroke="#a15c00" stroke-dasharray="2 3"/>`;
+    for (const [t, d] of x.win.trace) g += `<rect x="${X(Math.max(0, t - d))}" y="${y0 - h(d)}" width="${Math.max(0.6, X(t) - X(Math.max(0, t - d)) - 0.6)}" height="${h(d)}" fill="${d > 33.4 ? '#b3261e' : '#2f6fdb'}"/>`;
+  });
+  $('strip').setAttribute('viewBox', `0 0 ${W} ${top + CFG.length * RH + 4}`); $('strip').innerHTML = g;
+  const log = B.rep.tierLog.map(l => `${sec(l.t)}：${l.from}档 40 帧第 90 百分位 ${msf(l.p90)}，${l.txt}${l.to ? '到' + l.to + '档' : ''}`).join('；');
+  const bigLT = B.rep.longtasks.filter(x => x.d > 200).map(x => `${sec(x.t)} 处 ${msf(x.d)}`).join('、');
+  $('msus').innerHTML = `每个矩形是一帧，宽度和高度都表示这一帧的时间，虚线是 33 毫秒（每秒 30 帧）。B 的自动调整：${log}。${bigLT ? `升档时重新编译着色器、上传新贴图，出现了长任务（${bigLT}），所以调整次数要少，最好在用户不操作的时候进行。` : ''}`
+    + `<br>结论：这台设备上，固定高档每帧 ${msf(R.high.win.p50)}，即使 A 加载完成后也几乎无法流畅旋转；B 用低档完成任务和浏览，选中的作品仍然显示清晰图；简化模式不渲染三维，同样能在 ${sec(m(S, '任务完成'))} 完成任务。`;
+  document.body.classList.add('done');
+}
+window.__gp = { load, renderAll };
+</script>
+</body>
+</html>
