@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>项目 12 研究复现：Reinhard 等人的全局色调映射</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .note { max-width: 1140px; margin: 0 0 10px; padding: 6px 12px; border-radius: 8px; background: #fff6e0; border: 1px solid #f0d9a8; font-size: 12px; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; } table.t tr > th:first-child { white-space: nowrap; } td.num { font-variant-numeric: tabular-nums; }
+  .good { color: var(--ok); } .poor { color: var(--bad); }
+  .scenes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; } .scenes figure { margin: 0; font-size: 11px; color: var(--muted); } .scenes canvas { width: 100%; display: block; border-radius: 4px; } .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  code { font-size: 11.5px; }
+</style>
+</head>
+<body>
+<p class="note">三个高动态范围场景都是用公式生成的（模拟数据），亮度单位是相对值；结果只说明算法在这些场景上的行为，没有做人眼主观评价。复现对象：Reinhard、Stark、Shirley、Ferwerda，《Photographic tone reproduction for digital images》，ACM Transactions on Graphics，2002，DOI 10.1145/566654.566575，只复现其中的全局算子（式 1—4）。</p>
+<section class="panel">
+  <h2>结果：每个场景左边是基线（同样曝光后直接截断），右边是复现的全局算子</h2>
+  <div class="scenes" id="scenes"></div>
+  <table class="t" id="tRes"></table>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>研究记录</h2><table class="t" id="tReport"></table></div>
+    <div><h2>复现核对：公式的性质</h2><table class="t" id="tCheck"></table><h2 style="margin-top:6px">配置</h2><table class="t" id="tConf"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const W = 320, H = 200, A_KEY = 0.18, DELTA = 1e-4;
+// ---------- 三个场景（公式生成的高动态范围亮度，RGB 线性值） ----------
+const SCENES = {
+  '日落天空': (x, y) => { const sky = y < 120, sun = Math.hypot(x - 230, y - 70) < 14; if (sun) return [60000, 45000, 25000]; if (sky) { const k = 2000 * Math.exp(-((x - 230) ** 2 + (y - 70) ** 2) / 9000) + 60 + 40 * (1 - y / 120); return [k, k * 0.75, k * 0.5]; } const g = 0.5 + 4 * ((Math.sin(x * 0.15) + 1) / 2) * ((y - 120) / 80); return [g * 0.6, g * 0.8, g * 0.5]; },
+  '窗内与窗外': (x, y) => { const win = x > 190 && x < 290 && y > 30 && y < 150; if (win) { const v = 600 + 2400 * ((Math.sin(x * 0.2) * Math.cos(y * 0.15) + 1) / 2); return [v * 0.8, v * 0.9, v]; } const v = 0.05 + 0.95 * ((Math.sin(x * 0.08) + 1) / 2) * (1 - y / 260) * (x < 190 ? 1 : 0.6); return [v, v * 0.85, v * 0.7]; },
+  '普通场景（动态范围小）': (x, y) => { const v = 0.2 + 0.8 * ((Math.sin(x * 0.05) * Math.cos(y * 0.07) + 1) / 2); return [v, v * 0.9, v * 0.8]; } };
+const lum = ([r, g, b]) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+const encode = v => { v = Math.min(1, Math.max(0, v)); return v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055; };   // sRGB 编码
+function hdr(f) { const px = new Array(W * H); for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) px[y * W + x] = f(x, y); return px; }
+function logAvg(px) { return Math.exp(px.reduce((s, p) => s + Math.log(DELTA + lum(p)), 0) / px.length); }   // 式 1
+function tonemap(px, method, Lwhite) {
+  const Lbar = logAvg(px), out = new Array(px.length);
+  for (let i = 0; i < px.length; i++) {
+    const L = lum(px[i]), Ls = A_KEY / Lbar * L;   // 式 2：按“关键值”缩放
+    const Ld = method === 'base' ? Ls : Ls * (1 + Ls / (Lwhite * Lwhite)) / (1 + Ls);   // 式 4（Lwhite 为无穷大时退化为式 3）
+    const k = L > 0 ? Ld / L : 0; out[i] = px[i].map(c => c * k);
+  }
+  return { out, Lbar };
+}
+function toCanvas(out) { const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'), img = g.createImageData(W, H); out.forEach((p, i) => { for (let j = 0; j < 3; j++) img.data[i * 4 + j] = Math.round(encode(p[j]) * 255); img.data[i * 4 + 3] = 255; }); g.putImageData(img, 0, 0); return c; }
+function metrics(out, hi, lo) {
+  const L = out.map(p => lum(p)), sel = f => [...L.keys()].filter(i => f(i % W, Math.floor(i / W)));
+  const lumClip = L.filter(v => v >= 0.999).length / L.length, chanClip = out.filter(p => p.some(c => c >= 0.999)).length / out.length;
+  const levels = new Set(sel(hi).map(i => Math.round(encode(L[i]) * 255))).size;
+  const vals = sel(lo).map(i => encode(L[i])), m = vals.reduce((a, b) => a + b, 0) / vals.length, sd = Math.sqrt(vals.reduce((a, b) => a + (b - m) ** 2, 0) / vals.length);
+  return { lumClip, chanClip, levels, sd };
+}
+const sun = (x, y) => Math.hypot(x - 230, y - 70) < 14, win = (x, y) => x > 190 && x < 290 && y > 30 && y < 150;
+const REGIONS = { '日落天空': [(x, y) => y < 120 && !sun(x, y), '天空（不含太阳）', (x, y) => y >= 120, '地面'], '窗内与窗外': [win, '窗外', (x, y) => !win(x, y), '室内'], '普通场景（动态范围小）': [() => true, '全图', () => true, '全图'] };
+function run() {
+  const R = {};
+  for (const [name, f] of Object.entries(SCENES)) {
+    const px = hdr(f), lbar = logAvg(px), Lwhite = px.reduce((m, p) => Math.max(m, A_KEY / lbar * lum(p)), 0), range = px.reduce((m, p) => Math.max(m, lum(p)), 0) / Math.max(1e-6, px.reduce((m, p) => Math.min(m, lum(p)), Infinity));
+    const base = tonemap(px, 'base'), rein = tonemap(px, 'reinhard', Lwhite), [hi, hn, lo, ln] = REGIONS[name];
+    const fig = document.createElement('figure'); fig.innerHTML = `<div class="pair"></div><figcaption>${name}：最亮与最暗相差 ${range.toExponential(1).replace('e+', ' × 10^')} 倍</figcaption>`; fig.firstChild.append(toCanvas(base.out), toCanvas(rein.out)); $('scenes').append(fig);
+    R[name] = { range, Lwhite, Lbar: lbar, base: metrics(base.out, hi, lo), rein: metrics(rein.out, hi, lo), hn, ln };
+  }
+  const pct = v => (v * 100).toFixed(1) + '%', cmp = (a, b, better) => better === 'lower' ? (b < a ? 'good' : b > a ? 'poor' : '') : (b > a ? 'good' : b < a ? 'poor' : '');
+  $('tRes').innerHTML = `<tr><th>场景</th><th>亮度过曝（显示亮度 ≥ 1）基线／复现</th><th>颜色通道溢出（某一通道 ≥ 1）基线／复现</th><th>亮部区域的灰阶数 基线／复现</th><th>暗部区域的亮度标准差 基线／复现</th></tr>` + Object.entries(R).map(([n, r]) => `<tr><th>${n}</th><td class="num ${cmp(r.base.lumClip, r.rein.lumClip, 'lower')}">${pct(r.base.lumClip)}／${pct(r.rein.lumClip)}</td><td class="num ${cmp(r.base.chanClip, r.rein.chanClip, 'lower')}">${pct(r.base.chanClip)}／${pct(r.rein.chanClip)}</td><td class="num ${cmp(r.base.levels, r.rein.levels)}">${r.hn}：${r.base.levels}／${r.rein.levels}</td><td class="num ${cmp(r.base.sd, r.rein.sd)}">${r.ln}：${r.base.sd.toFixed(3)}／${r.rein.sd.toFixed(3)}</td></tr>`).join('');
+  // 公式性质
+  const op = (Ls, Lw) => Ls * (1 + Ls / (Lw * Lw)) / (1 + Ls), lw = R['日落天空'].Lwhite;
+  let mono = true; for (let k = 0; k < 1000; k++) { const a = k / 100, b = (k + 1) / 100; if (op(b, lw) < op(a, lw)) mono = false; }
+  const checks = [['Ls = Lwhite 时输出恰好为 1（“映射为纯白的最小亮度”）', Math.abs(op(lw, lw) - 1), v => v < 1e-12, v => `误差 ${v.toExponential(0)}`], ['Lwhite → ∞ 时退化为 Ls/(1+Ls)（式 3）', Math.abs(op(3, 1e9) - 3 / 4), v => v < 1e-9, v => `误差 ${v.toExponential(0)}`], ['在 0—10 范围内单调递增', mono ? 0 : 1, v => v === 0, v => v === 0 ? '是' : '否'], ['低亮度时近似线性：Ls = 0.01 的输出／输入', op(0.01, lw) / 0.01, v => Math.abs(v - 0.99) < 0.005, v => v.toFixed(4)]];
+  $('tCheck').innerHTML = `<tr><th>性质</th><th>结果</th></tr>` + checks.map(([n, v, ok, f]) => `<tr><th>${n}</th><td class="${ok(v) ? 'good' : 'poor'}">${f(v)}</td></tr>`).join('');
+  $('tConf').innerHTML = `<tr><th>关键值 a</th><td>${A_KEY}（中灰）</td></tr><tr><th>对数平均的 δ</th><td>${DELTA}，避免 log(0)</td></tr><tr><th>Lwhite</th><td>场景中缩放后亮度的最大值（三个场景分别为 ${Object.values(R).map(r => r.Lwhite.toFixed(2)).join('、')}）</td></tr><tr><th>颜色</th><td>按亮度比例缩放 RGB，最后做 sRGB 编码；不做额外的饱和度处理</td></tr><tr><th>基线</th><td>同样按 a ÷ 对数平均亮度缩放，超过 1 的部分在显示时截断</td></tr><tr><th>分辨率</th><td>${W} × ${H}</td></tr>`;
+  const s = R['日落天空'], w = R['窗内与窗外'], n = R['普通场景（动态范围小）'];
+  $('tReport').innerHTML = `<tr><th>问题</th><td>论文的全局算子能否把高动态范围场景显示在普通屏幕上，减少过曝、保留亮部层次？代价是什么？</td></tr><tr><th>基线</th><td>同样曝光后直接截断（最常见的简单做法）</td></tr><tr><th>方法</th><td>按论文式 1—4 实现全局算子；不实现局部的“减淡与加深”部分</td></tr><tr><th>配置</th><td>见右侧</td></tr>
+    <tr><th>结果</th><td>亮度过曝：日落天空 ${pct(s.base.lumClip)} → ${pct(s.rein.lumClip)}，窗内与窗外 ${pct(w.base.lumClip)} → ${pct(w.rein.lumClip)}。日落天空的亮度过曝几乎消失，但天空的灰阶数没有增加（${s.base.levels} → ${s.rein.levels} 级）：原来截断的部分被压进了很窄的亮度范围。公式的四条性质全部核对通过。</td></tr>
+    <tr><th>失败情况</th><td>① 颜色通道溢出：亮度不过曝，但偏色的亮部（暖色天空、冷色窗外）仍有通道超过 1，日落天空 ${pct(s.rein.chanClip)}、窗内与窗外 ${pct(w.rein.chanClip)}，显示时颜色变淡——算子只处理亮度，没有处理颜色。② 暗部对比：室内的标准差 ${w.base.sd.toFixed(3)} → ${w.rein.sd.toFixed(3)}${w.rein.sd < w.base.sd ? '，略有下降' : ''}。③ 窗外：灰阶只从 ${w.base.levels} 级变成 ${w.rein.levels} 级，仍接近纯白——曝光由室内决定，全局曲线没有余地留给窗外的细节，要靠论文的局部算子或单独调整。④ 小动态范围的场景：Lwhite 取最大亮度（${n.Lwhite.toFixed(2)}，小于 1）时曲线把整张图提亮，标准差 ${n.base.sd.toFixed(3)} → ${n.rein.sd.toFixed(3)}，${pct(n.rein.chanClip)} 的像素通道溢出——这时不需要色调映射，或者应把 Lwhite 设为不小于 1。</td></tr>
+    <tr><th>限制</th><td>场景是公式生成的，不是真实照片；只看像素统计，没有做观察者实验；没有复现局部算子；参数只试了一组</td></tr><tr><th>来源</th><td>论文 DOI 10.1145/566654.566575；本页代码按论文公式独立实现</td></tr>`;
+  return R;
+}
+window.__rr = { run };
+</script>
+</body>
+</html>
