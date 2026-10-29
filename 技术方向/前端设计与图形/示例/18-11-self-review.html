@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自评与评审：四种状态、证据与评审记录</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 3px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  table.t tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .states { display: flex; gap: 3px; flex-wrap: nowrap; } .states button { font: inherit; font-size: 11px; border: 1px solid var(--line); background: #fff; border-radius: 10px; padding: 1px 7px; cursor: pointer; white-space: nowrap; color: var(--ink); min-height: 24px; }
+  .states button[aria-pressed="true"] { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .states button:focus-visible, input:focus-visible, button:focus-visible { outline: 3px solid #f2a93b; outline-offset: 2px; }
+  input.ev { font: inherit; font-size: 11px; width: 100%; border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
+  .thumb { width: 72px; height: 44px; object-fit: cover; object-position: top left; border: 1px solid var(--line); border-radius: 4px; display: block; }
+  .nothumb { width: 72px; height: 44px; border: 1px dashed var(--line); border-radius: 4px; display: grid; place-items: center; color: #9aa2b1; font-size: 10.5px; }
+  .dist { display: flex; gap: 6px; flex-wrap: wrap; } .dist span { border-radius: 9px; padding: 0 8px; background: #f1f3f6; font-size: 11.5px; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .crit { background: #f6f7f9; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font-size: 11.5px; }
+  #rev td:nth-child(2) { white-space: nowrap; }
+  .flag { font-size: 11px; border-radius: 6px; padding: 0 5px; } .flag.poor { background: #fbe1de; } .flag.mid { background: #fff3d6; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>能力自评：每项能力一个状态，每个状态都附证据</h2>
+  <p class="sub">四种状态：尚未验证、在指导下完成、能够独立完成、能够解释并复用。状态越高，要求的证据越多：在指导下完成要写明谁指导了哪一步；能够独立完成要有作品截图；能够解释并复用还要有第二处使用的证据。证据截图会真的被加载一次，打不开就算没有证据。不把各项合成总分，只用来决定下一步。表中的学习者与填写内容为演示而构造。</p>
+  <table class="t" id="sa"></table>
+  <div class="dist" id="dist"></div>
+  <p class="m" id="next"></p>
+</section>
+<section class="panel">
+  <h2>作品评审：标准在开始前约定，按四个方面分别记录优点、问题与下一步</h2>
+  <div class="two">
+    <div><div class="crit" id="crit"></div></div>
+    <div><p class="m" id="mrev"></p></div>
+  </div>
+  <table class="t" id="rev"></table>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const STATES = ['尚未验证', '在指导下完成', '能够独立完成', '能够解释并复用'];
+const NEXT = ['照着对应示例完成一次，保存截图作为证据', '不看步骤，换一个页面独立再做一次', '向别人讲清做法，并在另一个作品里复用', '把做法整理成清单或模板，留给别人用'];
+const ABIL = [
+  ['设计资产目录与治理', '图片/18-03-asset-audit.png'], ['组件目录与采用度', '图片/18-04-component-catalog.png'], ['可复现的视觉检查', '图片/18-05-visual-checks.png'], ['视觉回归与差异分类', '图片/18-06-visual-regression.png'],
+  ['感知性能测量', '图片/18-07-perceived-performance.png'], ['三维页面的性能分级', '图片/18-08-gallery-performance.png'], ['交互流程验收', '图片/18-09-acceptance-checks.png'], ['工程与研究记录检查', '图片/18-10-engineering-research-checks.png']
+];
+const SA = ABIL.map(([name]) => ({ name, state: 0, ev: '', ev2: '', note: '', ok: {} }));
+// 证据是否存在：真的加载一次图片
+const seen = new Map();
+const exists = src => { if (!src) return Promise.resolve(false); if (!seen.has(src)) seen.set(src, new Promise(res => { const i = new Image(); i.onload = () => res(true); i.onerror = () => res(false); i.src = '../' + src; })); return seen.get(src); };
+async function validate(k) {
+  const a = SA[k], need = [];
+  if (a.state >= 1 && !a.ev) need.push('缺少证据截图');
+  if (a.state >= 1 && a.ev && !(await exists(a.ev))) need.push(`证据“${a.ev}”打不开`);
+  if (a.state === 1 && !a.note) need.push('要写明谁指导、指导了哪一步');
+  if (a.state === 3 && !a.ev2) need.push('缺少第二处使用的证据');
+  if (a.state === 3 && a.ev2 && (a.ev2 === a.ev || !(await exists(a.ev2)))) need.push('第二处证据要是另一个能打开的文件');
+  a.need = need; a.evOk = a.ev && await exists(a.ev);
+  return need;
+}
+function renderSA() {
+  $('sa').innerHTML = `<tr><th>能力</th><th>状态</th><th>证据（相对于分册目录）</th><th>说明／第二处证据</th><th></th><th>检查</th></tr>` + SA.map((a, k) => `<tr data-k="${k}">
+    <th>${a.name}</th>
+    <td><div class="states" role="group" aria-label="${a.name}的状态">${STATES.map((s, i) => `<button type="button" data-s="${i}" aria-pressed="${a.state === i}">${s}</button>`).join('')}</div></td>
+    <td><input class="ev" data-f="ev" value="${esc(a.ev)}" placeholder="图片/xx.png" aria-label="${a.name}的证据"></td>
+    <td><input class="ev" data-f="${a.state === 3 ? 'ev2' : 'note'}" value="${esc(a.state === 3 ? a.ev2 : a.note)}" placeholder="${a.state === 3 ? '第二处使用的截图' : a.state === 1 ? '谁指导、哪一步' : '可选'}" aria-label="${a.name}的说明"></td>
+    <td>${a.evOk ? `<img class="thumb" src="../${esc(a.ev)}" alt="${a.name}的证据截图">` : '<span class="nothumb">无证据</span>'}</td>
+    <td>${a.need == null ? '' : a.need.length ? `<span class="poor">✗ ${a.need.join('；')}</span>` : `<span class="good">✓</span> 下一步：${NEXT[a.state]}`}</td></tr>`).join('');
+  const cnt = STATES.map((s, i) => SA.filter(a => a.state === i).length);
+  $('dist').innerHTML = STATES.map((s, i) => `<span>${s}：${cnt[i]} 项</span>`).join('') + `<span>证据不足：${SA.filter(a => a.need && a.need.length).length} 项</span>`;
+  const todo = SA.map((a, k) => ({ a, k })).filter(x => x.a.need && x.a.need.length);
+  $('next').innerHTML = `没有总分。下一步按顺序：先补证据不足的 ${todo.length} 项（${todo.map(x => x.a.name).join('、') || '无'}）；再从“尚未验证”的 ${cnt[0]} 项里选一项，照着对应示例做一次。`;
+}
+$('sa').addEventListener('click', async e => { const b = e.target.closest('[data-s]'); if (!b) return; const k = +b.closest('tr').dataset.k; SA[k].state = +b.dataset.s; await validate(k); renderSA(); });
+$('sa').addEventListener('change', async e => { const f = e.target.dataset.f; if (!f) return; const k = +e.target.closest('tr').dataset.k; SA[k][f] = e.target.value.trim(); await validate(k); renderSA(); });
+renderSA();
+
+// ---------- 作品评审 ----------
+// 评审标准在开始前约定；评审开始后修改标准会生成新版本，旧评审仍按旧版本解读
+const CRITERIA = [
+  { v: 1, date: '2026-10-20', items: { 视觉: '层级清楚；深浅主题都可读', 任务体验: '第一次使用的人 3 分钟内完成报名', 工程质量: '只用键盘能完成；提交失败能恢复', 原创表达: '封面插画有统一而独特的风格' } },
+  { v: 2, date: '2026-10-24', items: { 视觉: '层级清楚；深浅主题都可读', 任务体验: '第一次使用的人 2 分钟内完成报名', 工程质量: '只用键盘能完成；提交失败能恢复', 原创表达: '封面插画有统一而独特的风格' } }
+];
+// 评审记录为演示而构造
+const REVIEWS = [
+  { who: '同伴评审 R1', v: 1, notes: {
+    视觉: { 优点: '价格和按钮一眼能找到', 问题: '感觉不太好看', 下一步: '' },
+    任务体验: { 优点: '步骤条说明了进度', 问题: '实测用了 2 分 40 秒，卡在选择班次', 下一步: '把班次说明放到选项旁边' },
+    工程质量: { 优点: '失败后有重试', 问题: '弹窗关闭后焦点回到页面顶部', 下一步: '关闭时把焦点放回“课程说明”' },
+    原创表达: { 优点: '插画的线条风格统一', 问题: '', 下一步: '' } } },
+  { who: '老师评审 R2', v: 2, notes: {
+    视觉: { 优点: '深色主题对比度都在 4.5 以上', 问题: '长标题截成两行后，第二行和价格挤在一起', 下一步: '标题与价格之间加 4 像素间距' },
+    任务体验: { 优点: '三步流程清楚', 问题: '一般', 下一步: '再观察两位新用户' },
+    工程质量: { 优点: '键盘路径完整', 问题: '无', 下一步: '' } } }
+];
+const DIMS = ['视觉', '任务体验', '工程质量', '原创表达'];
+// 含糊的问题描述：只有感受词、没有具体对象或数字
+const VAGUE = /^(感觉|一般|不太|还行|不好看|不舒服|有点)/;
+const concrete = s => /\d|标题|按钮|价格|焦点|弹窗|间距|颜色|字号|对比|步骤|选项|线条|插画|主题/.test(s);
+function checkReviews() {
+  const rows = [], flags = [];
+  for (const r of REVIEWS) for (const d of DIMS) {
+    const n = r.notes[d], f = [];
+    if (!n) f.push(['poor', '这一方面没有记录']);
+    else {
+      if (!n.问题 || n.问题 === '无') f.push(['mid', '没有写问题：写“没有发现问题”，并说明看了什么']);
+      else if (VAGUE.test(n.问题) && !concrete(n.问题)) f.push(['poor', '问题不具体：写出在哪里、看到了什么']);
+      if (!n.下一步 && n.问题 && n.问题 !== '无') f.push(['mid', '有问题但没有下一步']);
+    }
+    if (r.v !== CRITERIA[CRITERIA.length - 1].v) { const old = CRITERIA.find(c => c.v === r.v).items[d], cur = CRITERIA[CRITERIA.length - 1].items[d]; if (old !== cur) f.push(['mid', `按标准第 ${r.v} 版评审；此项现行标准已改为“${cur}”`]); }
+    rows.push({ r, d, n, f }); flags.push(...f);
+  }
+  return { rows, flags };
+}
+function renderReview() {
+  const cur = CRITERIA[CRITERIA.length - 1];
+  $('crit').innerHTML = `<b>评审标准（第 ${cur.v} 版，${cur.date}）</b><br>` + DIMS.map(d => `${d}：${esc(cur.items[d])}${CRITERIA[0].items[d] !== cur.items[d] ? `<span class="flag mid">第 1 版是“${esc(CRITERIA[0].items[d])}”</span>` : ''}`).join('<br>');
+  const { rows, flags } = checkReviews();
+  $('rev').innerHTML = `<tr><th>评审人</th><th>方面</th><th>优点</th><th>问题</th><th>下一步</th><th>检查</th></tr>` + rows.map(x => `<tr><th>${x.r.who}（第 ${x.r.v} 版）</th><td>${x.d}</td><td>${esc(x.n ? x.n.优点 : '—')}</td><td>${esc(x.n ? x.n.问题 || '（空）' : '—')}</td><td>${esc(x.n ? x.n.下一步 || '（空）' : '—')}</td><td>${x.f.length ? x.f.map(([c, t]) => `<span class="flag ${c}">${t}</span>`).join(' ') : '<span class="good">✓</span>'}</td></tr>`).join('');
+  const bad = flags.filter(f => f[0] === 'poor').length, mid = flags.filter(f => f[0] === 'mid').length;
+  $('mrev').innerHTML = `检查发现 ${bad} 处需要重写、${mid} 处需要补充。不同作品的重点不同，所以标准在开始前约定；评审中途把“3 分钟”改成“2 分钟”后，R1 的任务体验结论要按第 1 版理解，或者请 R1 按第 2 版重看。四个方面分别记录，不加总分：一个作品可以视觉很好而工程质量还要补。`;
+  return { bad, mid };
+}
+window.__sr = { SA, validate, renderSA, renderReview };
+</script>
+</body>
+</html>
