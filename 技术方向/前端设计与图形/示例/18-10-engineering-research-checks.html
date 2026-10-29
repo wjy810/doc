@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>验收检查：工程、可访问性与研究记录</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script src="https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js"></script>
+<script>
+// 资源清理的观测：包装计时器、窗口事件和动画帧，卸载组件后看还剩多少
+const LEAK = { intervals: new Set(), listeners: 0, rafCalls: 0, longtasks: [] };
+{
+  const si = window.setInterval.bind(window), ci = window.clearInterval.bind(window);
+  window.setInterval = (f, t) => { const id = si(f, t); LEAK.intervals.add(id); return id; };
+  window.clearInterval = id => { LEAK.intervals.delete(id); ci(id); };
+  const ael = window.addEventListener.bind(window), rel = window.removeEventListener.bind(window);
+  window.addEventListener = (t, f, o) => { if (t === 'resize') { LEAK.listeners++; if (o && o.signal) o.signal.addEventListener('abort', () => LEAK.listeners--); } return ael(t, f, o); };
+  window.removeEventListener = (t, f, o) => { if (t === 'resize') LEAK.listeners--; return rel(t, f, o); };
+  const raf = window.requestAnimationFrame.bind(window);
+  window.requestAnimationFrame = cb => raf(ts => { LEAK.rafCalls++; cb(ts); });
+  try { new PerformanceObserver(l => l.getEntries().forEach(e => LEAK.longtasks.push({ t: e.startTime, d: e.duration }))).observe({ type: 'longtask', buffered: true }); } catch (e) { /* 不支持长任务观察时，阻塞检查会显示“未测量” */ }
+}
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  html.big { font-size: 200%; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 3px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  table.t tr > th:first-child { white-space: nowrap; } td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .good { color: var(--ok); } .poor { color: var(--bad); }
+  .hosts { display: flex; gap: 14px; align-items: start; flex-wrap: wrap; } .host { width: 540px; }
+  body.done .hosts { display: none; }
+  .shots { display: grid; grid-template-columns: 300px 300px minmax(0, 1fr); gap: 14px; align-items: start; }
+  .shots2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+  .shots figure, .shots2 figure { margin: 0; font-size: 11.5px; color: var(--muted); } .shots img, .shots2 img { display: block; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; } figure b { color: var(--ink); }
+  .rec { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; } .rec pre { margin: 0; font: 11px/1.45 ui-monospace, Menlo, Consolas, monospace; background: #f6f7f9; border: 1px solid var(--line); border-radius: 8px; padding: 8px; white-space: pre-wrap; }
+  /* ---------- 被检查的“学习周报”组件 ---------- */
+  .wk { background: #fff; color: #1d2330; border: 1px solid #dde1e7; border-radius: 12px; display: grid; }
+  .wk.A { width: 520px; font: 14px/1.5 "Noto Sans SC", system-ui, sans-serif; padding: 12px; gap: 8px; }
+  .wk.A header { display: flex; gap: 8px; align-items: center; height: 32px; } .wk.A .stats { height: 48px; overflow: hidden; display: flex; align-items: center; gap: 12px; }
+  .wk.A .num { font-size: 28px; font-weight: 700; } .wk.A canvas { width: 496px; height: 120px; }
+  .wk.B { width: 100%; max-width: 520px; font: 0.875rem/1.5 "Noto Sans SC", system-ui, sans-serif; padding: 0.75rem; gap: 0.5rem; }
+  .wk.B header { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; } .wk.B .stats { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+  .wk.B .num { font-size: 1.75rem; font-weight: 700; } .wk.B canvas { width: 100%; height: auto; aspect-ratio: 496 / 120; }
+  .wk h3 { margin: 0; font-size: 1em; flex: 1; } .wk.B h3 { min-width: max-content; } .wk .avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; } .wk .avatar-fb { width: 32px; height: 32px; border-radius: 50%; background: #c77700; color: #fff; display: grid; place-items: center; font-size: 0.8em; }
+  .wk select, .wk button, .wk input { font: inherit; font-size: 0.9em; }
+  .wk button { border: 1px solid #c9d0db; background: #f6f7f9; border-radius: 6px; padding: 2px 10px; cursor: pointer; min-height: 28px; }
+  .wk button:focus-visible, .wk select:focus-visible { outline: 3px solid #f2a93b; outline-offset: 2px; }
+  .wk .dot { width: 10px; height: 10px; border-radius: 50%; background: #1f7a4d; display: inline-block; }
+  .wk .goal { color: #1f5f3d; font-weight: 700; } .wk .msg { background: #fbe1de; color: #8c2a20; border-radius: 6px; padding: 4px 8px; } .wk .msg.info { background: #e8eefb; color: #1f4fae; }
+  .wk .acts { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+  .wk details { font-size: 0.85em; } .wk details table { border-collapse: collapse; } .wk details td, .wk details th { border: 1px solid #dde1e7; padding: 0 6px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>工程与可访问性检查（24.3）：同一个“学习周报”组件的两种实现</h2>
+  <p class="sub">组件显示本周学习分钟数（带数字动画）、每日柱状图、头像、目标是否达成、复制分享链接和声音提示，并每秒检查一次新数据。数据接口用页面里的计时器模拟，可以切换成失败。下面的结果由测试脚本真实操作得到：改变容器宽度和根字号、让接口与图片失败、模拟“减少动态效果”与缺少剪贴板接口、反复挂载卸载组件，再用 axe-core 检查语义。数据为演示而构造。</p>
+  <div class="hosts"><div class="host" id="hostA"></div><div class="host" id="hostB"></div></div>
+  <div class="shots" id="shots1"></div>
+  <div class="shots2" id="shots2"></div>
+  <table class="t" id="eng"></table><p class="m" id="meng"></p>
+</section>
+<section class="panel">
+  <h2>研究项目检查（24.4）：两份“图片压缩质量”试验记录</h2>
+  <p class="sub">两份记录比较同一件事：把封面图的 JPEG 质量从 0.9 降到 0.6，文件变小多少、画质损失多大（用 PSNR 衡量，数值越高越接近原图）。检查器读取记录的结构，并按记录里的参数在本页重新运行一次试验，看结果能不能重现。记录里涉及参与者的部分只写了做法，没有参与者数据。</p>
+  <div class="rec"><pre id="recA"></pre><pre id="recB"></pre></div>
+  <table class="t" id="res"></table><table class="t" id="rep"></table><p class="m" id="mres"></p>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// ---------- 模拟接口 ----------
+const NET = { fail: false };
+const WEEKS = { 42: [40, 55, 30, 70, 20, 60, 45], 43: [50, 35, 60, 80, 25, 40, 30] }, GOAL = 300, DAYS = ['一', '二', '三', '四', '五', '六', '日'];
+const fetchWeek = w => new Promise((res, rej) => setTimeout(() => NET.fail ? rej(new Error('网络错误')) : res(WEEKS[w]), 200));
+const AVATAR = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); g.fillStyle = '#c77700'; g.fillRect(0, 0, 64, 64); g.fillStyle = '#fff'; g.font = '700 32px system-ui'; g.textAlign = 'center'; g.fillText('林', 32, 43); return c.toDataURL(); })();
+function work(ms) { const end = performance.now() + ms; let x = 0; while (performance.now() < end) x += Math.sqrt(x + 1); return x; }
+function drawChart(cv, data) {
+  const r = cv.getBoundingClientRect(), dpr = devicePixelRatio || 1; cv.width = Math.max(1, Math.round(r.width * dpr)); cv.height = Math.max(1, Math.round(r.height * dpr));
+  const g = cv.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0, 0, r.width, r.height); if (!data) return;
+  const bw = r.width / 7; data.forEach((v, i) => { const h = v / 90 * (r.height - 18); g.fillStyle = '#2f6fdb'; g.fillRect(i * bw + bw * 0.2, r.height - 16 - h, bw * 0.6, h); g.fillStyle = '#5b6475'; g.font = '11px system-ui'; g.textAlign = 'center'; g.fillText('周' + DAYS[i], i * bw + bw / 2, r.height - 3); });
+}
+function beep() { try { const a = new AudioContext(), o = a.createOscillator(), gn = a.createGain(); gn.gain.value = 0.05; o.connect(gn).connect(a.destination); o.start(); o.stop(a.currentTime + 0.15); o.onended = () => a.close(); } catch (e) { /* 没有音频设备时忽略 */ } }
+
+// ---------- A：原始实现 ----------
+function mountA(host) {
+  host.innerHTML = `<div class="wk A" id="wkA"><header><img class="avatar" src="${NET.fail ? 'data:image/png;base64,broken' : AVATAR}"><h3>本周学习</h3><select><option value="43">第 43 周</option><option value="42">第 42 周</option></select></header>
+    <div class="stats"><span class="num">0</span>分钟 <span class="dot" title="达成"></span></div><canvas></canvas>
+    <div class="acts"><button tabindex="3">复制分享链接</button><button tabindex="1">刷新</button><button tabindex="2">🔔</button></div></div>`;
+  const el = host.firstChild, num = el.querySelector('.num'), cv = el.querySelector('canvas');
+  let data = null, shown = 0;
+  const load = w => fetchWeek(w).then(d => { data = d; drawChart(cv, d); }).catch(() => {});
+  // 数字动画：循环一直在跑
+  const tick = () => { const total = data ? data.reduce((a, b) => a + b) : 0; if (shown < total) { shown = Math.min(total, shown + 4); num.textContent = shown; if (shown >= GOAL && shown - 4 < GOAL) beep(); } requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+  setInterval(() => load(el.querySelector('select').value), 1000);
+  window.addEventListener('resize', () => drawChart(cv, data));
+  el.querySelector('select').onchange = e => { work(300); shown = 0; load(e.target.value); };   // 切换时同步重算全部统计
+  el.querySelector('.acts button').onclick = () => { if (navigator.clipboard) navigator.clipboard.writeText(location.href); };
+  load(43);
+  return () => { host.innerHTML = ''; };
+}
+// ---------- B：修改后的实现 ----------
+function mountB(host) {
+  host.innerHTML = `<div class="wk B" id="wkB"><header><span class="avfix"><img class="avatar" src="${NET.fail ? 'data:image/png;base64,broken' : AVATAR}" alt="林同学的头像"></span><h3 id="wkTitle">本周学习</h3>
+    <label>周次 <select><option value="43">第 43 周</option><option value="42">第 42 周</option></select></label></header>
+    <div class="stats" role="group" aria-labelledby="wkTitle"><span><span class="num">0</span> 分钟</span><span class="goal" hidden>✓ 已达成本周目标（${GOAL} 分钟）</span></div>
+    <canvas role="img" aria-label="每日学习时长图"></canvas>
+    <details><summary>查看每日数据</summary><table></table></details>
+    <div class="status" role="status"></div>
+    <div class="acts"><button type="button" data-a="copy">复制分享链接</button><button type="button" data-a="refresh">刷新</button><button type="button" data-a="sound" aria-pressed="false">声音提示：关</button></div></div>`;
+  const el = host.firstChild, num = el.querySelector('.num'), cv = el.querySelector('canvas'), status = el.querySelector('.status');
+  const ac = new AbortController(), cache = {}, reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let data = null, shown = 0, rafId = 0, sound = false, week = 43;
+  el.querySelector('img').addEventListener('error', e => { e.target.replaceWith(Object.assign(document.createElement('span'), { className: 'avatar-fb', textContent: '林', role: 'img', ariaLabel: '林同学的头像' })); });
+  function show(d) {
+    data = d; drawChart(cv, d);
+    const total = d.reduce((a, b) => a + b);
+    cv.setAttribute('aria-label', `每日学习时长：${d.map((v, i) => `周${DAYS[i]} ${v} 分钟`).join('，')}`);
+    el.querySelector('table').innerHTML = `<tr>${DAYS.map(x => `<th scope="col">周${x}</th>`).join('')}</tr><tr>${d.map(v => `<td>${v}</td>`).join('')}</tr>`;
+    el.querySelector('.goal').hidden = total < GOAL;
+    // 数字动画：到目标值就停；用户要求减少动态效果时直接显示结果
+    cancelAnimationFrame(rafId);
+    if (reduce) { shown = total; num.textContent = total; return; }
+    const step = () => { shown = Math.min(total, shown + 4); num.textContent = shown; if (shown < total) rafId = requestAnimationFrame(step); else if (total >= GOAL && sound) beep(); };
+    rafId = requestAnimationFrame(step);
+  }
+  async function load(w, quiet) {
+    week = w;
+    if (cache[w]) return show(cache[w]);
+    try { const d = await fetchWeek(w); if (ac.signal.aborted) return; cache[w] = d; status.className = 'status'; status.textContent = ''; show(d); }
+    catch (e) { if (ac.signal.aborted || quiet) return; status.className = 'status msg'; status.innerHTML = `第 ${w} 周的数据没有加载出来（${esc(e.message)}）。<button type="button" data-a="retry">重试</button>`; }
+  }
+  const poll = setInterval(() => load(week, true), 1000);
+  window.addEventListener('resize', () => drawChart(cv, data), { signal: ac.signal });
+  el.querySelector('select').addEventListener('change', e => { shown = 0; load(+e.target.value); });
+  el.addEventListener('click', async e => {
+    const a = e.target.closest('[data-a]'); if (!a) return;
+    if (a.dataset.a === 'retry' || a.dataset.a === 'refresh') { delete cache[week]; return load(week); }
+    if (a.dataset.a === 'sound') { sound = !sound; a.setAttribute('aria-pressed', String(sound)); a.textContent = `声音提示：${sound ? '开' : '关'}`; return; }
+    if (a.dataset.a === 'copy') {
+      try { if (!navigator.clipboard) throw new Error('不支持'); await navigator.clipboard.writeText(location.href); status.className = 'status msg info'; status.textContent = '链接已复制。'; }
+      catch (err) { status.className = 'status msg info'; status.innerHTML = `无法自动复制，请手动复制：<input readonly value="${esc(location.href.split('?')[0])}" aria-label="分享链接" size="18">`; status.querySelector('input').select(); }
+    }
+  });
+  load(43);
+  return () => { ac.abort(); clearInterval(poll); cancelAnimationFrame(rafId); host.innerHTML = ''; };
+}
+const UNMOUNT = {};
+const mount = v => { if (UNMOUNT[v]) UNMOUNT[v](); UNMOUNT[v] = (v === 'A' ? mountA : mountB)($('host' + v)); };
+
+// ---------- 研究记录与可重现性检查 ----------
+// 试验：程序生成一张封面图，分别用两种 JPEG 质量编码，记录文件大小与 PSNR
+function rng(seed) { let s = seed >>> 0 || 1; return () => (s = s * 16807 % 2147483647) / 2147483647; }
+function cover(w, rnd) {
+  const c = document.createElement('canvas'); c.width = w; c.height = Math.round(w * 2 / 3); const g = c.getContext('2d'), h = c.height;
+  const gr = g.createLinearGradient(0, 0, w, h); gr.addColorStop(0, `hsl(${rnd() * 360} 50% 40%)`); gr.addColorStop(1, `hsl(${rnd() * 360} 60% 75%)`); g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 40; i++) { g.strokeStyle = `hsl(${rnd() * 360} 70% ${40 + rnd() * 50}%)`; g.lineWidth = 1 + rnd() * 3; g.beginPath(); g.moveTo(rnd() * w, rnd() * h); g.lineTo(rnd() * w, rnd() * h); g.stroke(); }
+  g.fillStyle = '#fff'; g.font = `700 ${Math.round(h / 8)}px system-ui`; g.fillText('数据可视化入门', w * 0.06, h * 0.88);
+  return c;
+}
+async function psnr(src, url) {
+  const img = new Image(); img.src = url; await img.decode();
+  const c = document.createElement('canvas'); c.width = src.width; c.height = src.height; const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+  const a = src.getContext('2d').getImageData(0, 0, c.width, c.height).data, b = g.getImageData(0, 0, c.width, c.height).data;
+  let se = 0; for (let i = 0; i < a.length; i += 4) for (let k = 0; k < 3; k++) se += (a[i + k] - b[i + k]) ** 2;
+  return 10 * Math.log10(255 * 255 / (se / (a.length / 4 * 3)));
+}
+async function runVariant(v, seed) {
+  const src = cover(v.size, seed == null ? Math.random : rng(seed)), url = src.toDataURL('image/jpeg', v.q);
+  return { variant: v.name, seed, kb: +((url.length - 23) * 3 / 4 / 1024).toFixed(1), psnr: +(await psnr(src, url)).toFixed(2) };
+}
+async function runRecord(rec) { const out = []; for (const v of rec.params.variants) for (const s of rec.seeds || [null]) out.push(await runVariant(v, s)); return out; }
+const REC = {
+  A: { 标题: '图片压缩试验', question: '', goal: '看看哪个好', sources: [], inputs: '随便画的封面图', params: { variants: [{ name: '高质量', size: 1024, q: 0.9 }, { name: '低质量', size: 512, q: 0.6 }] }, seeds: null, env: null, results: null, failures: [], limits: [],
+       conclusions: [{ text: '低质量就够了，用户看不出区别', type: null, evidence: [] }], participants: { 做法: '在群里找几位同学看图，记下名字和反馈', consent: null, ids: null, withdraw: null }, steps: null },
+  B: { 标题: '课程封面的 JPEG 质量：0.9 与 0.6', question: '把课程封面从 JPEG 质量 0.9 降到 0.6，文件能小多少，画质损失多大？', goal: '为列表页选默认质量；画质用 PSNR 衡量，另请同学做二选一比较',
+       sources: [{ name: 'MDN：HTMLCanvasElement.toDataURL()', url: 'https://developer.mozilla.org/docs/Web/API/HTMLCanvasElement/toDataURL' }, { name: 'web.dev：图片格式与压缩', url: 'https://web.dev/learn/images/' }],
+       inputs: '程序生成的封面图（渐变、40 条随机线段、标题文字），宽 512 像素', params: { variants: [{ name: '质量 0.9', size: 512, q: 0.9 }, { name: '质量 0.6', size: 512, q: 0.6 }], independent: 'q' }, seeds: [1, 2, 3],
+       env: null, results: null,
+       failures: ['PSNR 最低的种子（见结果）里标题文字边缘有明显振铃'], limits: ['只测了程序生成的图，没有测照片', '只测了本机浏览器的 JPEG 编码器', 'PSNR 不等于人眼感受'],
+       conclusions: [{ text: '质量 0.6 的文件平均更小（见 r 结果的大小列）', type: '观察', evidence: ['results'] }, { text: '列表页缩略图可以默认用 0.6，详情页仍用 0.9', type: '推断', evidence: ['results', 'limits'] }],
+       participants: { 做法: '二选一比较，每人 6 组', consent: '知情同意说明 v1：用途、保存期限、可随时退出', ids: '只记编号 P01、P02…，不记姓名', withdraw: '退出者的数据全部删除', data: '未填写（需要真实参与者）' },
+       steps: '打开本页，按 seeds 与 params 运行 runRecord(REC.B)，比较 kb 与 psnr' }
+};
+function checkRecord(rec, rerun) {
+  const vs = rec.params.variants, keys = Object.keys(vs[0]).filter(k => k !== 'name'), diff = keys.filter(k => vs.some(v => v[k] !== vs[0][k]));
+  const same = rec.results && rerun && rerun.length === rec.results.length && rerun.every((x, i) => Math.abs(x.kb - rec.results[i].kb) < 0.05 && Math.abs(x.psnr - rec.results[i].psnr) < 0.01);
+  const P = rec.participants;
+  return {
+    q: { pass: !!rec.question && rec.sources.length > 0, ev: rec.question ? `问题明确；来源 ${rec.sources.length} 条` : `没有写研究问题（目标只写了“${rec.goal}”）；没有来源` },
+    cfg: { pass: !!rec.seeds && !!rec.env && !!rec.inputs, ev: rec.seeds ? `记录了输入、参数、种子 ${rec.seeds.join('、')} 与运行环境` : '没有随机种子，也没有记录浏览器与版本' },
+    fair: { pass: diff.length === 1, ev: diff.length === 1 ? `两个方案只差 ${diff[0]}（自变量）` : `两个方案同时改变了 ${diff.join(' 和 ')}，无法判断差异来自哪一个` },
+    lim: { pass: rec.failures.length > 0 && rec.limits.length > 0, ev: rec.limits.length ? `失败情况 ${rec.failures.length} 条、适用边界 ${rec.limits.length} 条` : '没有写失败情况和适用边界' },
+    concl: { pass: rec.conclusions.every(c => c.type && c.evidence.length), ev: rec.conclusions.map(c => `${c.type ? `【${c.type}】` : '【未区分】'}${c.text}`).join('；') },
+    repro: { pass: !!same, ev: same ? '按记录重新运行，大小与 PSNR 完全一致' : '按记录重新运行，结果与记录不同（没有固定随机输入）' },
+    people: { pass: !!P.consent && !!P.ids && !!P.withdraw, ev: P.consent ? `有知情同意、匿名编号与退出处理；参与者数据：${P.data}` : `做法是“${P.做法}”：记录真实姓名，没有知情同意和退出说明` }
+  };
+}
+window.__er = {
+  NET, LEAK, mount, UNMOUNT,
+  unmountAll: () => { for (const v of ['A', 'B']) if (UNMOUNT[v]) { UNMOUNT[v](); UNMOUNT[v] = null; } },
+  shot: (id, html) => $(id).insertAdjacentHTML('beforeend', html),
+  async research() {
+    // “原始运行”：生成两份记录里的结果；随后按记录重新运行一次
+    const env = `${navigator.userAgent.match(/(HeadlessChrome|Chrome)\/[\d.]+/)?.[0] || navigator.userAgent}；${navigator.hardwareConcurrency} 线程；${new Date().toISOString().slice(0, 10)}`;
+    REC.B.env = env;
+    for (const k of ['A', 'B']) REC[k].results = await runRecord(REC[k]);
+    const rerun = { A: await runRecord(REC.A), B: await runRecord(REC.B) };
+    // 每个字段一行，结果另见下表
+    const brief = (name, r) => name + '\n' + Object.entries(r).map(([k, v]) => `${k}: ${k === 'results' ? `（${v.length} 行，见下表）` : JSON.stringify(v)}`).join('\n');
+    $('recA').textContent = brief('A 记录', REC.A); $('recB').textContent = brief('B 记录', REC.B);
+    const C = { A: checkRecord(REC.A, rerun.A), B: checkRecord(REC.B, rerun.B) };
+    const ROWS = [['问题和目标明确，方法与来源可追踪', 'q'], ['输入、数据、参数与运行配置有记录', 'cfg'], ['比较方案使用一致的条件', 'fair'], ['结果包含失败情况与适用边界', 'lim'], ['结论区分观察和推断，并指向证据', 'concl'], ['他人能按说明重现关键结果', 'repro'], ['尊重参与者的知情、隐私和退出', 'people']];
+    const cell = x => `<td><span class="${x.pass ? 'good' : 'poor'}">${x.pass ? '✓ 通过' : '✗ 未通过'}</span> ${esc(x.ev)}</td>`;
+    $('res').innerHTML = `<tr><th>检查项</th><th>A 记录</th><th>B 记录</th></tr>` + ROWS.map(([n, k]) => `<tr><th>${n}</th>${cell(C.A[k])}${cell(C.B[k])}</tr>`).join('');
+    $('rep').innerHTML = `<tr><th>记录</th><th>方案</th><th>种子</th><th>记录里的大小</th><th>重新运行</th><th>记录里的 PSNR</th><th>重新运行</th></tr>` + ['A', 'B'].flatMap(k => REC[k].results.map((x, i) => `<tr><th>${k}</th><td>${esc(x.variant)}${REC[k].params.variants.find(v => v.name === x.variant).size !== 512 ? `（${REC[k].params.variants.find(v => v.name === x.variant).size} 像素）` : ''}</td><td class="num">${x.seed ?? '无'}</td><td class="num">${x.kb} KB</td><td class="num ${Math.abs(rerun[k][i].kb - x.kb) < 0.05 ? 'good' : 'poor'}">${rerun[k][i].kb} KB</td><td class="num">${x.psnr} dB</td><td class="num ${Math.abs(rerun[k][i].psnr - x.psnr) < 0.01 ? 'good' : 'poor'}">${rerun[k][i].psnr} dB</td></tr>`)).join('');
+    const b = REC.B.results, avg = n => b.filter(x => x.variant === n), kb9 = avg('质量 0.9').reduce((s, x) => s + x.kb, 0), kb6 = avg('质量 0.6').reduce((s, x) => s + x.kb, 0), worst = avg('质量 0.6').reduce((a, x) => x.psnr < a.psnr ? x : a);
+    $('mres').innerHTML = `B 的结果：质量 0.6 的文件合计比 0.9 小 ${((1 - kb6 / kb9) * 100).toFixed(0)}%；PSNR 最低的是种子 ${worst.seed}（${worst.psnr} dB），对应记录里写的失败情况。A 的两个方案同时改了尺寸和质量，又没有固定随机输入，即使数字看起来差别很大，也说不清来自哪里，别人也重现不出来。`;
+    return { C, env };
+  },
+  render: (html, note) => { $('eng').innerHTML = html; $('meng').innerHTML = note; document.body.classList.add('done'); }
+};
+mount('A'); mount('B');
+</script>
+</body>
+</html>
