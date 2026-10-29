@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>组件与资产目录：统一高频组件并检验能否独立使用</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 4px 0 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } table.t tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .col { display: grid; gap: 6px; align-content: start; }
+  .strip { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; border: 1px dashed var(--line); border-radius: 8px; padding: 6px; min-height: 40px; }
+  .doc { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 12px; display: grid; gap: 3px; }
+  .doc code { font: 11px ui-monospace, Menlo, monospace; background: #f6f7f9; padding: 0 4px; border-radius: 4px; }
+  .tag-s { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 9px; background: #fff3d6; color: #7a4a00; }
+  /* 历史遗留的写法 */
+  .old button { font-family: inherit; border: 0; color: #fff; margin: 1px; font-size: 12px; }
+  .old .v1 { background: #2f6fdb; border-radius: 6px; padding: 3px 10px; } .old .v2 { background: #3070dc; border-radius: 4px; padding: 4px 12px; } .old .v3 { background: #2e6edb; border-radius: 6px; padding: 3px 10px; font-size: 11px; }
+  .old .v4 { background: #fff; color: #2f6fdb; border: 1px solid #2f6fdb; border-radius: 6px; padding: 2px 10px; } .old .v5 { background: #eef2f8; color: #1d2330; border-radius: 6px; padding: 3px 10px; }
+  .old .v6 { background: #b3261e; border-radius: 6px; padding: 3px 10px; } .old .v7 { background: #b42a20; border-radius: 6px; padding: 3px 8px; } .old .v8 { background: none; color: #2f6fdb; padding: 0 4px; }
+  .old .t1 { background: #e8eefb; color: #1f4fae; border-radius: 9px; padding: 0 8px; font-size: 11px; } .old .t2 { background: #e9effb; color: #1f4fae; border-radius: 10px; padding: 0 7px; font-size: 11px; } .old .t3 { background: #fff3d6; color: #7a4a00; border-radius: 9px; padding: 0 8px; font-size: 11px; }
+  .old .c1, .old .c2 { display: inline-block; width: 34px; height: 22px; border: 1px solid #dde1e7; border-radius: 8px; } .old .c2 { border-color: #dfe2e8; border-radius: 10px; }
+  /* 统一后的组件：只用令牌 */
+  .new { --primary: #2f6fdb; --primary-ink: #fff; --danger: #b3261e; --surface-2: #eef2f8; --info-bg: #e8eefb; --info-ink: #1f4fae; --warn-bg: #fff3d6; --warn-ink: #7a4a00; --border: #dde1e7; --r: 6px; --r-pill: 9px; }
+  .new .btn { font-family: inherit; border: 0; margin: 1px; font-size: 12px; padding: 3px 10px; border-radius: var(--r); }
+  .new .btn[data-v="primary"] { background: var(--primary); color: var(--primary-ink); } .new .btn[data-v="secondary"] { background: var(--surface-2); color: #1d2330; } .new .btn[data-v="danger"] { background: var(--danger); color: #fff; } .new .btn[data-v="text"] { background: none; color: var(--primary); padding: 0 4px; }
+  .new .btn:focus-visible { outline: 3px solid #2f6fdb66; } .new .btn:disabled { opacity: .5; }
+  .new .tag { border-radius: var(--r-pill); padding: 0 8px; font-size: 11px; } .new .tag[data-tone="info"] { background: var(--info-bg); color: var(--info-ink); } .new .tag[data-tone="warning"] { background: var(--warn-bg); color: var(--warn-ink); }
+  .new .card { display: inline-block; width: 34px; height: 22px; border: 1px solid var(--border); border-radius: 8px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div class="col"><h2>1 清点：六个页面里的组件实例与变体</h2>
+      <p class="sub">六个页面的组件用种子随机生成（为演示而构造），再用浏览器计算出的样式归类。上：统一前；下：按迁移表替换后。</p>
+      <div class="strip old" id="before"></div><div class="strip new" id="after"></div>
+      <table class="t" id="inv"></table><p class="m" id="minv"></p></div>
+    <div class="col"><h2>2 迁移表：旧写法 → 新组件</h2><table class="t" id="map"></table><p class="m" id="mmap"></p></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div class="col"><h2>3 目录条目：每个组件都要能独立读懂</h2><div id="docs" style="display:grid;gap:6px"></div><table class="t" id="complete"></table></div>
+    <div class="col"><h2>4 他人独立使用：只看目录能不能完成任务</h2>
+      <p class="sub"><span class="tag-s">脚本模拟</span> 一个只读目录的“新同事”脚本：按任务里的关键词逐条翻目录，找到满足全部要求的组件为止。它只能说明目录是否自足；真实的理解成本要请人来测，记录表在下面。</p>
+      <table class="t" id="tasks"></table><p class="m" id="mtasks"></p>
+      <h3>真人独立使用时记录什么</h3><table class="t" id="human"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ok = (b, y = '✓', n = '✗') => b ? `<span class="good">${y}</span>` : `<span class="poor">${n}</span>`;
+const mulberry32 = a => () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+const R = {};
+// ---------- 1 生成六个页面的组件实例 ----------
+const OLD = {
+  button: [['v1', '主要'], ['v2', '主要'], ['v3', '主要'], ['v4', '次要'], ['v5', '次要'], ['v6', '危险'], ['v7', '危险'], ['v8', '文字']],
+  tag: [['t1', '信息'], ['t2', '信息'], ['t3', '提醒']],
+  card: [['c1', '卡片'], ['c2', '卡片']]
+};
+const WEIGHTS = { button: [10, 6, 4, 5, 3, 3, 2, 6], tag: [9, 5, 4], card: [7, 4] };
+const rnd = mulberry32(18), pick = w => { const s = w.reduce((a, b) => a + b, 0); let r = rnd() * s; for (let i = 0; i < w.length; i++) { r -= w[i]; if (r < 0) return i; } return w.length - 1; };
+const PAGES = ['课程列表', '课程详情', '个人中心', '学习计划', '作业提交', '消息'];
+const instances = [];
+for (const pg of PAGES) for (const [kind, n] of [['button', 11], ['tag', 6], ['card', 4]]) for (let i = 0; i < n; i++) instances.push({ pg, kind, v: OLD[kind][pick(WEIGHTS[kind])][0] });
+const TEXT = { button: '按钮', tag: '标签', card: '' };
+$('before').innerHTML = instances.map(it => it.kind === 'button' ? `<button class="${it.v}">${TEXT.button}</button>` : it.kind === 'tag' ? `<span class="${it.v}">${TEXT.tag}</span>` : `<span class="${it.v}"></span>`).join('');
+// ---------- 2 迁移表 ----------
+const MAP = { v1: ['Button', 'primary'], v2: ['Button', 'primary'], v3: ['Button', 'primary'], v4: ['Button', 'secondary'], v5: ['Button', 'secondary'], v6: ['Button', 'danger'], v7: ['Button', 'danger'], v8: ['Button', 'text'], t1: ['Tag', 'info'], t2: ['Tag', 'info'], t3: ['Tag', 'warning'], c1: ['Card', ''], c2: ['Card', ''] };
+$('after').innerHTML = instances.map(it => { const [c, v] = MAP[it.v]; return c === 'Button' ? `<button class="btn" data-v="${v}">${TEXT.button}</button>` : c === 'Tag' ? `<span class="tag" data-tone="${v}">${TEXT.tag}</span>` : '<span class="card"></span>'; }).join('');
+// 用计算样式归类：同一类组件有几种样子
+function census(root) {
+  const out = {};
+  for (const el of root.children) {
+    const kind = el.tagName === 'BUTTON' ? 'button' : el.textContent ? 'tag' : 'card', cs = getComputedStyle(el);
+    const sig = [cs.backgroundColor, cs.color, cs.borderTopLeftRadius, cs.paddingTop, cs.paddingLeft, cs.fontSize, cs.borderTopColor, cs.borderTopWidth].join('|');
+    (out[kind] = out[kind] || { n: 0, sigs: new Set() }).n++; out[kind].sigs.add(sig);
+  }
+  return out;
+}
+const before = census($('before')), after = census($('after'));
+const KN = { button: '按钮', tag: '标签', card: '卡片' };
+$('inv').innerHTML = '<tr><th>组件</th><th>实例数</th><th>统一前的样子</th><th>统一后的样子</th><th>实际需要的种类</th></tr>' + Object.keys(KN).map(k => `<tr><th>${KN[k]}</th><td class="num">${before[k].n}</td><td class="num poor">${before[k].sigs.size}</td><td class="num good">${after[k].sigs.size}</td><td class="sub">${k === 'button' ? '主要、次要、危险、文字' : k === 'tag' ? '信息、提醒' : '1 种'}</td></tr>`).join('');
+const total = instances.length;
+$('minv').innerHTML = `${PAGES.length} 个页面共 ${total} 个组件实例。按实例数排序，按钮（${before.button.n}）、标签（${before.tag.n}）、卡片（${before.card.n}）是最高频的三类，先统一它们。统一前按钮有 ${before.button.sigs.size} 种样子，统一后 ${after.button.sigs.size} 种，正好是需要的四种角色。`;
+R.inv = { total, before: Object.fromEntries(Object.entries(before).map(([k, v]) => [k, [v.n, v.sigs.size]])), after: Object.fromEntries(Object.entries(after).map(([k, v]) => [k, [v.n, v.sigs.size]])) };
+// 迁移表与视觉变化：替换前后同一个实例的背景色差
+const lab = c => { const f = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; const [r, g, b] = c.map(f), X = (r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047, Y = r * 0.2126 + g * 0.7152 + b * 0.0722, Z = (r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883, t = v => v > 0.008856 ? Math.cbrt(v) : 7.787 * v + 16 / 116; return [116 * t(Y) - 16, 500 * (t(X) - t(Y)), 200 * (t(Y) - t(Z))]; };
+const rgb = s => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number), transparent = s => /rgba\(0, 0, 0, 0\)/.test(s);
+const dE = (a, b) => { const A = lab(a), B = lab(b); return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]); };
+const bEls = [...$('before').children], aEls = [...$('after').children], per = {};
+bEls.forEach((el, i) => { const a = getComputedStyle(el).backgroundColor, b = getComputedStyle(aEls[i]).backgroundColor, v = instances[i].v; const d = transparent(a) && transparent(b) ? 0 : transparent(a) || transparent(b) ? NaN : dE(rgb(a), rgb(b)); const r1 = getComputedStyle(el).borderTopLeftRadius, r2 = getComputedStyle(aEls[i]).borderTopLeftRadius; (per[v] = per[v] || { n: 0, d, radius: r1 !== r2 && !(transparent(a) && transparent(b)) ? `${r1}→${r2}` : '' }).n++; });
+$('map').innerHTML = '<tr><th>旧写法</th><th>用了几处</th><th>新组件</th><th>背景色差</th><th>其他变化</th></tr>' + Object.entries(MAP).map(([v, [c, p]]) => `<tr><td><code>.${v}</code>（${(OLD.button.concat(OLD.tag, OLD.card).find(x => x[0] === v) || [])[1]}）</td><td class="num">${per[v] ? per[v].n : 0}</td><td><code>${c}${p ? ` ${c === 'Tag' ? 'tone' : 'variant'}="${p}"` : ''}</code></td><td class="num ${per[v] && per[v].d > 3 ? 'mid' : ''}">${per[v] ? (Number.isNaN(per[v].d) ? '—' : per[v].d.toFixed(1)) : '—'}</td><td class="sub">${per[v] ? per[v].radius || '—' : '—'}</td></tr>`).join('');
+const visible = Object.entries(per).filter(([, x]) => x.d > 3 || x.radius); // 透明背景（文字按钮）的圆角变化看不出，不算
+$('mmap').innerHTML = `13 种旧写法映射到 3 个新组件、7 种用法。大部分替换肉眼看不出（色差小于 3）；看得出的有 ${visible.length} 种：${visible.map(([v, x]) => `.${v}（${x.d > 3 ? `色差 ${x.d.toFixed(1)}` : ''}${x.d > 3 && x.radius ? '，' : ''}${x.radius ? `圆角 ${x.radius}` : ''}）`).join('、')}——这些要在迁移说明里写清楚，并让页面负责人确认。`;
+R.map = { olds: Object.keys(MAP).length, visible: visible.map(([v, x]) => [v, +((x.d || 0).toFixed(1)), x.radius]) };
+
+// ---------- 3 目录条目 ----------
+let CATALOG = [
+  { name: 'Button', use: '触发一个操作。主要操作每屏只放一个。', notFor: '跳转到别的页面（用链接）', props: { variant: ['primary', 'secondary', 'danger', 'text'], size: ['S', 'M'], disabled: 'boolean', loading: 'boolean' }, states: ['悬停', '键盘焦点', '禁用', '加载中'], a11y: '文字说出结果；加载中保持可聚焦并读出“正在保存”', example: '<Button variant="danger">删除记录</Button>', keywords: ['主要操作', '次要操作', '取消', '危险', '删除', '加载中', '按钮'], owner: '设计系统组', version: '2.0.0', log: '2026-10 合并 8 种旧写法' },
+  { name: 'Tag', use: '给对象加分类或状态的短标签。', notFor: '可以点击的筛选（用 FilterChip）', props: { tone: ['info', 'warning'] }, states: [], a11y: '颜色之外要有文字', example: '<Tag tone="warning">即将开课</Tag>', keywords: ['标签', '分类', '状态', '提醒'], owner: '设计系统组', version: '1.1.0', log: '2026-10 合并 3 种旧写法' },
+  { name: 'Card', use: '把同一对象的信息放在一起。', notFor: '', props: {}, states: [], a11y: '', example: '<Card>…</Card>', keywords: ['卡片', '分组'], owner: '', version: '1.0.0', log: '' }
+];
+const FIELDS = [['use', '用途'], ['notFor', '何时不用'], ['props', '属性'], ['a11y', '无障碍要点'], ['example', '示例'], ['owner', '负责人'], ['log', '变更记录']];
+const filled = (c, f) => f === 'props' ? Object.keys(c.props).length > 0 || c.name === 'Card' && false : !!c[f];
+function drawDocs() {
+  $('docs').innerHTML = CATALOG.map(c => `<div class="doc"><b>${c.name}</b> <span class="sub">v${c.version} · 负责人 ${c.owner || '—'}</span><div>${esc(c.use)}${c.notFor ? `　不要用于：${esc(c.notFor)}` : ''}</div><div>${Object.entries(c.props).map(([k, v]) => `<code>${k}</code>：${Array.isArray(v) ? v.join(' ｜ ') : v}`).join('　') || '<span class="poor">没有写属性</span>'}</div><div><code>${esc(c.example)}</code></div></div>`).join('');
+  $('complete').innerHTML = '<tr><th>组件</th>' + FIELDS.map(f => `<th>${f[1]}</th>`).join('') + '</tr>' + CATALOG.map(c => `<tr><th>${c.name}</th>${FIELDS.map(([f]) => `<td>${ok(filled(c, f))}</td>`).join('')}</tr>`).join('');
+}
+drawDocs();
+
+// ---------- 4 只读目录的“新同事” ----------
+const TASKS = [
+  { t: '“开始学习”主要操作', need: ['主要操作'], prop: ['variant', 'primary'] },
+  { t: '“删除记录”危险操作', need: ['删除'], prop: ['variant', 'danger'] },
+  { t: '对话框里的“取消”', need: ['取消'], prop: ['variant', 'secondary'] },
+  { t: '保存时显示“正在保存”', need: ['加载中'], prop: ['loading', null] },
+  { t: '课程分类标签“数据”', need: ['分类'], prop: ['tone', 'info'] },
+  { t: '状态标签“即将开课”', need: ['提醒'], prop: ['tone', 'warning'] },
+  { t: '只有图标的“关闭”按钮', need: ['图标按钮'], prop: ['icon', null], fix: 'Button 增加 icon 属性，并要求只有图标时必须写 aria-label' },
+  { t: '带封面图的课程卡片', need: ['封面'], prop: ['media', null], fix: 'Card 增加 media 属性与图片比例的说明' }
+];
+function newColleague() {
+  return TASKS.map(task => {
+    let reads = 0, found = null;
+    for (const c of CATALOG) { reads++; if (task.need.every(k => c.keywords.includes(k)) && c.props[task.prop[0]] !== undefined && (!task.prop[1] || c.props[task.prop[0]].includes(task.prop[1]))) { found = c; break; } }
+    return { ...task, reads, found: found ? `${found.name} ${task.prop[0]}${task.prop[1] ? `="${task.prop[1]}"` : ''}` : null };
+  });
+}
+const RUN1 = newColleague();
+// 按“修改需求”改目录，再让脚本做一遍
+CATALOG[0].props.icon = 'string'; CATALOG[0].keywords.push('图标按钮'); CATALOG[0].a11y += '；只有图标时必须写 aria-label';
+CATALOG[2].props.media = '图片地址（16:9）'; CATALOG[2].keywords.push('封面'); CATALOG[2].owner = '课程组'; CATALOG[2].log = '2026-10 增加 media'; CATALOG[2].notFor = '整张卡片都可点击时（用 LinkCard）'; CATALOG[2].a11y = '标题用标题元素；封面图写替代文本'; CATALOG[2].version = '1.1.0';
+const RUN2 = newColleague();
+drawDocs();
+$('tasks').innerHTML = '<tr><th>任务</th><th>第一次</th><th>翻了几条</th><th>按需求修改目录后</th></tr>' + RUN1.map((r, i) => `<tr><td>${r.t}</td><td>${r.found ? `<span class="good">${esc(r.found)}</span>` : `<span class="poor">找不到</span><div class="sub">修改需求：${r.fix}</div>`}</td><td class="num">${r.reads}</td><td>${RUN2[i].found ? `<span class="good">${esc(RUN2[i].found)}</span>` : '<span class="poor">仍找不到</span>'}</td></tr>`).join('');
+const f1 = RUN1.filter(r => !r.found).length, f2 = RUN2.filter(r => !r.found).length;
+$('mtasks').innerHTML = `第一次 8 个任务完成 ${8 - f1} 个，平均翻 ${(RUN1.reduce((s, r) => s + r.reads, 0) / 8).toFixed(1)} 条目录；找不到的 ${f1} 个变成两条修改需求（图标按钮、带封面的卡片）。按需求补上后再做一遍，${8 - f2}／8 完成。上面“目录条目”和完整度表显示的是修改后的版本：Card 补齐了负责人、何时不用、无障碍要点和变更记录。`;
+R.tasks = { run1: RUN1.map(r => [r.t, r.found, r.reads]), run2: RUN2.map(r => [r.t, r.found]), f1, f2 };
+$('human').innerHTML = '<tr><th>记录项</th><th>怎么记</th><th>本页</th></tr>' + [['完成任务用的时间', '从拿到任务到写出正确用法'], ['卡住的地方', '记下在哪一条、为什么'], ['理解错的属性', '例如把 secondary 用成危险操作'], ['提出的修改需求', '缺的组件、属性、例子'], ['是否愿意下次直接用目录', '结束时问一次']].map(r => `<tr><td>${r[0]}</td><td class="sub">${r[1]}</td><td class="mid">未填写</td></tr>`).join('');
+R.complete = CATALOG.map(c => [c.name, FIELDS.filter(([f]) => !filled(c, f)).map(f => f[1])]);
+document.fonts.ready.then(() => { window.__cat = R; });
+</script>
+</body>
+</html>
