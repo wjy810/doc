@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>反馈与布局动画：弹性按钮、卡片展开、列表重排与拖拽吸附</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; } .tag { font-size: 11px; color: var(--muted); margin: 0 0 2px; }
+  .stage { border: 1px solid var(--line); border-radius: 8px; height: 170px; position: relative; overflow: hidden; background: #fafbfc; }
+  button { font: inherit; } :focus-visible { outline: 3px solid #f2a93b; outline-offset: 2px; }
+  /* 1 弹性按钮 */
+  .bw { display: grid; place-items: center; align-content: center; gap: 8px; height: 100%; }
+  .bounce { border: 0; border-radius: 10px; padding: 8px 20px; background: var(--accent); color: #fff; font-weight: 700; cursor: pointer; }
+  .bounce.pop { animation: pop .35s cubic-bezier(.3, 1.6, .5, 1); } @keyframes pop { 40% { transform: scale(.88); } }
+  .bounce:disabled { opacity: .6; } .bw .st { font-size: 12px; min-height: 20px; } .bw .st.err { color: var(--bad); } .bw .st.ok { color: var(--ok); }
+  @media (prefers-reduced-motion: reduce) { .B .bounce.pop { animation: none; } }
+  /* 2 卡片展开 */
+  .cards { display: flex; gap: 8px; padding: 10px; }
+  .cards .c { width: 76px; height: 70px; border-radius: 8px; background: #dfe8f8; border: 0; text-align: left; padding: 6px 8px; font-size: 12px; cursor: pointer; }
+  .detail { position: absolute; border-radius: 10px; background: #dfe8f8; padding: 10px 12px; overflow: hidden; }
+  .detail h3 { margin: 0 0 4px; font-size: 15px; } .detail p { margin: 0; font-size: 12px; } .detail .close { position: absolute; right: 6px; top: 4px; border: 0; background: none; font-size: 16px; cursor: pointer; width: 28px; height: 28px; }
+  /* 3 列表重排 */
+  .list { position: relative; margin: 8px; } #lA, #lB { height: 182px; }
+  .list .row { position: absolute; left: 0; right: 0; height: 24px; border-radius: 5px; background: #eef2f8; padding: 0 8px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+  .sorts { display: flex; gap: 6px; padding: 6px 8px 0; } .sorts button { font-size: 12px; border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 1px 8px; }
+  /* 4 拖拽吸附 */
+  .board { position: absolute; inset: 8px; background-image: linear-gradient(#e7ebf1 1px, transparent 1px), linear-gradient(90deg, #e7ebf1 1px, transparent 1px); background-size: 20px 20px; border: 1px dashed #c9d0db; border-radius: 6px; }
+  .node { position: absolute; width: 60px; height: 40px; border-radius: 6px; background: var(--accent); color: #fff; display: grid; place-items: center; font-size: 12px; cursor: grab; touch-action: none; user-select: none; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div><h2>1 按钮弹性反馈：连点、取消与真实结果</h2><p class="sub">“加入学习计划”按下时缩一下再弹回。A 在 pointerdown 就提交、每次按下都提交，动画结束就显示“已加入”；B 在 click 提交（按下后移开就算取消），提交中不再接受点击，等服务器返回后才显示结果。服务器 0.5 秒返回，可以切换成失败。</p><div class="pair"><div><p class="tag">A</p><div class="stage A"><div class="bw" id="bA"><button class="bounce" type="button">加入学习计划</button><div class="st"></div></div></div></div><div><p class="tag">B</p><div class="stage B"><div class="bw" id="bB"><button class="bounce" type="button">加入学习计划</button><div class="st" role="status"></div></div></div></div></div><table class="t" id="tB"></table></div>
+    <div><h2>2 卡片展开详情：中断、返回与焦点</h2><p class="sub">点击卡片，详情从卡片的位置展开（记录前后位置，再过渡）。A 展开动画进行中按 Esc 会等动画播完再瞬间收回，焦点留在页面上；B 从当前大小反向收回，打开时焦点进入详情，关闭后回到原来的卡片。</p><div class="pair"><div><p class="tag">A</p><div class="stage" id="xA"><div class="cards"></div></div></div><div><p class="tag">B</p><div class="stage" id="xB"><div class="cards"></div></div></div></div><table class="t" id="tX"></table></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>3 平滑列表重排：排序数据与视觉对应</h2><p class="sub">点“按价格”“按时间”排序，行从旧位置滑到新位置。A 在动画进行中忽略新的排序（数据却已经按新方式排好），连点两次后画面停在旧的顺序；B 每次都从每一行当前的实际位置重新出发，并用文字说明当前的排序方式。</p><div class="pair"><div><p class="tag">A</p><div class="stage" id="lA"></div></div><div><p class="tag">B</p><div class="stage" id="lB"></div></div></div><table class="t" id="tL"></table></div>
+    <div><h2>4 拖拽吸附：撤销、键盘替代与边界</h2><p class="sub">把方块拖到网格上，松手时吸附到 20 像素的格点。A 只支持鼠标拖拽，可以拖出画板；B 限制在画板内，Ctrl＋Z 撤销，方向键按格移动。</p><div class="pair"><div><p class="tag">A</p><div class="stage" id="dA"><div class="board"></div><div class="node" style="left:28px;top:28px">节点</div></div></div><div><p class="tag">B</p><div class="stage" id="dB"><div class="board"></div><div class="node" tabindex="0" role="button" aria-label="节点，方向键移动，Ctrl＋Z 撤销" style="left:28px;top:28px">节点</div></div></div></div><table class="t" id="tD"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const frame = () => new Promise(r => requestAnimationFrame(r));
+// ---------- 1 弹性按钮 ----------
+const SRV = { fail: false, log: [] };
+const save = v => { SRV.log.push(v); return new Promise((res, rej) => setTimeout(() => SRV.fail ? rej(new Error('网络错误')) : res(), 500)); };
+function setupButtons() {
+  for (const v of ['A', 'B']) {
+    const w = $('b' + v), b = w.querySelector('button'), st = w.querySelector('.st');
+    const pop = () => { b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop'); };
+    if (v === 'A') {
+      b.addEventListener('pointerdown', () => { pop(); save('A').catch(() => {}); setTimeout(() => { st.className = 'st ok'; st.textContent = '✓ 已加入'; }, 350); });
+    } else {
+      let pending = false;
+      b.addEventListener('pointerdown', pop);
+      b.addEventListener('click', async () => {
+        if (pending) return; pending = true; b.disabled = true; st.className = 'st'; st.textContent = '正在加入…';
+        try { await save('B'); st.className = 'st ok'; st.textContent = '✓ 已加入学习计划'; } catch (e) { st.className = 'st err'; st.textContent = `没有加入：${e.message}。请重试。`; }
+        pending = false; b.disabled = false;
+      });
+    }
+  }
+}
+// ---------- 2 卡片展开 ----------
+const COURSE = [['数据可视化', '12 周 · 林老师'], ['交互设计', '8 周 · 周老师'], ['三维图形', '10 周 · 陈老师']];
+function setupCards() {
+  for (const v of ['A', 'B']) {
+    const st = $('x' + v); st.querySelector('.cards').innerHTML = COURSE.map((c, i) => `<button class="c" type="button" data-i="${i}"><b>${c[0]}</b><br>${c[1]}</button>`).join('');
+    let det = null, anim = null, from = null, opener = null;
+    const open = btn => {
+      opener = btn; const sr = st.getBoundingClientRect(), r = btn.getBoundingClientRect();
+      from = { left: r.left - sr.left, top: r.top - sr.top, width: r.width, height: r.height };
+      const to = { left: 8, top: 8, width: sr.width - 18, height: sr.height - 18 };
+      det = document.createElement('div'); det.className = 'detail'; det.setAttribute('role', 'dialog'); det.setAttribute('aria-label', COURSE[btn.dataset.i][0] + '详情');
+      det.innerHTML = `<h3 tabindex="-1">${COURSE[btn.dataset.i][0]}</h3><p>${COURSE[btn.dataset.i][1]}。每周两次课，用真实数据完成作品。</p><button class="close" type="button" aria-label="关闭">×</button>`;
+      st.append(det);
+      const kf = [from, to].map(o => ({ left: o.left + 'px', top: o.top + 'px', width: o.width + 'px', height: o.height + 'px' }));
+      anim = det.animate(kf, { duration: 600, easing: 'ease-out', fill: 'forwards' });
+      if (v === 'B') det.querySelector('h3').focus();
+      det.querySelector('.close').onclick = close;
+    };
+    const close = async () => {
+      if (!det) return;
+      const d = det; det = null;
+      if (v === 'A') { await anim.finished; d.remove(); return; }   // A：等展开播完，再瞬间移除
+      // B：从当前大小反向收回，关闭后焦点回到原来的卡片
+      const cs = getComputedStyle(d), cur = { left: cs.left, top: cs.top, width: cs.width, height: cs.height };
+      anim.cancel(); const back = d.animate([cur, { left: from.left + 'px', top: from.top + 'px', width: from.width + 'px', height: from.height + 'px' }], { duration: 250, easing: 'ease-in', fill: 'forwards' });
+      opener.focus(); await back.finished; d.remove();
+    };
+    st.addEventListener('click', e => { const b = e.target.closest('.c'); if (b && !det) open(b); });
+    st.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && v === 'A') close(); });
+  }
+}
+// 采样展开详情的宽度，找出一帧里最大的跳变
+async function sampleDetail(v, ms) { const st = $('x' + v), ws = [], t0 = performance.now(); while (performance.now() - t0 < ms) { await frame(); const d = st.querySelector('.detail'); ws.push(d ? d.getBoundingClientRect().width : 0); } let j = 0, last = 0; for (let i = 1; i < ws.length; i++) { if (ws[i] && ws[i - 1]) j = Math.max(j, Math.abs(ws[i] - ws[i - 1])); if (ws[i - 1] && !ws[i]) last = ws[i - 1]; } return { jump: j, last, ws }; }
+// ---------- 3 列表重排 ----------
+const ROWS = [['数据可视化入门', 1299, 3], ['交互设计基础', 899, 1], ['三维图形与着色器', 1599, 5], ['可访问性实践', 599, 2], ['动效与时间', 699, 4]];
+const LIST = {};
+function setupLists() {
+  for (const v of ['A', 'B']) {
+    const st = $('l' + v);
+    st.innerHTML = `<div class="sorts"><button type="button" data-k="1">按价格</button><button type="button" data-k="2">按时间</button><span class="m" role="status" style="margin-left:auto"></span></div><div class="list">${ROWS.map((r, i) => `<div class="row" data-i="${i}"><span>${r[0]}</span><span>¥${r[1]}</span></div>`).join('')}</div>`;
+    const els = [...st.querySelectorAll('.row')], L = LIST[v] = { order: ROWS.map((r, i) => i), y: ROWS.map((r, i) => i * 28) };
+    els.forEach((e, i) => { e.style.top = L.y[i] + 'px'; });
+    const list = st.querySelector('.list');
+    st.querySelector('.sorts').addEventListener('click', e => {
+      const b = e.target.closest('[data-k]'); if (!b) return; const k = +b.dataset.k;
+      L.order = ROWS.map((r, i) => i).sort((a, c) => ROWS[a][k] - ROWS[c][k]);
+      // A：动画进行中忽略新的画面更新，但数据已经换成新的排序
+      if (v === 'A' && L.busy) return;
+      const top0 = list.getBoundingClientRect().top, start = els.map(el => el.getBoundingClientRect().top - top0);   // 每一行当前的实际位置
+      const target = []; L.order.forEach((idx, pos) => { target[idx] = pos * 28; });
+      els.forEach((el, i) => { el.getAnimations().forEach(a => a.cancel()); el.style.top = target[i] + 'px'; el.animate([{ top: start[i] + 'px' }, { top: target[i] + 'px' }], { duration: 400, easing: 'ease-in-out' }); });
+      if (v === 'A') { L.busy = true; setTimeout(() => { L.busy = false; }, 400); }
+      else st.querySelector('[role=status]').textContent = '已' + b.textContent + '排序';
+    });
+  }
+}
+// ---------- 4 拖拽吸附 ----------
+const DRAG = {};
+function setupDrag() {
+  for (const v of ['A', 'B']) {
+    const st = $('d' + v), n = st.querySelector('.node'), board = st.querySelector('.board'), D = DRAG[v] = { hist: [] };
+    const snap = x => Math.round(x / 20) * 20;
+    const setPos = (x, y, record) => { if (v === 'B') { const bw = board.clientWidth, bh = board.clientHeight; x = Math.max(0, Math.min(Math.floor((bw - 60) / 20) * 20, x)); y = Math.max(0, Math.min(Math.floor((bh - 40) / 20) * 20, y)); } if (record) D.hist.push([n.offsetLeft, n.offsetTop]); n.style.left = 8 + x + 'px'; n.style.top = 8 + y + 'px'; };
+    let start = null;
+    n.addEventListener('pointerdown', e => { n.setPointerCapture(e.pointerId); start = { x: e.clientX, y: e.clientY, l: n.offsetLeft - 8, t: n.offsetTop - 8 }; D.hist.push([n.offsetLeft, n.offsetTop]); });
+    n.addEventListener('pointermove', e => { if (start) setPos(start.l + e.clientX - start.x, start.t + e.clientY - start.y); });
+    n.addEventListener('pointerup', () => { if (!start) return; setPos(snap(n.offsetLeft - 8), snap(n.offsetTop - 8)); start = null; });
+    if (v === 'B') {
+      n.addEventListener('keydown', e => { const d = { ArrowLeft: [-20, 0], ArrowRight: [20, 0], ArrowUp: [0, -20], ArrowDown: [0, 20] }[e.key]; if (d) { e.preventDefault(); setPos(snap(n.offsetLeft - 8) + d[0], snap(n.offsetTop - 8) + d[1], true); } });
+      st.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'z') { const p = D.hist.pop(); if (p) { n.style.left = p[0] + 'px'; n.style.top = p[1] + 'px'; } e.preventDefault(); } });
+    }
+  }
+}
+setupButtons(); setupCards(); setupLists(); setupDrag();
+window.__mf = { SRV, LIST, ROWS, sampleDetail, fill: (id, h) => { $(id).innerHTML = h; } };
+</script>
+</body>
+</html>
