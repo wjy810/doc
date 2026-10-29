@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>感知性能：同一个页面的两种加载顺序</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 4px 0 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } #shifts th { white-space: nowrap; } table.t tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .rate { display: inline-block; border-radius: 9px; padding: 0 6px; font-size: 11px; margin-left: 4px; }
+  .rate.good { background: #e3f1e8; } .rate.mid { background: #fff3d6; } .rate.poor { background: #fbe1de; }
+  .two { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .lab { display: grid; grid-template-columns: 540px minmax(0, 1fr); gap: 14px; align-items: start; }
+  #lab { width: 540px; height: 520px; border: 1px solid var(--line); border-radius: 8px; background: #f6f7f9; }
+  .col { display: grid; gap: 6px; align-content: start; }
+  .ctl { display: flex; gap: 8px; flex-wrap: wrap; } .ctl button { font: inherit; border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+  .ctl button:focus-visible { outline: 3px solid #f2a93b; outline-offset: 2px; }
+  body.done #labWrap { display: none; }
+  .film { display: grid; grid-template-columns: 64px repeat(5, 200px); gap: 8px 12px; align-items: start; }
+  .film .who { font-weight: 700; padding-top: 4px; } .film .who span { display: block; font-weight: 400; color: var(--muted); font-size: 11px; }
+  .film figure { margin: 0; font-size: 11px; color: var(--muted); }
+  .film img { display: block; width: 200px; border: 1px solid var(--line); border-radius: 6px; }
+  .film figcaption b { color: var(--ink); }
+  svg.tl { display: block; width: 100%; height: auto; } svg.tl text { font: 10.5px "Noto Sans SC", system-ui, sans-serif; fill: #5b6475; } svg.tl .lane { fill: #1d2330; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>同一个“学习中心”页面，两种加载顺序</h2>
+  <p class="sub">被测页面是 <a href="18-07-learning-center.html?v=A">18-07-learning-center.html</a>。网络和服务器延迟用固定计时器模拟，两个版本里每个文件的下载时间相同，区别只在什么时候开始请求、有没有预留位置、计算怎样安排；绘制、布局偏移、长任务和交互时长都由浏览器的 PerformanceObserver 实际记录。页面内容为演示而构造。</p>
+  <table class="t">
+    <tr><th></th><th>A 原始版</th><th>B 改进版</th></tr>
+    <tr><th>页面与课程文字</th><td>立即返回空壳和“正在加载…”；脚本包（0.6 秒）运行后再请求课程数据（0.8 秒）</td><td>服务器取完数据再返回页面（晚 0.3 秒），到达时就有课程文字</td></tr>
+    <tr><th>首页大图（1.4 秒）</th><td>地址在课程数据里，数据回来才开始下载；到达后插在列表上方</td><td>地址写在页面里，页面一到就高优先级下载；按比例预留位置，先显示主色</td></tr>
+    <tr><th>缩略图与公告</th><td>不留位置，到达后插入</td><td>缩略图固定 72×48 并显示骨架；公告预留一行</td></tr>
+    <tr><th>初始化计算（600 毫秒）</th><td>2.1 秒开始，一次做完</td><td>同时开始，拆成 40 毫秒一段，每段后让出主线程</td></tr>
+    <tr><th>收藏按钮（保存 0.6 秒）</th><td>等服务器返回后才改变</td><td>立即显示“保存中…”，返回后确认；失败时恢复原状态</td></tr>
+  </table>
+  <div class="lab" id="labWrap">
+    <iframe id="lab" title="被测页面" src="about:blank"></iframe>
+    <div class="col">
+      <div class="ctl"><button type="button" id="runA">加载 A 原始版</button><button type="button" id="runB">加载 B 改进版</button></div>
+      <p class="m">加载后可以在 2.1—2.7 秒之间点一次“收藏”，体会主线程被占用时的等待。每次加载 4 秒后汇总：</p>
+      <table class="t" id="live"><tr><th>次</th><th>版本</th><th>FCP</th><th>LCP</th><th>CLS</th><th>长任务</th><th>INP</th><th>看到结果</th></tr></table>
+    </div>
+  </div>
+</section>
+<section class="panel">
+  <h2>胶片图：同一次加载在不同时刻的画面</h2>
+  <p class="sub">测试脚本在指定时刻截取框架画面；时间从页面开始导航算起。下方时间线来自三次只加载、不操作的运行中 LCP 居中的那一次，“点击收藏”一行来自另一次在 2.3 秒按下“第 2 门课”收藏按钮的运行。</p>
+  <div class="film" id="film"></div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>指标（三次加载的中位数；交互为单独一次）</h2><table class="t" id="metrics"></table><p class="m" id="mnote"></p></div>
+    <div><h2>A 的布局偏移从哪里来</h2><table class="t" id="shifts"></table><p class="m" id="judge"></p></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const RES = [];
+let count = 0;
+const sec = ms => ms == null ? '—' : (ms / 1000).toFixed(2) + ' 秒';
+const msf = ms => ms == null ? '—' : Math.round(ms) + ' 毫秒';
+// 良好与“差”的分界（web.dev，按真实访问的第 75 百分位评估）
+const RATE = { fcp: [1800, 3000], lcp: [2500, 4000], cls: [0.1, 0.25], inp: [200, 500] };
+const RLABEL = { good: '良好', mid: '需要改进', poor: '差' };
+const rate = (k, x) => x == null ? '' : x <= RATE[k][0] ? 'good' : x <= RATE[k][1] ? 'mid' : 'poor';
+const cell = (k, x, text) => { const r = rate(k, x); return `<span class="${r}">${text}</span>${r ? `<span class="rate ${r}">${RLABEL[r]}</span>` : ''}`; };
+const med = a => { const s = a.filter(x => x != null).sort((x, y) => x - y); return s.length ? s[(s.length - 1) >> 1] : null; };
+
+function load(v, run) { $('lab').src = `18-07-learning-center.html?v=${v}&run=${run}`; }
+window.addEventListener('message', e => {
+  if (!e.data || e.data.kind !== 'pp') return;
+  const s = e.data.s; RES.push(s); count++;
+  const lt = s.longtasks.length ? `${s.longtasks.length} 次，最长 ${msf(Math.max(...s.longtasks.map(x => x.d)))}` : '0 次';
+  $('live').insertAdjacentHTML('beforeend', `<tr><td>${count}</td><td>${s.v}</td><td class="num">${sec(s.fcp)}</td><td class="num">${sec(s.lcp)}</td><td class="num">${s.cls.toFixed(3)}</td><td>${lt}</td><td class="num">${msf(s.inp)}</td><td class="num">${s.feedback == null ? '—' : sec(s.feedback)}</td></tr>`);
+});
+let manual = 0;
+$('runA').onclick = () => load('A', 'm' + ++manual);
+$('runB').onclick = () => load('B', 'm' + ++manual);
+
+// ---------- 结果呈现（由测试脚本在全部运行之后调用） ----------
+// 原因：上一次偏移之后、这一次偏移之前插入的内容（同一帧里可能插入了几张缩略图）
+function cause(s, sh) {
+  const i = s.shifts.indexOf(sh), prev = i > 0 ? s.shifts[i - 1].t : -1;
+  const list = s.arrivals.filter(x => x.t > prev + 1 && x.t <= sh.t + 1).map(x => x.what);
+  if (!list.length) return i > 0 ? cause(s, s.shifts[i - 1]).replace(/（续）$/, '') + '（续）' : '未知';   // 同一批插入在下一帧继续造成的偏移
+  const th = list.filter(w => w.includes('缩略图')).map(w => w.match(/\d+/)[0]);
+  return [...(th.length ? [`第 ${th.join('、')} 张缩略图`] : []), ...list.filter(w => !w.includes('缩略图'))].join('、') + '插入';
+}
+const byNum = a => [...a].sort((x, y) => x.localeCompare(y, 'zh', { numeric: true }));
+function timeline(v, s, si) {
+  const W = 1060, X = t => 70 + t / 4000 * (W - 90);
+  let g = '';
+  for (let t = 0; t <= 4000; t += 500) g += `<line x1="${X(t)}" x2="${X(t)}" y1="14" y2="104" stroke="#eef0f3"/><text x="${X(t)}" y="10" text-anchor="middle">${t / 1000} 秒</text>`;
+  [['绘制', 28], ['布局偏移', 52], ['主线程', 72], ['点击收藏', 94]].forEach(([n, y]) => { g += `<text class="lane" x="0" y="${y + 4}">${n}</text>`; });
+  const tick = (t, color, txt, y, anchor = 'start') => `<line x1="${X(t)}" x2="${X(t)}" y1="${y - 8}" y2="${y + 8}" stroke="${color}" stroke-width="2"/><text x="${X(t) + (anchor === 'start' ? 4 : -4)}" y="${y + 4}" text-anchor="${anchor}" style="fill:${color}">${txt}</text>`;
+  g += tick(s.fcp, '#2f6fdb', `FCP ${(s.fcp / 1000).toFixed(2)}`, 28);
+  g += tick(s.lcp, rate('lcp', s.lcp) === 'good' ? '#1f7a4d' : '#a15c00', `LCP ${(s.lcp / 1000).toFixed(2)}（${s.lcpEl}）`, 28);
+  if (!s.shifts.length) g += `<text x="${X(0) + 4}" y="56">没有记录到布局偏移</text>`;
+  // 相距 300 毫秒以内的偏移合成一组标注
+  const groups = [];
+  for (const sh of s.shifts) {
+    const h = Math.max(2, Math.min(18, sh.v / 0.3 * 18)); g += `<rect x="${X(sh.t) - 2}" y="${60 - h}" width="4" height="${h}" fill="#b3261e"/>`;
+    const last = groups[groups.length - 1]; if (last && sh.t - last.end < 300) { last.end = sh.t; last.sum += sh.v; last.n++; } else groups.push({ end: sh.t, sum: sh.v, n: 1 });
+  }
+  for (const gr of groups) if (gr.sum >= 0.02) g += `<text x="${X(gr.end) + 6}" y="56" style="fill:#b3261e">${gr.n > 1 ? gr.n + ' 次共 ' : ''}${gr.sum.toFixed(3)}</text>`;
+  if (!s.longtasks.length) g += `<text x="${X(0) + 4}" y="76">没有超过 50 毫秒的长任务</text>`;
+  for (const lt of s.longtasks) { g += `<rect x="${X(lt.t)}" y="66" width="${Math.max(2, X(lt.t + lt.d) - X(lt.t))}" height="11" rx="2" fill="#9aa2b1"/>`; if (lt.d > 150) g += `<text x="${X(lt.t + lt.d) + 4}" y="76">长任务 ${Math.round(lt.d)} 毫秒</text>`; }
+  if (si && si.pressed != null) {
+    const p = si.pressed, e1 = si.inpStart + si.inp, f = si.feedback != null ? p + si.feedback : null;
+    g += `<circle cx="${X(p)}" cy="94" r="4" fill="#1d2330"/><rect x="${X(p)}" y="90" width="${Math.max(2, X(e1) - X(p))}" height="8" fill="#5b6475"/>`;
+    if (f != null && f > e1 + 20) g += `<line x1="${X(e1)}" x2="${X(f)}" y1="94" y2="94" stroke="#5b6475" stroke-dasharray="3 3"/><circle cx="${X(f)}" cy="94" r="4" fill="none" stroke="#1d2330"/>`;
+    g += `<text x="${X(p) - 8}" y="98" text-anchor="end">按下 ${(p / 1000).toFixed(2)} 秒 · INP ${Math.round(si.inp)} 毫秒 · 看到结果 ${sec(si.feedback)}</text>`;
+  }
+  return `<svg class="tl" viewBox="0 0 ${W} 108" role="img" aria-label="${v} 版时间线">${g}</svg>`;
+}
+function renderAll(film) {
+  const loads = v => RES.filter(s => s.v === v && /^[123]$/.test(s.run));
+  const byRun = (v, r) => RES.find(s => s.v === v && s.run === r);
+  const S = {};
+  for (const v of ['A', 'B']) {
+    const L = loads(v), m = med(L.map(s => s.lcp));
+    S[v] = { L, rep: L.find(s => s.lcp === m), fcp: med(L.map(s => s.fcp)), lcp: m, cls: med(L.map(s => s.cls)), lt: med(L.map(s => s.longtasks.length)), ltMax: med(L.map(s => s.longtasks.length ? Math.max(...s.longtasks.map(x => x.d)) : 0)), text: med(L.map(s => s.marks['课程文字'] ?? s.marks['课程文字和占位'])), i: byRun(v, 'i'), f: byRun(v, 'f') };
+  }
+  // 胶片图与时间线
+  let h = '';
+  for (const v of ['A', 'B']) {
+    h += `<div class="who">${v}<span>${v === 'A' ? '原始版' : '改进版'}</span></div>`;
+    const marks = Object.entries(S[v].f.marks).sort((a, b) => a[1] - b[1]);
+    let prev = -1;
+    for (const shot of film[v]) {
+      const fresh = marks.filter(([, t]) => t > prev && t <= shot.t).map(([n]) => n);
+      h += `<figure><img src="${shot.url}" alt="${v} 版 ${(shot.t / 1000).toFixed(1)} 秒时的画面"><figcaption><b>${(shot.t / 1000).toFixed(1)} 秒</b> · ${fresh.length ? '新出现：' + fresh.join('、') : prev < 0 ? '还没有内容' : '没有变化'}</figcaption></figure>`;
+      prev = shot.t;
+    }
+    h += `<div style="grid-column:1 / -1">${timeline(v, S[v].rep, S[v].i)}</div>`;
+  }
+  $('film').innerHTML = h;
+  // 指标表
+  const A = S.A, B = S.B, row = (n, th, a, b) => `<tr><th>${n}</th><td>${th}</td><td class="num">${a}</td><td class="num">${b}</td></tr>`;
+  const runs = (x, k, f) => `<br><span style="color:#9aa2b1">${x.L.map(s => f(s[k])).join('／')}</span>`;
+  $('metrics').innerHTML = `<tr><th>指标</th><th>良好</th><th>A 原始版</th><th>B 改进版</th></tr>`
+    + row('首次内容绘制 FCP', '≤ 1.8 秒', cell('fcp', A.fcp, sec(A.fcp)) + runs(A, 'fcp', sec), cell('fcp', B.fcp, sec(B.fcp)) + runs(B, 'fcp', sec))
+    + row('课程文字出现', '—', sec(A.text), sec(B.text))
+    + row('最大内容绘制 LCP', '≤ 2.5 秒', cell('lcp', A.lcp, sec(A.lcp)) + `（${A.rep.lcpEl}）` + runs(A, 'lcp', sec), cell('lcp', B.lcp, sec(B.lcp)) + `（${B.rep.lcpEl}）` + runs(B, 'lcp', sec))
+    + row('累积布局偏移 CLS', '≤ 0.1', cell('cls', A.cls, A.cls.toFixed(3)) + runs(A, 'cls', x => x.toFixed(3)), cell('cls', B.cls, B.cls.toFixed(3)) + runs(B, 'cls', x => x.toFixed(3)))
+    + row('长任务（超过 50 毫秒）', '越少越好', `${A.lt} 次，最长 ${msf(A.ltMax)}`, `${B.lt} 次` + (B.lt ? `，最长 ${msf(B.ltMax)}` : ''))
+    + row('交互到下一次绘制 INP', '≤ 200 毫秒', cell('inp', A.i.inp, msf(A.i.inp)) + `<br>其中等待 ${msf(A.i.inpDelay)}`, cell('inp', B.i.inp, msf(B.i.inp)) + `<br>其中等待 ${msf(B.i.inpDelay)}`)
+    + row('从按下到看到收藏结果', '无统一阈值', sec(A.i.feedback), sec(B.i.feedback));
+  $('mnote').innerHTML = `灰色小字是三次运行各自的数值。这是实验室数据：一台机器、固定延迟、每版三次；评估真实网站时，这些阈值按真实访问的第 75 百分位判断。A 在点击那次运行里 LCP 停在 ${sec(A.i.lcp)}（${A.i.lcpEl}）：用户第一次输入后浏览器不再更新 LCP，所以测加载的运行不要操作页面。${[...new Set(RES.flatMap(s => s.unsupported))].length ? '本浏览器不支持：' + [...new Set(RES.flatMap(s => s.unsupported))].join('、') : ''}`;
+  // A 的偏移明细
+  const r = A.rep;
+  $('shifts').innerHTML = `<tr><th>时间</th><th>偏移值</th><th>原因（这次偏移前插入的内容）</th><th>被推动的元素</th></tr>` + r.shifts.map(sh => `<tr><td class="num">${sec(sh.t)}</td><td class="num">${sh.v.toFixed(3)}</td><td>${esc(cause(r, sh))}</td><td>${esc(byNum(sh.src).join('、'))}</td></tr>`).join('') + `<tr><th>合计</th><td class="num">${r.shifts.reduce((x, s) => x + s.v, 0).toFixed(3)}</td><td colspan="2">CLS 取间隔不超过 1 秒的一组偏移之和的最大值：${r.cls.toFixed(3)}；B 记录到 ${B.rep.shifts.length} 次偏移</td></tr>`;
+  const big = r.shifts.reduce((a, b) => b.v > a.v ? b : a, { v: 0 });
+  $('judge').innerHTML = `A 的 FCP 只有 ${sec(A.fcp)}，看起来很快，但那时只有页头和“正在加载…”；课程文字 ${sec(A.text)} 才出现，首页大图 ${sec(A.lcp)} 才出现，LCP 记录的正是这一刻。最大的一次偏移 ${big.v.toFixed(3)} 来自${esc(cause(r, big))}。按下“收藏”时主线程正在做初始化，INP ${msf(A.i.inp)}，其中 ${msf(A.i.inpDelay)} 是等待；INP 只量到下一次绘制，收藏结果还要等服务器，从按下到看到结果用了 ${sec(A.i.feedback)}。`
+    + `<br>B 使用同样的下载时间。服务器先取数据，所以第一次绘制反而晚了（${sec(B.fcp)}），但出现的就是课程文字；大图提前请求（LCP ${sec(B.lcp)}）；缩略图、公告和大图都有预留位置（CLS ${B.cls.toFixed(3)}）；初始化拆成小段（INP ${msf(B.i.inp)}）；收藏先显示“保存中…”，${sec(B.i.feedback)} 就能看到结果。`;
+  document.body.classList.add('done');
+}
+window.__pp = { load, count: () => count, renderAll, RES };
+</script>
+</body>
+</html>

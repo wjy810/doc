@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>学习中心（被测页面）</title>
+<script>
+// 先注册性能观察器，再生成页面：第一次绘制和最早的布局偏移也能记录下来
+const M = { fcp: null, lcp: [], shifts: [], longtasks: [], events: [], marks: {}, arrivals: [], pressed: null, feedback: null };
+function label(n) { for (let e = n; e && e.nodeType === 1; e = e.parentElement) if (e.dataset.name) return e.dataset.name; return n && n.nodeType === 1 ? n.tagName.toLowerCase() : null; }
+function observe(type, cb, extra) { try { new PerformanceObserver(l => l.getEntries().forEach(cb)).observe({ type, buffered: true, ...extra }); } catch (e) { (M.unsupported ||= []).push(type); } }
+observe('paint', e => { if (e.name === 'first-contentful-paint') M.fcp = e.startTime; });
+observe('largest-contentful-paint', e => M.lcp.push({ t: e.startTime, el: label(e.element), size: e.size }));
+observe('layout-shift', e => { if (!e.hadRecentInput) M.shifts.push({ t: e.startTime, v: e.value, src: [...new Set(e.sources.map(s => label(s.node)).filter(Boolean))] }); });
+observe('longtask', e => M.longtasks.push({ t: e.startTime, d: e.duration }));
+// 交互：短于 16 毫秒的事件不会单独报告，第一次输入另由 first-input 补上
+const onEvent = e => { if (e.interactionId) M.events.push({ id: e.interactionId, type: e.name, t: e.startTime, d: e.duration, delay: e.processingStart - e.startTime }); };
+observe('event', onEvent, { durationThreshold: 16 });
+observe('first-input', onEvent);
+</script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f6f7f9; color: #1d2330; font: 14px/1.5 system-ui, "PingFang SC", "Microsoft YaHei", "WenQuanYi Zen Hei", sans-serif; }
+  header { height: 44px; background: #1d2330; color: #fff; display: flex; align-items: center; gap: 10px; padding: 0 14px; }
+  header .sp { flex: 1; } header .av { width: 26px; height: 26px; border-radius: 50%; background: #c77700; display: grid; place-items: center; font-size: 12px; }
+  main { padding: 10px 14px; display: grid; gap: 10px; }
+  .loading { height: 300px; display: grid; place-items: center; align-content: center; gap: 8px; color: #5b6475; }
+  .ring { width: 28px; height: 28px; border-radius: 50%; border: 3px solid #dde1e7; border-top-color: #2f6fdb; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .notice { background: #fff3d6; color: #6b4300; border-radius: 8px; padding: 5px 10px; font-size: 13px; min-height: 31px; }
+  .notice.sk { background: #eceff3; }
+  .hero { position: relative; border-radius: 10px; overflow: hidden; }
+  .hero img { display: block; width: 100%; height: auto; }
+  /* B：按图片比例预留位置，先用图片的主色做占位 */
+  .hero.reserved { aspect-ratio: 960 / 340; background: linear-gradient(110deg, #2c5aa0, #86a9e0); }
+  .hero.reserved img { position: absolute; inset: 0; height: 100%; }
+  .hero .cap { position: absolute; left: 12px; bottom: 10px; color: #fff; font-size: 18px; font-weight: 700; text-shadow: 0 1px 3px rgba(0, 0, 0, .45); }
+  h2 { font-size: 15px; margin: 2px 0 0; }
+  .list { display: grid; gap: 8px; }
+  .item { display: flex; align-items: center; gap: 10px; background: #fff; border-radius: 8px; padding: 6px 8px; }
+  .item .txt { flex: 1; min-width: 0; } .item .t { font-weight: 700; } .item .s { font-size: 12px; color: #5b6475; }
+  .thumb { width: 72px; height: 48px; border-radius: 6px; flex: none; display: block; }
+  .thumb.sk { background: linear-gradient(90deg, #e3e7ee 30%, #f1f3f6 50%, #e3e7ee 70%) 0 0 / 200% 100%; animation: shimmer 1.2s linear infinite; }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+  @media (prefers-reduced-motion: reduce) { .ring, .thumb.sk { animation: none; } }
+  .fav { font: inherit; font-size: 12px; width: 84px; flex: none; border: 1px solid #c9d0db; background: #fff; color: #1d2330; border-radius: 14px; padding: 2px 0; cursor: pointer; }
+  .fav.on { background: #e8eefb; border-color: #2f6fdb; color: #1f4fae; } .fav.pending { border-style: dashed; }
+  .fav:focus-visible { outline: 3px solid #f2a93b; outline-offset: 2px; }
+  #standalone { position: fixed; left: 8px; right: 8px; bottom: 8px; background: #1d2330; color: #fff; font-size: 12px; padding: 6px 8px; border-radius: 8px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const P = new URLSearchParams(location.search), V = P.get('v') === 'B' ? 'B' : 'A', RUN = P.get('run') || '';
+const app = document.getElementById('app');
+// 网络与服务器用固定延迟模拟（毫秒，从页面开始计算）；两个版本里每个文件的下载时间相同，区别只在什么时候开始请求
+const at = t => new Promise(r => setTimeout(r, Math.max(0, t - performance.now())));
+// 记录“看到变化”的时刻：变化后的第一帧开始时（rAF 回调）；不用 setTimeout，因为让出主线程后的后续计算会排在它前面
+const nextFrame = cb => requestAnimationFrame(() => cb());
+const mark = n => nextFrame(() => { M.marks[n] = performance.now(); });
+const arrived = what => M.arrivals.push({ what, t: performance.now() });
+const DL = { bundle: 600, data: 800, hero: 1400, thumb: 250, notice: 1200, save: 600 };
+const COURSES = [['数据可视化入门', '12 周 · 林老师', 215], ['交互设计基础', '8 周 · 周老师', 30], ['三维图形与着色器', '10 周 · 陈老师', 270], ['可访问性实践', '6 周 · 王老师', 165], ['动效与时间', '6 周 · 赵老师', 0], ['设计系统维护', '8 周 · 孙老师', 200]];
+const HEADER = '<header data-name="页头"><b>学习中心</b><span class="sp"></span><span>我的课程</span><span class="av">林</span></header>';
+const NOTICE = '周六 22:00—24:00 系统维护，期间无法提交作业。';
+const item = (c, i, thumb) => `<div class="item" data-name="第 ${i + 1} 门课">${thumb}<div class="txt"><div class="t">${c[0]}</div><div class="s">${c[1]}</div></div><button class="fav" id="fav-${i}" type="button">☆ 收藏</button></div>`;
+
+// 生成图片：渐变、柱形和细小噪点，让它像真实照片一样有细节（过于单调的图片不会被当作最大内容）
+function picture(w, h, hue, seed) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, w, h); grad.addColorStop(0, `hsl(${hue} 55% 40%)`); grad.addColorStop(1, `hsl(${hue + 10} 60% 72%)`);
+  g.fillStyle = grad; g.fillRect(0, 0, w, h);
+  let s = seed; const rnd = () => (s = s * 16807 % 2147483647) / 2147483647;
+  for (let i = 0; i < 14; i++) { const bh = h * (0.2 + rnd() * 0.6); g.fillStyle = `hsl(${hue + rnd() * 60} 70% ${70 + rnd() * 20}% / .8)`; g.fillRect(w * (0.45 + i * 0.038), h - bh, w * 0.028, bh); }
+  const d = g.getImageData(0, 0, w, h); for (let i = 0; i < d.data.length; i += 4) { const n = (rnd() - 0.5) * 18; d.data[i] += n; d.data[i + 1] += n; d.data[i + 2] += n; }
+  g.putImageData(d, 0, 0);
+  return c.toDataURL('image/jpeg', 0.85);
+}
+async function image(w, h, hue, seed, cls) { const img = new Image(); img.src = picture(w, h, hue, seed); img.alt = ''; if (cls) img.className = cls; await img.decode(); return img; }
+const heroImage = () => image(960, 340, 215, 7);
+const thumbImage = i => image(144, 96, COURSES[i][2], 11 + i, 'thumb');
+// 模拟初始化：给全部课程计算推荐分（用固定时长的计算代替真实工作）
+function work(ms) { const end = performance.now() + ms; let x = 0; while (performance.now() < end) x += Math.sqrt(x + 1); return x; }
+const yieldToMain = () => globalThis.scheduler && scheduler.yield ? scheduler.yield() : new Promise(r => setTimeout(r, 0));
+
+// ---------- A：原始版 ----------
+async function runA() {
+  app.innerHTML = HEADER + '<main id="main"><div class="loading" data-name="加载提示"><span class="ring"></span>正在加载…</div></main>';
+  mark('页头和转圈');
+  const main = document.getElementById('main');
+  await at(DL.bundle);   // 脚本包下载完才开始请求数据和公告
+  at(DL.bundle + DL.notice).then(() => { const n = document.createElement('div'); n.className = 'notice'; n.dataset.name = '公告'; n.textContent = NOTICE; main.prepend(n); arrived('公告'); mark('公告'); });
+  await at(DL.bundle + DL.data);
+  main.querySelector('.loading').remove();
+  main.insertAdjacentHTML('beforeend', `<h2 data-name="列表标题">我的课程</h2><div class="list" data-name="课程列表">${COURSES.map((c, i) => item(c, i, '')).join('')}</div>`);
+  mark('课程文字');
+  const t0 = performance.now();
+  // 缩略图不留位置：到达后插到每一行最前面，把文字挤开、把下面的行推下去
+  COURSES.forEach((c, i) => at(t0 + DL.thumb + i * 40).then(() => thumbImage(i)).then(img => { main.querySelectorAll('.item')[i].prepend(img); arrived(`第 ${i + 1} 张缩略图`); if (i === COURSES.length - 1) mark('缩略图'); }));
+  // 大图地址在课程数据里，数据回来后才开始下载；到达后插在列表上方
+  at(t0 + DL.hero).then(heroImage).then(img => { const h = document.createElement('div'); h.className = 'hero'; h.dataset.name = '首页大图'; h.append(img); h.insertAdjacentHTML('beforeend', '<span class="cap">本周推荐：数据可视化入门</span>'); const n = main.querySelector('.notice'); n ? n.after(h) : main.prepend(h); arrived('首页大图'); mark('大图'); });
+  // 初始化一次做完：600 毫秒里主线程无法响应点击
+  at(2100).then(() => { work(600); mark('初始化完成'); });
+}
+async function favA(b) { const pressed = M.pressed; await at(performance.now() + DL.save); const on = !b.classList.contains('on'); b.classList.toggle('on', on); b.textContent = on ? '★ 已收藏' : '☆ 收藏'; nextFrame(() => { if (M.feedback == null) M.feedback = performance.now() - pressed; }); }
+
+// ---------- B：改进版 ----------
+async function runB() {
+  // 服务器先取完课程数据再返回页面，所以页面晚 300 毫秒到达，但到达时就有课程文字
+  await at(300);
+  app.innerHTML = HEADER + `<main id="main"><div class="notice sk" id="notice" data-name="公告"></div>
+    <div class="hero reserved" id="hero" data-name="首页大图"><span class="cap">本周推荐：数据可视化入门</span></div>
+    <h2 data-name="列表标题">我的课程</h2><div class="list" data-name="课程列表">${COURSES.map((c, i) => item(c, i, '<span class="thumb sk"></span>')).join('')}</div></main>`;
+  mark('课程文字和占位');
+  const t0 = performance.now();
+  // 大图地址写在页面里，页面一到就以高优先级开始下载（真实页面用 <img fetchpriority="high"> 或 <link rel="preload">）
+  at(t0 + DL.hero).then(heroImage).then(img => { document.getElementById('hero').prepend(img); arrived('首页大图'); mark('大图'); });
+  COURSES.forEach((c, i) => at(t0 + DL.thumb + i * 40).then(() => thumbImage(i)).then(img => { document.querySelectorAll('.item')[i].querySelector('.thumb').replaceWith(img); arrived(`第 ${i + 1} 张缩略图`); if (i === COURSES.length - 1) mark('缩略图'); }));
+  at(t0 + DL.notice).then(() => { const n = document.getElementById('notice'); n.classList.remove('sk'); n.textContent = NOTICE; arrived('公告'); mark('公告'); });
+  // 同样 600 毫秒的初始化，拆成 40 毫秒一段，每段之后把主线程让给输入和绘制
+  at(2100).then(async () => { for (let done = 0; done < 600; done += 40) { work(40); await yieldToMain(); } mark('初始化完成'); });
+}
+const setFav = (b, on, pending) => { b.classList.toggle('on', on); b.classList.toggle('pending', pending); b.textContent = pending ? (on ? '★ 保存中…' : '☆ 保存中…') : on ? '★ 已收藏' : '☆ 收藏'; };
+async function favB(b) {
+  if (b.classList.contains('pending')) return;
+  const pressed = M.pressed, on = !b.classList.contains('on');
+  setFav(b, on, true);   // 先在本地显示结果，标明正在保存
+  nextFrame(() => { if (M.feedback == null) M.feedback = performance.now() - pressed; });
+  const ok = await at(performance.now() + DL.save).then(() => true);
+  setFav(b, ok ? on : !on, false);   // 保存失败时恢复原状态（本演示的保存总是成功）
+}
+
+// 按下的时刻用事件自带的时间戳：主线程忙时，事件处理会晚于按下
+document.addEventListener('pointerdown', e => { M.pressed = e.timeStamp; });
+document.addEventListener('click', e => { const b = e.target.closest('.fav'); if (b) (V === 'A' ? favA : favB)(b); });
+(V === 'A' ? runA : runB)();
+
+// 4 秒后汇总：CLS 取最大的会话窗口（偏移间隔不超过 1 秒、窗口不超过 5 秒），INP 取最慢的一次交互
+function summary() {
+  let cls = 0, cur = 0, start = -1, last = -1;
+  for (const s of M.shifts) { if (start < 0 || s.t - last > 1000 || s.t - start > 5000) { cur = 0; start = s.t; } cur += s.v; last = s.t; cls = Math.max(cls, cur); }
+  const by = {}; for (const e of M.events) if (!by[e.id] || e.d > by[e.id].d) by[e.id] = e;
+  const worst = Object.values(by).sort((a, b) => b.d - a.d)[0];
+  const lcp = M.lcp[M.lcp.length - 1] || {};
+  return { v: V, run: RUN, fcp: M.fcp, lcp: lcp.t, lcpEl: lcp.el, lcpAll: M.lcp, cls, shifts: M.shifts, longtasks: M.longtasks, inp: worst ? worst.d : null, inpStart: worst ? worst.t : null, inpDelay: worst ? worst.delay : null, pressed: M.pressed, feedback: M.feedback, marks: M.marks, arrivals: M.arrivals, unsupported: M.unsupported || [] };
+}
+at(4000).then(() => {
+  const s = summary();
+  if (parent !== window) { parent.postMessage({ kind: 'pp', s }, '*'); return; }
+  const f = ms => ms == null ? '—' : (ms / 1000).toFixed(2) + ' 秒';
+  const box = document.createElement('div'); box.id = 'standalone';
+  box.textContent = `${V} 版：FCP ${f(s.fcp)} · LCP ${f(s.lcp)}（${s.lcpEl}） · CLS ${s.cls.toFixed(3)} · 长任务 ${s.longtasks.length} 次` + (s.inp != null ? ` · INP ${Math.round(s.inp)} 毫秒` : ' · 4 秒内未点击');
+  document.body.append(box);
+});
+</script>
+</body>
+</html>
