@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>统计与实验设计：样本量、提前查看、顺序效应与三种说法</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --warn: #a15c00; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .note { max-width: 1140px; margin: 0 0 10px; padding: 6px 12px; border-radius: 8px; background: #fff6e0; border: 1px solid #f0d9a8; font-size: 12px; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); } .mid { color: var(--warn); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; } .row figure { margin: 0; font-size: 11px; color: var(--muted); } .row canvas { display: block; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+</style>
+</head>
+<body>
+<p class="note">本页所有数据都由程序按设定的规则生成（模拟数据），不是真实参与者的数据。模拟的好处是知道“真实答案”，可以检查方法会不会给出错误结论。</p>
+<section class="panel">
+  <div class="two">
+    <div><h2>1 比较方案：样本量与置信区间</h2><p class="sub">两个界面方案的任务完成时间。模拟时设定 B 比 A 平均快约 10%（约 3 秒），个体差异很大。每组人数从 5 增加到 80，用自助法（bootstrap）估计“A 减 B”的 95% 置信区间，再把同样规模的研究重复 200 次。</p><div class="row" id="ci"></div><table class="t" id="tCi"></table></div>
+    <div><h2>2 提前查看：没有差别也会“显著”</h2><p class="sub">1000 次模拟的 A/A 实验：两组完全相同，转化率都是 10%。A 每进来 100 人（每组）就做一次双比例 z 检验，一旦 p &lt; 0.05 就停止并宣布结果；B 事先定好每组 2000 人，到了再检验一次。图中是前 20 次实验的 p 值随人数的变化。</p><div class="row" id="peek"></div><table class="t" id="tPeek"></table></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>3 控制变量：顺序效应</h2><p class="sub">24 位模拟参与者每人用两个方案各做一次任务。设定两个方案其实一样快，但做第二次时因为熟悉任务会快 12%。A 让所有人先用 A 方案再用 B 方案；B 让一半人先用 A、一半人先用 B（平衡顺序）。各重复 500 次研究，用配对 t 检验（自由度 23，临界值 2.069）。</p><table class="t" id="tOrd"></table></div>
+    <div><h2>4 三种说法，三种证据</h2><p class="sub">用第 1 部分每组 20 人的模拟数据，分别写出三种结论。它们回答不同的问题，不能互相替代。</p><table class="t" id="tClaim"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const fig = (host, cv, cap) => { const f = document.createElement('figure'); f.append(cv); f.insertAdjacentHTML('beforeend', `<figcaption>${cap}</figcaption>`); host.append(f); };
+const canvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); return c; };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const normal = R => Math.sqrt(-2 * Math.log(1 - R())) * Math.cos(2 * Math.PI * R());
+const mean = a => a.reduce((s, x) => s + x, 0) / a.length;
+const sd = a => { const m = mean(a); return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / (a.length - 1)); };
+// 标准正态分布的累积函数（Abramowitz–Stegun 7.1.26 近似）
+const Phi = z => { const t = 1 / (1 + 0.3275911 * Math.abs(z) / Math.SQRT2), y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-z * z / 2); return z >= 0 ? (1 + y) / 2 : (1 - y) / 2; };
+// ---------- 1 样本量与置信区间 ----------
+const R1 = rng(2024), taskTime = (median) => median * Math.exp(0.35 * normal(R1));   // 对数正态：有少数很慢的人
+const POOL = { A: Array.from({ length: 80 }, () => taskTime(30)), B: Array.from({ length: 80 }, () => taskTime(27)) };
+function bootCI(a, b, R, n = 2000) { const d = []; for (let i = 0; i < n; i++) { let sa = 0, sb = 0; for (let k = 0; k < a.length; k++) sa += a[Math.floor(R() * a.length)]; for (let k = 0; k < b.length; k++) sb += b[Math.floor(R() * b.length)]; d.push(sa / a.length - sb / b.length); } d.sort((x, y) => x - y); return [d[Math.floor(n * 0.025)], d[Math.floor(n * 0.975)]]; }
+function sampleSize() {
+  const ns = [5, 10, 20, 40, 80], R = rng(5), REP = 200, out = {}, trueDiff = (30 - 27) * Math.exp(0.35 ** 2 / 2);
+  for (const n of ns) {
+    const a = POOL.A.slice(0, n), b = POOL.B.slice(0, n), ci = bootCI(a, b, R);
+    // 重复做 200 次同样规模的研究：平均区间宽度、覆盖真实差别的比例、区间不含 0 的比例
+    let width = 0, cover = 0, detect = 0;
+    for (let r = 0; r < REP; r++) { const ra = Array.from({ length: n }, () => taskTime(30)), rb = Array.from({ length: n }, () => taskTime(27)), [lo, hi] = bootCI(ra, rb, R, 500); width += hi - lo; if (lo <= trueDiff && trueDiff <= hi) cover++; if (lo > 0) detect++; }
+    out[n] = { diff: mean(a) - mean(b), lo: ci[0], hi: ci[1], width: width / REP, cover: cover / REP, detect: detect / REP };
+  }
+  const c = canvas(250, 150), g = c.getContext('2d'), X = d => 125 + d * 9, Y = i => 22 + i * 26;
+  g.strokeStyle = '#9aa2b1'; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(X(0), 6); g.lineTo(X(0), 144); g.stroke(); g.setLineDash([]);
+  g.strokeStyle = '#1f7a4d'; g.beginPath(); g.moveTo(X(trueDiff), 6); g.lineTo(X(trueDiff), 144); g.stroke();
+  g.font = '10px system-ui'; ns.forEach((n, i) => { const o = out[n]; g.strokeStyle = g.fillStyle = o.lo > 0 ? '#2f6fdb' : '#b3261e'; g.lineWidth = 2; g.beginPath(); g.moveTo(X(Math.max(-13, o.lo)), Y(i)); g.lineTo(X(Math.min(13, o.hi)), Y(i)); g.stroke(); g.beginPath(); g.arc(X(o.diff), Y(i), 3, 0, 7); g.fill(); g.fillStyle = '#5b6475'; g.fillText(`n=${n}`, 4, Y(i) + 3); });
+  fig($('ci'), c, '一次抽样的平均差与区间（红：包含 0）　绿线：设定的真实差别');
+  out.trueDiff = trueDiff;
+  $('tCi').innerHTML = `<tr><th>每组人数</th><th>图中这一次的区间</th><th>平均区间宽度</th><th>区间包含真实差别</th><th>区间不含 0（检出 B 更快）</th></tr>` + ns.map(n => { const o = out[n]; return `<tr><th class="num">${n}</th><td class="num">[${o.lo.toFixed(1)}, ${o.hi.toFixed(1)}]</td><td class="num">${o.width.toFixed(1)} 秒</td><td class="num">${(o.cover * 100).toFixed(0)}%</td><td class="num ${o.detect < 0.8 ? 'poor' : 'good'}">${(o.detect * 100).toFixed(0)}%</td></tr>`; }).join('') + `<tr><td colspan="5">真实差别是 ${trueDiff.toFixed(1)} 秒，后三列各重复 200 次研究。人数增加到 4 倍，区间宽度大约减半；每组只有 5 人时自助法的区间偏窄，只有约 85% 包含真实差别。个体差异这么大时，每组 80 人也只有约一半的研究能检出差别。研究前先估算需要的人数。</td></tr>`;
+  return out;
+}
+// ---------- 2 提前查看 ----------
+function peeking() {
+  const R = rng(99), E = 1000, step = 100, maxN = 2000, p = 0.1, out = { A: 0, B: 0 }, traces = [], stopAt = [];
+  for (let e = 0; e < E; e++) {
+    let ca = 0, cb = 0, stopped = false; const tr = [];
+    for (let n = 1; n <= maxN; n++) {
+      if (R() < p) ca++; if (R() < p) cb++;
+      if (n % step === 0) {
+        const pool = (ca + cb) / (2 * n), se = Math.sqrt(pool * (1 - pool) * 2 / n), z = se ? (ca - cb) / n / se : 0, pv = 2 * (1 - Phi(Math.abs(z)));
+        tr.push(pv); if (!stopped && pv < 0.05) { stopped = true; out.A++; stopAt.push(n); }
+        if (n === maxN && pv < 0.05) out.B++;
+      }
+    }
+    if (e < 20) traces.push(tr);
+  }
+  const c = canvas(250, 150), g = c.getContext('2d'), X = i => 8 + i / 19 * 236, Y = pv => 140 - pv * 130;
+  g.strokeStyle = '#b3261e'; g.beginPath(); g.moveTo(8, Y(0.05)); g.lineTo(244, Y(0.05)); g.stroke(); g.fillStyle = '#b3261e'; g.font = '10px system-ui'; g.fillText('p = 0.05', 200, Y(0.05) - 3);
+  g.strokeStyle = 'rgba(47,111,219,.45)'; traces.forEach(tr => { g.beginPath(); tr.forEach((pv, i) => i ? g.lineTo(X(i), Y(pv)) : g.moveTo(X(i), Y(pv))); g.stroke(); });
+  fig($('peek'), c, '横轴：每组 100 到 2000 人（每 100 人检验一次）');
+  const crossed = traces.filter(tr => tr.some(pv => pv < 0.05)).length;
+  out.rateA = out.A / E; out.rateB = out.B / E; out.medianStop = stopAt.sort((a, b) => a - b)[Math.floor(stopAt.length / 2)]; out.crossed20 = crossed;
+  $('tPeek').innerHTML = `<tr><th></th><th>检验次数</th><th>1000 次 A/A 实验中宣布“有差别”的比例</th></tr><tr><th>A 边看边停</th><td class="num">最多 20 次</td><td class="num poor">${(out.rateA * 100).toFixed(1)}%（停下时每组人数的中位数 ${out.medianStop}）</td></tr><tr><th>B 事先定好人数</th><td class="num">1 次</td><td class="num good">${(out.rateB * 100).toFixed(1)}%</td></tr><tr><td colspan="3">两组本来没有差别，p 值会随机上下波动；看的次数越多，碰到一次低于 0.05 的机会越大（图中 20 次实验里有 ${crossed} 次曾经低于这条线）。需要中途查看时，事先写好查看次数，并使用序贯检验等修正方法。</td></tr>`;
+  return out;
+}
+// ---------- 3 顺序效应 ----------
+function orderEffect() {
+  const R = rng(321), N = 24, S = 500, learn = 0.88, tcrit = 2.069, out = {};
+  for (const v of ['A', 'B']) {
+    let sumEst = 0, sig = 0, bFaster = 0;
+    for (let s = 0; s < S; s++) {
+      const diffs = [];
+      for (let i = 0; i < N; i++) {
+        const base = 30 * Math.exp(0.4 * normal(R)), noise = () => Math.exp(0.1 * normal(R)), aFirst = v === 'A' ? true : i % 2 === 0;
+        const tA = base * noise() * (aFirst ? 1 : learn), tB = base * noise() * (aFirst ? learn : 1);   // 两个方案本身一样快，只有“第二次”更快
+        diffs.push(tA - tB);
+      }
+      const m = mean(diffs), t = m / (sd(diffs) / Math.sqrt(N)); sumEst += m; if (Math.abs(t) > tcrit) { sig++; if (m > 0) bFaster++; }
+    }
+    out[v] = { est: sumEst / S, sig: sig / S, bFaster: bFaster / S };
+  }
+  $('tOrd').innerHTML = `<tr><th>设计</th><th>估计的“B 比 A 快”（平均）</th><th>500 次研究中检验“显著”的比例</th><th>其中结论是“B 更快”的比例</th></tr>` + [['A', '所有人先 A 后 B'], ['B', '平衡顺序']].map(([v, n]) => { const o = out[v]; return `<tr><th>${n}</th><td class="num ${Math.abs(o.est) > 1 ? 'poor' : 'good'}">${o.est.toFixed(2)} 秒</td><td class="num ${o.sig > 0.1 ? 'poor' : 'good'}">${(o.sig * 100).toFixed(1)}%</td><td class="num">${(o.bFaster * 100).toFixed(1)}%</td></tr>`; }).join('') + `<tr><td colspan="4">两个方案其实没有差别。固定顺序时，“熟悉任务”这个变量和“方案”绑在一起，几乎每次研究都会得出 B 更快的错误结论；平衡顺序后，熟悉带来的影响在两个方案上相互抵消，误报率降到 5% 以下（顺序造成的差异被算进了误差，检验偏保守；把顺序作为一个因素放进分析会更灵敏）。同样需要控制的还有：任务内容、设备、时间段、参与者的经验。</td></tr>`;
+  return out;
+}
+// ---------- 4 三种说法 ----------
+function claims(ci) {
+  const o = ci[20];
+  const rows = [
+    ['个人觉得更好看', '“我觉得 B 的版式更清爽。”', '设计者自己的判断', '说明设计意图，可以作为提出假设的起点', '其他人是否同样觉得，以及是否更好用'],
+    ['任务表现改善', `“这 20 位模拟参与者用 B 平均快 ${o.diff.toFixed(1)} 秒。”`, '对样本的测量（时间、错误、完成率）', '在这组人、这个任务上观察到的差别', '换一批人是否仍然成立'],
+    ['统计上支持差异', `“A − B 的 95% 置信区间是 [${o.lo.toFixed(1)}, ${o.hi.toFixed(1)}] 秒，${o.lo > 0 ? '不包含 0' : '包含 0'}。”`, '从样本推断总体（置信区间、检验）', o.lo > 0 ? '在同类人群与任务上，差别大概率存在，范围大约是多少' : '目前的数据还不足以区分两个方案', '差别是否重要、是否值得改；对其他任务和人群是否适用']];
+  $('tClaim').innerHTML = `<tr><th>说法</th><th>例句</th><th>证据来源</th><th>能说明</th><th>不能说明</th></tr>` + rows.map(r => `<tr><th>${r[0]}</th><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td></tr>`).join('') + `<tr><td colspan="5">报告时同时写出：人数、任务、测量方法、效应大小与区间、数据来源（这里是模拟数据），以及没有覆盖的情况。</td></tr>`;
+  return rows.map(r => r[0]);
+}
+window.__se = { run: () => { const ci = sampleSize(); return { ci, peek: peeking(), order: orderEffect(), claims: claims(ci) }; } };
+</script>
+</body>
+</html>
