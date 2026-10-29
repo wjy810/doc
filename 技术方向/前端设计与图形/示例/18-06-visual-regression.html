@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>视觉回归：固定数据的组件展示页与差异分类</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } h3 { font-size: 13px; margin: 4px 0 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } table.t tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .mid { color: var(--warn); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .shots { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
+  .shots figure { margin: 0; font-size: 11px; color: var(--muted); width: 266px; }
+  .shots img { display: block; border: 1px solid var(--line); border-radius: 6px; max-width: 100%; }
+  .cls { display: inline-block; border-radius: 9px; padding: 0 6px; font-size: 11px; }
+  .cls.exp { background: #e3f1e8; color: #1f5f3d; } .cls.bad { background: #fbe1de; color: #8c2a20; } .cls.miss { background: #fff3d6; color: #7a4a00; } .cls.same { color: #9aa2b1; }
+  #stageWrap { position: absolute; left: 0; top: 0; opacity: 0; pointer-events: none; z-index: -1; } #stageWrap.show { position: static; opacity: 1; z-index: auto; }
+  /* 展示页：所有颜色和间距都来自令牌；版本 B 改了几个令牌 */
+  .sc { --r-btn: 6px; --tag-size: 11px; --gap-s: 6px; --input-border: #c9d0db; width: var(--w); padding: 12px; display: grid; gap: 10px; font-size: 13px; }
+  .sc.vB { --r-btn: 8px; --tag-size: 12px; --gap-s: 2px; }
+  /* “预期结果”：只应用变更请求里声明的两处修改 */
+  .sc.vE { --r-btn: 8px; --tag-size: 12px; }
+  .sc.light { --bg: #fff; --fg: #1d2330; --fg2: #5b6475; --surface: #f6f7f9; --border: #dde1e7; --primary: #2f6fdb; --danger: #b3261e; background: var(--bg); color: var(--fg); }
+  .sc.dark { --bg: #161b26; --fg: #e8ebf1; --fg2: #aeb6c5; --surface: #222a38; --border: #343b4b; --primary: #5b8ff0; --danger: #e5675e; --input-border: #4a5366; background: var(--bg); color: var(--fg); }
+  .sc.vB .input { border-color: #c9d0db; }
+  .sc .cell { padding: 6px; }
+  .sc .btn { font: inherit; border: 0; border-radius: var(--r-btn); padding: 5px 14px; margin-right: 6px; }
+  .sc .btn.p { background: var(--primary); color: #fff; } .sc .btn.s { background: var(--surface); color: var(--fg); border: 1px solid var(--border); } .sc .btn.d { background: var(--danger); color: #fff; opacity: .5; }
+  .sc .tag { display: inline-block; font-size: var(--tag-size); padding: 0 8px; border-radius: 9px; margin-right: 6px; } .sc .tag.i { background: #e8eefb; color: #1f4fae; } .sc .tag.w { background: #fff3d6; color: #7a4a00; }
+  .sc .input { width: 100%; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--input-border); border-radius: 6px; padding: 4px 8px; }
+  .sc .err { color: var(--danger); font-size: 12px; }
+  .sc .card { border: 1px solid var(--border); border-radius: 10px; padding: 10px; display: grid; gap: 4px; }
+  .sc .card .foot { display: flex; gap: var(--gap-s); align-items: center; margin-top: 4px; }
+  .sc .empty { text-align: center; color: var(--fg2); border: 1px dashed var(--border); border-radius: 10px; padding: 14px; }
+  .sc .toast { display: flex; gap: var(--gap-s); align-items: center; background: var(--fg); color: var(--bg); border-radius: 8px; padding: 6px 10px; }
+  .sc .row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; border-bottom: 1px solid var(--border); padding: 4px 0; }
+  .sc .avs { display: flex; } .sc .av { width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--bg); margin-left: -6px; display: grid; place-items: center; color: #fff; font-size: 11px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>变更请求 #128：按钮圆角从 6 改为 8，标签字号从 11 改为 12</h2>
+  <p class="sub">展示页用固定数据把 10 个组件排在一起，测试脚本在 浅色／深色 × 360／768 像素 四种条件下，对改动前（A）、改动后（B）和“只应用声明的修改”的预期结果（E）逐个组件截图并逐像素比较。组件与数据为演示而构造。</p>
+  <table class="t" id="grid"></table><p class="m" id="mgrid"></p>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>覆盖率与判断</h2><table class="t" id="cover"></table></div>
+    <div><h2>追查结果</h2><p class="m" id="mcover"></p></div>
+  </div>
+  <h2>需要人来判断的差异</h2><div class="shots" id="shots"></div>
+</section>
+<div id="stageWrap"><div id="stage"></div></div>
+<script>
+const $ = id => document.getElementById(id);
+const COMPONENTS = [
+  ['primary', '主要按钮', '<button class="btn p">开始学习</button>'],
+  ['secondary', '次要按钮', '<button class="btn s">稍后再说</button>'],
+  ['danger', '危险按钮（禁用）', '<button class="btn d" disabled>退出课程</button>'],
+  ['tag', '标签', '<span class="tag i">数据</span><span class="tag w">即将开课</span>'],
+  ['input', '输入框（错误）', '<input class="input" value="1380000000" aria-label="手机号"><div class="err">现在是 10 位，请检查是否漏输。</div>'],
+  ['card', '课程卡片', '<div class="card"><b>数据可视化入门</b><span style="color:var(--fg2)">12 周 · 每周 8 小时</span><div class="foot"><span class="tag i">数据</span><span>¥1,299</span><button class="btn p">报名</button></div></div>'],
+  ['empty', '空状态', '<div class="empty">还没有学习计划。<br>从“课程”里选一门开始吧。</div>'],
+  ['toast', '提示条', '<div class="toast"><span>✓</span><span>已保存</span><span style="margin-left:auto;text-decoration:underline">撤销</span></div>'],
+  ['row', '表格行', '<div class="row"><span>第 3 周作业</span><span style="color:var(--fg2)">10 月 29 日</span><span>已提交</span></div>'],
+  ['avatars', '头像组', '<div class="avs" style="padding-left:6px">' + ['#c77700', '#2f6fdb', '#7b5ea7', '#0f766e'].map((c, i) => `<span class="av" style="background:${c}">${'林周陈王'[i]}</span>`).join('') + '</div>']
+];
+// 变更请求里声明会变的组件
+const DECLARED = ['primary', 'secondary', 'danger', 'tag'];
+function render(version, theme, width) {
+  $('stage').innerHTML = `<div class="sc ${theme} ${version === 'B' ? 'vB' : version === 'E' ? 'vE' : ''}" style="--w:${width}px">${COMPONENTS.map(([k, , html]) => `<div class="cell" id="c-${k}">${html}</div>`).join('')}</div>`;
+}
+async function decode(b64) { const img = new Image(); img.src = 'data:image/png;base64,' + b64; await img.decode(); const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; const g = c.getContext('2d'); g.drawImage(img, 0, 0); return g.getImageData(0, 0, c.width, c.height); }
+async function diff(a64, b64, draw) {
+  const A = await decode(a64), B = await decode(b64), w = Math.max(A.width, B.width), h = Math.max(A.height, B.height);
+  let n = 0; const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'), out = g.createImageData(w, h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const inA = x < A.width && y < A.height, inB = x < B.width && y < B.height, k = (y * w + x) * 4;
+    let d = 255, base = 245;
+    if (inA && inB) { const i = (y * A.width + x) * 4, j = (y * B.width + x) * 4; d = Math.max(Math.abs(A.data[i] - B.data[j]), Math.abs(A.data[i + 1] - B.data[j + 1]), Math.abs(A.data[i + 2] - B.data[j + 2])); base = 235 + (A.data[i] + A.data[i + 1] + A.data[i + 2]) / 3 * 0.08; }
+    if (d > 24) { n++; out.data.set([220, 30, 30, 255], k); } else out.data.set([base, base, base, 255], k);
+  }
+  g.putImageData(out, 0, 0);
+  return { n, sizeChanged: A.width !== B.width || A.height !== B.height, url: draw ? c.toDataURL() : null };
+}
+// 分类：先比较 A 与 B（有没有变化），再比较“只应用声明修改的预期结果 E”与 B（变化能不能被声明解释）
+const classify = (k, nAB, nEB) => nEB ? 'bad' : nAB ? 'exp' : DECLARED.includes(k) ? 'miss' : 'same';
+const LABEL = { exp: '预期修改', bad: '问题：有声明以外的变化', miss: '修改没有生效', same: '无变化' };
+window.__vr = { render, diff, classify, COMPONENTS, DECLARED, fill: (id, html) => { $(id).innerHTML = html; }, LABEL };
+</script>
+</body>
+</html>
