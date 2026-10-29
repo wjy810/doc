@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三维展示：产品旋转与透明玻璃材质</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); }
+  .row4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; } .tag { font-size: 11px; color: var(--muted); margin: 0 0 2px; }
+  .stage { border: 1px solid var(--line); border-radius: 8px; height: 220px; position: relative; overflow: hidden; background: #eef1f5; }
+  .stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  .poster { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 6px; background: linear-gradient(#eef1f5, #dfe4ec); color: #5b6475; font-size: 12px; }
+  .poster .bar { width: 120px; height: 5px; border-radius: 3px; background: #d3d9e2; overflow: hidden; } .poster .bar i { display: block; height: 100%; width: 0; background: var(--accent); }
+  .hint { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); background: rgba(29, 35, 48, .8); color: #fff; font-size: 11.5px; padding: 2px 10px; border-radius: 10px; pointer-events: none; white-space: nowrap; }
+  .reset { position: absolute; right: 6px; top: 6px; font: inherit; font-size: 11.5px; border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 1px 8px; cursor: pointer; }
+  :focus-visible { outline: 3px solid #f2a93b; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>三维产品旋转与透明玻璃材质</h2>
+  <p class="sub">左边两格是一盏可以旋转查看的台灯（用基本几何体搭成）：模型下载用 3 秒的计时器模拟。A 下载完之前画布一片空白，没有操作提示，转动和缩放不设限制，也不能回到初始视角；B 先显示占位和进度，第一次操作前显示提示，限制俯仰角与距离，并有“恢复视角”按钮。右边两格是两只叠在一起的玻璃杯：A 用普通透明度（不透明度 0.25），保持写入深度、不排序；B 用基于物理的材质（清漆层反射环境光照），透明物体按距离排序、不写入深度。表中另测了把 B 换成透射材质（transmission）的情况。</p>
+  <div class="row4">
+    <div><p class="tag">产品 A</p><div class="stage" id="pA"><canvas></canvas></div></div>
+    <div><p class="tag">产品 B</p><div class="stage" id="pB"><canvas></canvas><div class="poster" role="status"><span>正在加载模型…</span><span class="bar"><i></i></span></div><div class="hint" hidden>拖动旋转 · 滚轮缩放 · 方向键也可以</div><button class="reset" type="button" hidden>恢复视角</button></div></div>
+    <div><p class="tag">玻璃 A</p><div class="stage" id="gA"><canvas></canvas></div></div>
+    <div><p class="tag">玻璃 B</p><div class="stage" id="gB"><canvas></canvas></div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px"><table class="t" id="tP"></table><table class="t" id="tG"></table></div>
+  <p class="m" id="mG"></p>
+</section>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function renderer(cv, opts = {}) { const r = new THREE.WebGLRenderer({ canvas: cv, antialias: true, preserveDrawingBuffer: true, ...opts }); const b = cv.getBoundingClientRect(); r.setSize(b.width, b.height, false); r.setPixelRatio(1); r.outputColorSpace = THREE.SRGBColorSpace; r.toneMapping = THREE.ACESFilmicToneMapping; return r; }
+// ---------- 产品：台灯 ----------
+function lamp() {
+  const g = new THREE.Group(), metal = new THREE.MeshStandardMaterial({ color: 0x3a3f4a, metalness: 0.7, roughness: 0.35 }), shade = new THREE.MeshStandardMaterial({ color: 0xf2a93b, roughness: 0.5 });
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.7, 0.12, 48), metal); base.position.y = 0.06;
+  const arm1 = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.2, 16), metal); arm1.position.set(0.15, 0.65, 0); arm1.rotation.z = -0.25;
+  const arm2 = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.9, 16), metal); arm2.position.set(0.05, 1.42, 0); arm2.rotation.z = 1.0;
+  const head = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.45, 40, 1, true), shade); head.position.set(-0.4, 1.55, 0); head.rotation.z = 2.4; head.material.side = THREE.DoubleSide;
+  g.add(base, arm1, arm2, head); return g;
+}
+const P = {};
+async function setupProduct(v) {
+  const st = $('p' + v), cv = st.querySelector('canvas');
+  // 模型“下载”3 秒；B 先显示占位与进度。渲染器和环境贴图等下载完再创建，不在下载期间占住主线程
+  const t0 = performance.now(), poster = st.querySelector('.poster');
+  if (poster) { const fill = poster.querySelector('i'); const tick = () => { const k = Math.min(1, (performance.now() - t0) / 3000); fill.style.width = k * 100 + '%'; poster.firstElementChild.textContent = `正在加载模型… ${Math.round(k * 100)}%`; if (k < 1) requestAnimationFrame(tick); }; tick(); }
+  await sleep(3000);
+  const ren = renderer(cv), scene = new THREE.Scene(); scene.background = new THREE.Color(0xeef1f5);
+  const pm = new THREE.PMREMGenerator(ren); scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+  const b = cv.getBoundingClientRect(), cam = new THREE.PerspectiveCamera(40, b.width / b.height, 0.05, 100); cam.position.set(2.2, 1.6, 3.0);
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(2.5, 48), new THREE.MeshStandardMaterial({ color: 0xd9dee6, roughness: 1 })); floor.rotation.x = -Math.PI / 2; scene.add(floor);
+  const ctl = new OrbitControls(cam, cv); ctl.target.set(0, 0.8, 0); ctl.enableDamping = false;
+  if (v === 'B') { ctl.minPolarAngle = 0.2; ctl.maxPolarAngle = Math.PI / 2 - 0.05; ctl.minDistance = 1.8; ctl.maxDistance = 7; ctl.listenToKeyEvents(cv); cv.tabIndex = 0; cv.setAttribute('aria-label', '台灯三维模型，拖动或用方向键旋转'); }
+  ctl.update(); ctl.saveState();
+  const S = P[v] = { ctl, cam, ren, scene, ready: false, firstPaint: null, interacted: false };
+  const draw = () => ren.render(scene, cam);
+  // change 事件里只渲染：在这里调用 ctl.update() 会再次触发 change，无限递归
+  ctl.addEventListener('change', () => { draw(); if (!S.interacted) { S.interacted = true; const h = st.querySelector('.hint'); if (h) h.hidden = true; } });
+  scene.add(lamp()); S.ready = true; draw(); S.firstPaint = performance.now() - t0;
+  if (poster) { poster.remove(); st.querySelector('.hint').hidden = false; const rb = st.querySelector('.reset'); rb.hidden = false; rb.onclick = () => { ctl.reset(); }; }
+  // 视角信息：相机到目标的距离，以及俯仰角（0 是正上方，90 度是水平，超过 90 度就到了地面以下）
+  S.view = () => { const d = cam.position.distanceTo(ctl.target); return { dist: d, polar: ctl.getPolarAngle() * 180 / Math.PI, below: cam.position.y < 0 }; };
+}
+// ---------- 玻璃 ----------
+const G = {};
+function glass(v, x, z, color) {
+  const geo = new THREE.LatheGeometry([[0.0, 0], [0.42, 0], [0.45, 0.05], [0.5, 1.1], [0.46, 1.1], [0.41, 0.08], [0.0, 0.08]].map(p => new THREE.Vector2(p[0], p[1])), 48);
+  // A：普通透明度、保持写入深度；B：基于物理的材质（清漆层反射环境），透明、不写深度；C：透射材质（只在测量时换上）
+  const mat = v === 'A' ? new THREE.MeshStandardMaterial({ color, transparent: true, opacity: 0.25, roughness: 0.1, depthWrite: true }) : new THREE.MeshPhysicalMaterial({ color, transparent: true, opacity: 0.35, roughness: 0.05, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.6, depthWrite: false });
+  const m = new THREE.Mesh(geo, mat); m.position.set(x, 0, z); return m;
+}
+async function setupGlass(v) {
+  const st = $('g' + v), cv = st.querySelector('canvas'), ren = renderer(cv), scene = new THREE.Scene(); scene.background = new THREE.Color(0xffffff);
+  if (v === 'B') { const pm = new THREE.PMREMGenerator(ren); scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture; }
+  else { scene.add(new THREE.AmbientLight(0xffffff, 1.2)); const d = new THREE.DirectionalLight(0xffffff, 1.5); d.position.set(2, 3, 2); scene.add(d); }
+  const b = cv.getBoundingClientRect(), cam = new THREE.PerspectiveCamera(35, b.width / b.height, 0.1, 50); cam.position.set(0, 1.3, 4); cam.lookAt(0, 0.5, 0);
+  // 背后放一张有条纹的卡片，透过玻璃应该能看到它被折射、变暗
+  const tex = (() => { const c = document.createElement('canvas'); c.width = 256; c.height = 128; const g = c.getContext('2d'); for (let i = 0; i < 16; i++) { g.fillStyle = i % 2 ? '#2f6fdb' : '#ffffff'; g.fillRect(i * 16, 0, 16, 128); } const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
+  const card = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.0), new THREE.MeshBasicMaterial({ map: tex })); card.position.set(0, 0.6, -1.2); scene.add(card);
+  // 先加前面的杯子再加后面的；A 关闭排序，后面的杯子在重叠处会被前面的深度挡住
+  const front = glass(v, 0.25, 0.3, 0xcfe8ff), back = glass(v, -0.35, -0.4, 0xffd6a0);
+  scene.add(front, back); ren.sortObjects = v === 'B';
+  ren.info.autoReset = false;
+  const S = G[v] = { ren, scene, cam, back, front };
+  S.draw = () => { ren.info.reset(); ren.render(scene, cam); return { calls: ren.info.render.calls, tris: ren.info.render.triangles }; };
+  S.info = S.draw();
+  // 只画后面的杯子，作为“重叠处应该看到什么”的参照
+  S.backOnly = () => { front.visible = false; S.draw(); const px = read(ren, cv); front.visible = true; S.draw(); return px; };
+  S.cv = cv;
+}
+function read(ren, cv) { const gl = ren.getContext(), w = cv.width, h = cv.height, px = new Uint8Array(w * h * 4); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px); return { px, w, h }; }
+// 玻璃与背景的差异：杯子投影区域里，像素与“没有杯子时”的差别越大，越看得出玻璃
+function glassVisibility(v) { const S = G[v]; S.front.visible = false; S.back.visible = false; S.draw(); const bg = read(S.ren, S.cv); S.front.visible = true; S.back.visible = true; S.draw(); const all = read(S.ren, S.cv); let n = 0, s = 0; for (let i = 0; i < all.px.length; i += 4) { const d = Math.abs(all.px[i] - bg.px[i]) + Math.abs(all.px[i + 1] - bg.px[i + 1]) + Math.abs(all.px[i + 2] - bg.px[i + 2]); if (d > 6) { n++; s += d; } } return { area: n, mean: n ? s / n / 3 : 0 }; }
+// 透明排序：后面的杯子单独画时可见、整体画时却被前面挡掉的像素
+function sortingLoss(v) { const S = G[v], only = S.backOnly(); S.front.visible = false; S.back.visible = false; S.draw(); const bg = read(S.ren, S.cv); S.front.visible = true; S.back.visible = true; S.draw(); const all = read(S.ren, S.cv); S.front.visible = true; S.back.visible = false; S.draw(); const fr = read(S.ren, S.cv); S.back.visible = true; S.draw();
+  let backPx = 0, lost = 0;
+  for (let i = 0; i < all.px.length; i += 4) { const inBack = Math.abs(only.px[i] - bg.px[i]) + Math.abs(only.px[i + 1] - bg.px[i + 1]) + Math.abs(only.px[i + 2] - bg.px[i + 2]) > 6, inFront = Math.abs(fr.px[i] - bg.px[i]) + Math.abs(fr.px[i + 1] - bg.px[i + 1]) + Math.abs(fr.px[i + 2] - bg.px[i + 2]) > 6; if (inBack && inFront) { backPx++; if (Math.abs(all.px[i] - fr.px[i]) + Math.abs(all.px[i + 1] - fr.px[i + 1]) + Math.abs(all.px[i + 2] - fr.px[i + 2]) < 4) lost++; } }
+  return { overlap: backPx, lost }; }
+// C：把 B 的两只杯子换成透射材质，测量后换回
+function useTransmission(on) { const S = G.B; for (const m of [S.front, S.back]) { if (on) { m.userData.old = m.material; m.material = new THREE.MeshPhysicalMaterial({ color: m.material.color, transmission: 1, thickness: 0.3, roughness: 0.05, ior: 1.5 }); } else { m.material.dispose(); m.material = m.userData.old; } } S.info = S.draw(); return S.info; }
+async function frameCost(v, n = 40) { const S = G[v], ts = []; for (let i = 0; i < n; i++) { const t = performance.now(); S.front.rotation.y += 0.02; S.draw(); S.ren.getContext().finish(); ts.push(performance.now() - t); await new Promise(r => requestAnimationFrame(r)); } ts.sort((a, b) => a - b); return ts[ts.length >> 1]; }
+// 不在模块顶层等待：顶层 await 会推迟页面的 load 事件
+Promise.all([setupProduct('A'), setupProduct('B')]).then(() => Promise.all([setupGlass('A'), setupGlass('B')])).then(() => { window.__d3 = D3; });
+const D3 = { P, G, glassVisibility, sortingLoss, frameCost, useTransmission, fill: (id, h) => { $(id).innerHTML = h; } };
+</script>
+</body>
+</html>
