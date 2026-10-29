@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>模拟：群体运动与烟雾</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; } .row figure { margin: 0; font-size: 11px; color: var(--muted); } .row canvas { display: block; border: 1px solid var(--line); border-radius: 6px; background: #11162a; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div><h2>1 群体运动：邻域查询与参数稳定</h2><p class="sub">800 个个体按三条规则运动：分离、对齐、聚集。A 每一步都两两比较距离，分离力与距离成反比、没有速度上限；B 把画面分成边长等于感知半径的网格，只比较相邻格子里的个体，分离力有上限，速度限制在 0.6—2.4 之间。初始状态用固定种子生成，两边完全相同。</p><div class="row" id="bRow"></div><table class="t" id="tB"></table></div>
+    <div><h2>2 烟雾：模型假设与时间步长</h2><p class="sub">64×64 的网格，底部中间不断冒出烟（密度），在一个固定的旋涡速度场里扩散、被带走。A 用显式方法：扩散按当前值直接外推，平流把每格的烟沿速度推到下游；B 用隐式扩散（迭代求解）和沿速度往回找来源的平流。两种时间步长（0.01、0.1）各算 120 步。模型假设：速度场固定、不可压缩，不考虑温度与浮力，边界上的烟会流出。</p><div class="row" id="fRow"></div><table class="t" id="tF"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const rng = seed => { let s = seed; return () => (s = s * 16807 % 2147483647) / 2147483647; };
+// ---------- 1 群体运动 ----------
+const BW = 260, BH = 180, N = 800, R = 20, RS = 8;
+function makeBoids() { const r = rng(42); return Array.from({ length: N }, () => { const a = r() * 6.283; return { x: r() * BW, y: r() * BH, vx: Math.cos(a) * 1.2, vy: Math.sin(a) * 1.2 }; }); }
+const wrap = (d, L) => d > L / 2 ? d - L : d < -L / 2 ? d + L : d;
+// 两种邻域查询：返回每个个体的邻居下标，并统计比较次数
+function neighborsNaive(bs) { let cmp = 0; const out = bs.map(() => []); for (let i = 0; i < bs.length; i++) for (let j = 0; j < bs.length; j++) { if (i === j) continue; cmp++; const dx = wrap(bs[j].x - bs[i].x, BW), dy = wrap(bs[j].y - bs[i].y, BH); if (dx * dx + dy * dy < R * R) out[i].push(j); } return { out, cmp }; }
+function neighborsGrid(bs) {
+  // 宽、高平均分成整数个格子，每格不小于感知半径；否则最后一格偏窄，跨边界的近邻会漏掉
+  let cmp = 0; const cx = Math.floor(BW / R), cy = Math.floor(BH / R), cw = BW / cx, ch = BH / cy, cells = Array.from({ length: cx * cy }, () => []);
+  bs.forEach((b, i) => cells[Math.min(cy - 1, Math.floor(b.y / ch)) * cx + Math.min(cx - 1, Math.floor(b.x / cw))].push(i));
+  const out = bs.map(() => []);
+  bs.forEach((b, i) => { const gx = Math.min(cx - 1, Math.floor(b.x / cw)), gy = Math.min(cy - 1, Math.floor(b.y / ch)); for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) { const c = cells[((gy + oy + cy) % cy) * cx + (gx + ox + cx) % cx]; for (const j of c) { if (j === i) continue; cmp++; const dx = wrap(bs[j].x - b.x, BW), dy = wrap(bs[j].y - b.y, BH); if (dx * dx + dy * dy < R * R) out[i].push(j); } } });
+  return { out, cmp };
+}
+function stepBoids(bs, v) {
+  const nb = v === 'A' ? neighborsNaive(bs) : neighborsGrid(bs), acc = bs.map(() => [0, 0]);
+  bs.forEach((b, i) => {
+    let sx = 0, sy = 0, ax = 0, ay = 0, cxs = 0, cys = 0; const ns = nb.out[i];
+    for (const j of ns) { const o = bs[j], dx = wrap(o.x - b.x, BW), dy = wrap(o.y - b.y, BH), d = Math.hypot(dx, dy) || 0.01; ax += o.vx; ay += o.vy; cxs += dx; cys += dy;
+      if (d < RS) { if (v === 'A') { sx -= dx / (d * d) * 8; sy -= dy / (d * d) * 8; } else { const k = (RS - d) / RS; sx -= dx / d * k; sy -= dy / d * k; } } }
+    if (ns.length) { ax = ax / ns.length - b.vx; ay = ay / ns.length - b.vy; cxs /= ns.length; cys /= ns.length; }
+    let fx = sx * 1.5 + ax * 0.05 + cxs * 0.01, fy = sy * 1.5 + ay * 0.05 + cys * 0.01;
+    if (v === 'B') { const f = Math.hypot(fx, fy), mf = 0.08; if (f > mf) { fx *= mf / f; fy *= mf / f; } }
+    acc[i] = [fx, fy];
+  });
+  bs.forEach((b, i) => { b.vx += acc[i][0]; b.vy += acc[i][1]; if (v === 'B') { const s = Math.hypot(b.vx, b.vy), c = Math.max(0.6, Math.min(2.4, s)); b.vx *= c / s; b.vy *= c / s; } b.x = (b.x + b.vx + BW * 100) % BW; b.y = (b.y + b.vy + BH * 100) % BH; });
+  return nb.cmp;
+}
+function drawBoids(cv, bs) { const g = cv.getContext('2d'); g.fillStyle = '#11162a'; g.fillRect(0, 0, BW, BH); g.strokeStyle = '#9cc0ff'; g.beginPath(); for (const b of bs) { const s = Math.hypot(b.vx, b.vy) || 1; g.moveTo(b.x, b.y); g.lineTo(b.x - b.vx / s * 4, b.y - b.vy / s * 4); } g.stroke(); }
+function runBoids() {
+  const res = {};
+  // 两种查询找到的邻居是否完全相同
+  const probe = makeBoids(), a = neighborsNaive(probe), b = neighborsGrid(probe);
+  const same = a.out.every((x, i) => x.length === b.out[i].length && x.slice().sort((p, q) => p - q).every((y, k) => y === b.out[i].slice().sort((p, q) => p - q)[k]));
+  for (const v of ['A', 'B']) {
+    const bs = makeBoids(), speeds = []; let cmp = 0; const t0 = performance.now();
+    for (let s = 0; s < 300; s++) { cmp = stepBoids(bs, v); if (s % 50 === 49) speeds.push(bs.reduce((m, x) => m + Math.hypot(x.vx, x.vy), 0) / N); }
+    const ms = (performance.now() - t0) / 300, maxSpeed = Math.max(...bs.map(x => Math.hypot(x.vx, x.vy)));
+    const cv = document.createElement('canvas'); cv.width = BW; cv.height = BH; drawBoids(cv, bs);
+    const fig = document.createElement('figure'); fig.append(cv); fig.insertAdjacentHTML('beforeend', `<figcaption>${v}：第 300 步</figcaption>`); $('bRow').append(fig);
+    res[v] = { cmp, ms, speeds, maxSpeed };
+  }
+  res.same = same;
+  return res;
+}
+// ---------- 2 烟雾 ----------
+const G = 64, IX = (i, j) => i + (G + 2) * j, SIZE = (G + 2) * (G + 2);
+function velocity() { const u = new Float32Array(SIZE), w = new Float32Array(SIZE); for (let j = 1; j <= G; j++) for (let i = 1; i <= G; i++) { const x = (i - G / 2) / G, y = (j - G / 2) / G; u[IX(i, j)] = -y * 1.2; w[IX(i, j)] = x * 1.2 - 0.6; } return [u, w]; }
+// 扩散系数 k；显式：d += k·dt·N²·(周围平均 − 自己)×4，系数超过 0.25 就会振荡发散
+function diffuseExplicit(d, k, dt) { const a = k * dt * G * G, n = new Float32Array(SIZE); for (let j = 1; j <= G; j++) for (let i = 1; i <= G; i++) n[IX(i, j)] = d[IX(i, j)] + a * (d[IX(i - 1, j)] + d[IX(i + 1, j)] + d[IX(i, j - 1)] + d[IX(i, j + 1)] - 4 * d[IX(i, j)]); return n; }
+function diffuseImplicit(d, k, dt) { const a = k * dt * G * G, n = new Float32Array(d); for (let it = 0; it < 20; it++) for (let j = 1; j <= G; j++) for (let i = 1; i <= G; i++) n[IX(i, j)] = (d[IX(i, j)] + a * (n[IX(i - 1, j)] + n[IX(i + 1, j)] + n[IX(i, j - 1)] + n[IX(i, j + 1)])) / (1 + 4 * a); return n; }
+// 显式平流：把每格的烟按速度推给下游的格子（迎风差分）
+function advectExplicit(d, u, w, dt) { const n = new Float32Array(SIZE), c = dt * G; for (let j = 1; j <= G; j++) for (let i = 1; i <= G; i++) { const p = IX(i, j), uu = u[p] * c, ww = w[p] * c; const dx = uu > 0 ? d[p] - d[IX(i - 1, j)] : d[IX(i + 1, j)] - d[p], dy = ww > 0 ? d[p] - d[IX(i, j - 1)] : d[IX(i, j + 1)] - d[p]; n[p] = d[p] - uu * dx - ww * dy; } return n; }
+// 半拉格朗日平流：从每格沿速度往回找来源位置，双线性插值
+function advectBack(d, u, w, dt) { const n = new Float32Array(SIZE), c = dt * G; for (let j = 1; j <= G; j++) for (let i = 1; i <= G; i++) { let x = i - c * u[IX(i, j)], y = j - c * w[IX(i, j)]; x = Math.max(0.5, Math.min(G + 0.5, x)); y = Math.max(0.5, Math.min(G + 0.5, y)); const i0 = Math.floor(x), j0 = Math.floor(y), s = x - i0, t = y - j0; n[IX(i, j)] = (1 - s) * ((1 - t) * d[IX(i0, j0)] + t * d[IX(i0, j0 + 1)]) + s * ((1 - t) * d[IX(i0 + 1, j0)] + t * d[IX(i0 + 1, j0 + 1)]); } return n; }
+function runSmoke(v, dt) {
+  const [u, w] = velocity(), k = 0.0012; let d = new Float32Array(SIZE), injected = 0;
+  for (let s = 0; s < 120; s++) {
+    for (let i = G / 2 - 3; i <= G / 2 + 3; i++) for (let j = G - 6; j <= G - 3; j++) { d[IX(i, j)] += 2 * dt; injected += 2 * dt; }
+    d = v === 'A' ? advectExplicit(diffuseExplicit(d, k, dt), u, w, dt) : advectBack(diffuseImplicit(d, k, dt), u, w, dt);
+    for (let i = 0; i < G + 2; i++) { d[IX(0, i)] = d[IX(G + 1, i)] = d[IX(i, 0)] = d[IX(i, G + 1)] = 0; }   // 边界外的烟流出
+  }
+  let sum = 0, min = Infinity, max = -Infinity, bad = 0; for (let j = 1; j <= G; j++) for (let i = 1; i <= G; i++) { const x = d[IX(i, j)]; if (!isFinite(x)) { bad++; continue; } sum += x; min = Math.min(min, x); max = Math.max(max, x); }
+  const cv = document.createElement('canvas'); cv.width = G * 2; cv.height = G * 2; const g = cv.getContext('2d'), img = g.createImageData(G, G);
+  for (let j = 1; j <= G; j++) for (let i = 1; i <= G; i++) { const x = d[IX(i, j)], k4 = ((j - 1) * G + i - 1) * 4; if (!isFinite(x) || x < -0.01) { img.data.set([220, 40, 40, 255], k4); } else { const c = Math.min(255, x * 255); img.data.set([c, c, c * 1.1, 255], k4); } }
+  const t = document.createElement('canvas'); t.width = G; t.height = G; t.getContext('2d').putImageData(img, 0, 0); g.imageSmoothingEnabled = false; g.drawImage(t, 0, 0, G * 2, G * 2);
+  const fig = document.createElement('figure'); fig.append(cv); fig.insertAdjacentHTML('beforeend', `<figcaption>${v}，时间步 ${dt}</figcaption>`); $('fRow').append(fig);
+  let um = 0; for (let p = 0; p < SIZE; p++) um = Math.max(um, Math.hypot(u[p], w[p]));
+  return { sum, min, max, bad, injected, coef: k * dt * G * G, cfl: um * dt * G };
+}
+window.__sim = { runBoids, runSmoke, fill: (id, h) => { $(id).innerHTML = h; } };
+</script>
+</body>
+</html>
