@@ -1,2 +1,6 @@
-// 15-03：读取审计、徽章与边界核对结果，并报告页面高度
-module.exports = async page => { await page.waitForFunction(() => window.__ct, null, { timeout: 30000 }); console.log(JSON.stringify(await page.evaluate(() => window.__ct))); console.log('height', await page.evaluate(() => document.documentElement.scrollHeight)); };
+// 20-03 坐标、单位与三角函数：页面内计算并填表
+module.exports = async page => {
+  const r = await page.evaluate(() => window.__ct.run());
+  console.log(JSON.stringify(r));
+  console.log('height', await page.evaluate(() => document.documentElement.scrollHeight));
+};

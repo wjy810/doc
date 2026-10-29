@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>比例、坐标、单位与三角函数</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; } .row figure { margin: 0; font-size: 11px; color: var(--muted); } .row canvas { display: block; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  code { font-size: 11.5px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div><h2>1 坐标映射：数据到屏幕</h2><p class="sub">把 1—1000 的数据画成柱状图。屏幕的 y 轴向下，数学的 y 轴向上。A 直接用“数值 × 比例”当 y 坐标；B 用 <code>y = 底部 − 数值 × 比例</code>，并提供反向映射（从像素换算回数值，供提示框使用）。数据跨三个数量级，B 另外画了一张对数比例的图。</p><div class="row" id="map"></div><table class="t" id="tMap"></table></div>
+    <div><h2>2 单位：CSS 像素与设备像素</h2><p class="sub">在设备像素比为 2 的屏幕上画一条 1 像素宽的线。A 的画布尺寸等于 CSS 尺寸，浏览器显示时再放大一倍；B 把画布尺寸乘以设备像素比，再用 <code>scale(2, 2)</code> 按 CSS 像素作图。下面是放大 8 倍的局部（按设备像素模拟显示）。</p><div class="row" id="dpr"></div><table class="t" id="tDpr"></table></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>3 三角函数：旋转与圆周运动</h2><p class="sub">在半径 50 的圆上放 12 个点（每隔 30 度一个），再让一个点沿圆运动。A 把角度直接传给 <code>Math.sin()</code>；B 先换算成弧度（乘以 π／180）。蓝点是期望的位置，红点是实际的位置。</p><div class="row" id="trig"></div><table class="t" id="tTrig"></table></div>
+    <div><h2>4 周期与波形：按帧还是按时间</h2><p class="sub">让一个点按正弦波上下运动，周期设为 1 秒。A 每一帧把相位加一个固定值（按 60 帧每秒算）；B 用经过的时间算相位。模拟在 60 帧与 30 帧每秒的设备上各运行 5 秒，从过零点测出实际周期。</p><div class="row" id="wave"></div><table class="t" id="tWave"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const fig = (host, cv, cap) => { const f = document.createElement('figure'); f.append(cv); f.insertAdjacentHTML('beforeend', `<figcaption>${cap}</figcaption>`); host.append(f); };
+const canvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+// ---------- 1 坐标映射 ----------
+const DATA = [3, 20, 150, 1000, 60, 8];
+function mapping() {
+  const W = 170, H = 140, pad = 16, bottom = H - pad, maxV = 1000, sy = (bottom - pad) / maxV, out = {};
+  for (const v of ['A', 'B', 'log']) {
+    const c = canvas(W, H), g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+    g.strokeStyle = '#dde1e7'; g.beginPath(); g.moveTo(pad, bottom); g.lineTo(W - 4, bottom); g.stroke();
+    const bw = (W - pad - 8) / DATA.length;
+    // 三种映射：数值 → 柱顶的 y 坐标
+    const top = val => v === 'A' ? val * sy : v === 'B' ? bottom - val * sy : bottom - Math.log10(val) / 3 * (bottom - pad);
+    const inv = y => v === 'B' ? (bottom - y) / sy : v === 'log' ? 10 ** ((bottom - y) / (bottom - pad) * 3) : y / sy;
+    const tops = DATA.map(top);
+    DATA.forEach((val, i) => { const y = tops[i]; g.fillStyle = v === 'A' ? '#b3261e' : '#2f6fdb'; if (v === 'A') g.fillRect(pad + i * bw + 3, 0, bw - 6, y); else g.fillRect(pad + i * bw + 3, y, bw - 6, bottom - y); g.fillStyle = '#5b6475'; g.font = '9px system-ui'; g.fillText(val, pad + i * bw + 3, v === 'A' ? Math.min(H - 2, y + 10) : y - 2); });
+    fig($('map'), c, v === 'A' ? 'A：数值 × 比例' : v === 'B' ? 'B：底部 − 数值 × 比例' : 'B：对数比例');
+    const maxI = DATA.indexOf(maxV), highest = tops.indexOf(Math.min(...tops));
+    const round = Math.max(...DATA.map((val, i) => Math.abs(inv(tops[i]) - val) / val));
+    const small = DATA.filter((val, i) => Math.abs(bottom - tops[i]) < 3).length;
+    out[v] = { maxOnTop: highest === maxI, round, small };
+  }
+  $('tMap').innerHTML = `<tr><th></th><th>最大值（1000）画在最高处</th><th>像素 → 数值 → 像素的相对误差</th><th>高度不到 3 像素、几乎看不见的柱子</th></tr>` + [['A', 'A'], ['B 线性', 'B'], ['B 对数', 'log']].map(([n, k]) => `<tr><th>${n}</th><td class="${out[k].maxOnTop ? 'good' : 'poor'}">${out[k].maxOnTop ? '是' : '否，最大值在最低处'}</td><td class="num">${out[k].round.toExponential(1)}</td><td class="num ${out[k].small ? 'poor' : 'good'}">${k === 'A' ? '—' : out[k].small + ' 根'}</td></tr>`).join('');
+  return out;
+}
+// ---------- 2 单位与设备像素比 ----------
+function dpr() {
+  const DPR = 2, W = 120, H = 60, out = {};
+  for (const v of ['A', 'B']) {
+    const k = v === 'A' ? 1 : DPR, c = canvas(W * k, H * k), g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.scale(k, k);
+    g.strokeStyle = '#1d2330'; g.lineWidth = 1; g.beginPath(); g.moveTo(10, 30.5); g.lineTo(110, 30.5); g.stroke();
+    g.fillStyle = '#1d2330'; g.font = '12px system-ui'; g.fillText('1 像素的线', 10, 20);
+    // 模拟设备像素比为 2 的屏幕：把画布放大到 240×120 设备像素显示（A 被浏览器放大，B 本来就是这个尺寸）
+    const screen = canvas(W * DPR, H * DPR), sg = screen.getContext('2d'); sg.imageSmoothingEnabled = true; sg.drawImage(c, 0, 0, W * DPR, H * DPR);
+    const d = sg.getImageData(30 * DPR, 0, 1, H * DPR).data; let solid = 0, partial = 0;
+    for (let y = 0; y < H * DPR; y++) { const l = d[y * 4]; if (l < 60) solid++; else if (l < 235) partial++; }
+    // 放大 8 倍的局部
+    const zoom = canvas(160, 120), zg = zoom.getContext('2d'); zg.imageSmoothingEnabled = false; zg.drawImage(screen, 60, 52, 20, 15, 0, 0, 160, 120);
+    fig($('dpr'), zoom, v === 'A' ? 'A：画布 120×60' : 'B：画布 240×120');
+    out[v] = { solid, partial, backing: `${c.width}×${c.height}` };
+  }
+  $('tDpr').innerHTML = `<tr><th></th><th>画布实际像素</th><th>线条在屏幕上的设备像素（实心／半透明）</th></tr>` + ['A', 'B'].map(v => `<tr><th>${v}</th><td class="num">${out[v].backing}</td><td class="num ${out[v].partial ? 'poor' : 'good'}">${out[v].solid}／${out[v].partial}${out[v].partial ? '（发虚）' : '（清晰）'}</td></tr>`).join('');
+  return out;
+}
+// ---------- 3 三角函数 ----------
+function trig() {
+  const R = 50, out = {};
+  for (const v of ['A', 'B']) {
+    const c = canvas(150, 150), g = c.getContext('2d'), cx = 75, cy = 75; g.fillStyle = '#fff'; g.fillRect(0, 0, 150, 150);
+    g.strokeStyle = '#dde1e7'; g.beginPath(); g.arc(cx, cy, R, 0, 7); g.stroke();
+    let err = 0, offCircle = 0;
+    for (let deg = 0; deg < 360; deg += 30) {
+      const want = [cx + R * Math.cos(deg * Math.PI / 180), cy - R * Math.sin(deg * Math.PI / 180)];
+      const a = v === 'A' ? deg : deg * Math.PI / 180, got = [cx + R * Math.cos(a), cy - R * Math.sin(a)];
+      err = Math.max(err, Math.hypot(got[0] - want[0], got[1] - want[1])); offCircle = Math.max(offCircle, Math.abs(Math.hypot(got[0] - cx, got[1] - cy) - R));
+      g.fillStyle = '#2f6fdb'; g.beginPath(); g.arc(...want, 3, 0, 7); g.fill(); g.fillStyle = '#b3261e'; g.beginPath(); g.arc(...got, 2, 0, 7); g.fill();
+    }
+    fig($('trig'), c, v === 'A' ? 'A：Math.sin(角度)' : 'B：Math.sin(角度 × π／180)');
+    // “90 度”应该在正上方
+    const a90 = v === 'A' ? 90 : Math.PI / 2;
+    out[v] = { err, offCircle, at90: [Math.cos(a90).toFixed(2), Math.sin(a90).toFixed(2)] };
+  }
+  $('tTrig').innerHTML = `<tr><th></th><th>12 个点与期望位置的最大偏差</th><th>离开圆周的距离</th><th>90 度时的 (cos, sin)</th></tr>` + ['A', 'B'].map(v => `<tr><th>${v}</th><td class="num ${out[v].err > 0.01 ? 'poor' : 'good'}">${out[v].err.toFixed(1)} 像素</td><td class="num">${out[v].offCircle.toFixed(3)}</td><td class="num ${v === 'A' ? 'poor' : 'good'}">(${out[v].at90.join(', ')})</td></tr>`).join('') + `<tr><td colspan="4">A 的点仍在圆上（三角函数的周期性），只是角度错了——这类错误画出来“看起来也是圆”，最容易漏掉。</td></tr>`;
+  return out;
+}
+// ---------- 4 周期：按帧还是按时间 ----------
+function wave() {
+  const out = {}, c = canvas(260, 130), g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, 260, 130);
+  const runs = [['A', 60, '#b3261e'], ['A', 30, '#f2a93b'], ['B', 60, '#2f6fdb'], ['B', 30, '#1f7a4d']];
+  runs.forEach(([v, fps, color], r) => {
+    const dt = 1 / fps, ys = [], ts = []; let phase = -0.5;   // 从 −0.5 开始，第一个向上过零点落在运行之后
+    for (let i = 0; i <= 5 * fps; i++) { const t = i * dt; if (v === 'A') { if (i) phase += 2 * Math.PI / 60; } else phase = 2 * Math.PI * t - 0.5; ys.push(Math.sin(phase)); ts.push(t); }
+    // 从向上穿过 0 的时刻测周期
+    const cross = []; for (let i = 1; i < ys.length; i++) if (ys[i - 1] < 0 && ys[i] >= 0) cross.push(ts[i - 1] + (0 - ys[i - 1]) / (ys[i] - ys[i - 1]) * dt);
+    const period = cross.length > 1 ? (cross[cross.length - 1] - cross[0]) / (cross.length - 1) : null;
+    out[v + fps] = { period, cycles: cross.length };
+    g.strokeStyle = color; g.lineWidth = 1.5; g.beginPath(); ys.forEach((y, i) => { const x = 10 + ts[i] / 5 * 240, yy = 18 + r * 28 + 10 - y * 10; i ? g.lineTo(x, yy) : g.moveTo(x, yy); }); g.stroke();
+    g.fillStyle = color; g.font = '10px system-ui'; g.fillText(`${v} ${fps} 帧`, 214, 14 + r * 28);
+  });
+  fig($('wave'), c, '5 秒内的波形（从上到下：A 60 帧、A 30 帧、B 60 帧、B 30 帧）');
+  $('tWave').innerHTML = `<tr><th></th><th>60 帧每秒的设备</th><th>30 帧每秒的设备</th></tr>` + ['A', 'B'].map(v => `<tr><th>${v}</th>${[60, 30].map(f => { const p = out[v + f].period; return `<td class="num ${Math.abs(p - 1) < 0.01 ? 'good' : 'poor'}">周期 ${p.toFixed(3)} 秒</td>`; }).join('')}</tr>`).join('');
+  return out;
+}
+window.__ct = { run: () => ({ map: mapping(), dpr: dpr(), trig: trig(), wave: wave() }) };
+</script>
+</body>
+</html>
