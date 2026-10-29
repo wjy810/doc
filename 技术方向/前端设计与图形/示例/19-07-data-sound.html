@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>数据与声音：音乐可视化与图表联动</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); }
+  .tag { font-size: 11px; color: var(--muted); margin: 0 0 2px; }
+  .viz { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .vbox { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .vbox canvas { display: block; width: 100%; height: 110px; background: #11162a; }
+  .vbar { display: flex; gap: 6px; align-items: center; padding: 6px 8px; font-size: 12px; flex-wrap: wrap; min-height: 40px; }
+  .vbar button { font: inherit; font-size: 12px; border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 1px 8px; cursor: pointer; }
+  .vbar .st { color: var(--muted); } .vbar .st.err { color: var(--bad); }
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .cbox { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; display: grid; gap: 4px; }
+  .cbox svg { display: block; width: 100%; height: auto; } .cbox svg text { font: 10px "Noto Sans SC", system-ui, sans-serif; fill: #5b6475; }
+  .cbox .bar { cursor: pointer; } .cbox .bar.sel { fill: #f2a93b; }
+  .row { display: flex; gap: 8px; align-items: center; font-size: 12px; flex-wrap: wrap; } .kpi { font-weight: 700; } .row button, .row select { font: inherit; font-size: 12px; }
+  :focus-visible { outline: 3px solid #f2a93b; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 音乐可视化：授权、静音与输入缺失</h2>
+  <p class="sub">Web Audio 的分析节点（AnalyserNode）把声音分成频段，柱子的高度是每个频段的能量。示例音乐用振荡器现场合成，不需要任何授权。麦克风的三种情况用替身函数模拟：允许、被拒绝、没有设备。A 一打开页面就请求麦克风，分析节点接在音量控制之后；B 默认播放示例音乐，用户点了才请求麦克风，被拒绝或没有设备时说明原因并回到示例音乐，分析节点接在音量控制之前，静音时画面照常。</p>
+  <div class="viz" id="viz"></div>
+  <table class="t" id="tV"></table>
+</section>
+<section class="panel">
+  <h2>2 交互图表联动：单位与数据一致性</h2>
+  <p class="sub">左边是各门课本学期的学习时长，右边是选中课程每周的学习时长，上方是筛选与合计。点一根柱子应该同时改变右图、筛选框和合计。A 三处各自保存“选中了哪门课”，左图用小时、右图用分钟却都没写单位，合计把分钟除以 100；B 只有一份选择状态，所有数字从同一份数据算出，坐标轴写明单位。数据为演示而构造。</p>
+  <div><p class="tag">A</p><div id="cA"></div></div>
+  <div><p class="tag">B</p><div id="cB"></div></div>
+  <table class="t" id="tC"></table>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// ---------- 1 音乐可视化 ----------
+// 麦克风替身：模拟允许、被拒绝、没有设备三种结果
+const MIC = { mode: 'denied', calls: 0 };
+const getMic = () => { MIC.calls++; return MIC.mode === 'ok' ? Promise.resolve('mic') : Promise.reject(Object.assign(new Error(MIC.mode === 'denied' ? 'Permission denied' : 'Requested device not found'), { name: MIC.mode === 'denied' ? 'NotAllowedError' : 'NotFoundError' })); };
+const V = {};
+function synth(ac, dest) {
+  // 示例音乐：每 0.25 秒换一个音，和弦加一点噪声
+  const notes = [262, 330, 392, 523, 440, 349, 294, 392], out = ac.createGain(); out.gain.value = 0.2; out.connect(dest);
+  const osc = ac.createOscillator(), osc2 = ac.createOscillator(); osc.type = 'sawtooth'; osc2.type = 'triangle'; osc.connect(out); osc2.connect(out);
+  let i = 0; const tick = () => { const f = notes[i++ % notes.length]; osc.frequency.setValueAtTime(f, ac.currentTime); osc2.frequency.setValueAtTime(f * 1.5, ac.currentTime); };
+  tick(); const id = setInterval(tick, 250); osc.start(); osc2.start();
+  return { stop: () => { clearInterval(id); osc.stop(); osc2.stop(); } };
+}
+function setupViz(v) {
+  const host = document.createElement('div'); host.className = 'vbox'; host.id = 'v' + v;
+  host.innerHTML = `<canvas width="540" height="110" ${v === 'B' ? 'role="img" aria-label="音乐的频谱：柱子越高，那个频段越响"' : ''}></canvas><div class="vbar"><b>${v}</b>${v === 'B' ? '<button type="button" data-a="demo">播放示例音乐</button><button type="button" data-a="mic">用麦克风</button>' : ''}<button type="button" data-a="mute" aria-pressed="false">静音</button><span class="st" ${v === 'B' ? 'role="status"' : ''}></span></div>`;
+  $('viz').append(host);
+  const cv = host.querySelector('canvas'), g = cv.getContext('2d'), st = host.querySelector('.st');
+  const ac = new AudioContext(), an = ac.createAnalyser(); an.fftSize = 128; const vol = ac.createGain();
+  // A：声音 → 音量 → 分析 → 扬声器（静音后分析节点收到的是 0）；B：声音 → 分析 → 音量 → 扬声器
+  if (v === 'A') { vol.connect(an); an.connect(ac.destination); } else { an.connect(vol); vol.connect(ac.destination); }
+  const input = v === 'A' ? vol : an;
+  const S = V[v] = { src: null, muted: false, heights: [], status: () => st.textContent };
+  const play = () => { if (S.src) S.src.stop(); S.src = synth(ac, input); };
+  host.querySelector('.vbar').addEventListener('click', async e => {
+    const a = e.target.closest('[data-a]'); if (!a) return;
+    if (a.dataset.a === 'mute') { S.muted = !S.muted; vol.gain.value = S.muted ? 0 : 1; a.setAttribute('aria-pressed', String(S.muted)); a.textContent = S.muted ? '取消静音' : '静音'; if (v === 'B') st.textContent = S.muted ? '已静音，画面照常显示' : ''; }
+    if (a.dataset.a === 'demo') { play(); st.className = 'st'; st.textContent = '正在播放示例音乐'; }
+    if (a.dataset.a === 'mic') {
+      try { await getMic(); st.className = 'st'; st.textContent = '正在使用麦克风'; }
+      catch (err) { st.className = 'st err'; st.textContent = err.name === 'NotAllowedError' ? '没有麦克风权限，已改回示例音乐。可以在浏览器设置里允许后再试。' : '没有找到麦克风，已改回示例音乐。'; play(); }
+    }
+  });
+  // A：一打开就请求麦克风；失败了什么也不说
+  // 麦克风接通后的声音在演示里用合成音乐代替
+  S.start = () => getMic().then(() => { play(); }).catch(() => {});
+  if (v === 'A') S.start(); else { play(); st.textContent = '正在播放示例音乐'; }
+  const data = new Uint8Array(an.frequencyBinCount);
+  const draw = () => { an.getByteFrequencyData(data); g.fillStyle = '#11162a'; g.fillRect(0, 0, cv.width, cv.height); const n = 40, bw = cv.width / n; S.heights = []; for (let i = 0; i < n; i++) { const h = data[i] / 255 * (cv.height - 6); S.heights.push(h); g.fillStyle = `hsl(${200 + i * 3} 70% 65%)`; g.fillRect(i * bw + 1, cv.height - h, bw - 2, h); } requestAnimationFrame(draw); };
+  requestAnimationFrame(draw);
+}
+const energy = v => V[v].heights.reduce((a, h) => a + h, 0) / Math.max(1, V[v].heights.length);
+// ---------- 2 图表联动 ----------
+const COURSES = ['数据可视化', '交互设计', '三维图形', '可访问性'];
+// 每门课 8 周的学习分钟数
+const MIN = [[120, 150, 90, 200, 180, 160, 210, 170], [60, 80, 75, 90, 100, 85, 70, 95], [200, 220, 260, 240, 180, 230, 250, 270], [40, 55, 60, 50, 45, 70, 65, 80]];
+const sum = a => a.reduce((x, y) => x + y, 0);
+function svgBars(vals, sel, unit) { const W = 520, H = 120, max = Math.max(...vals), bw = (W - 40) / vals.length; return `<svg viewBox="0 0 ${W} ${H + 18}" role="img" aria-label="各门课的学习时长${unit ? '（' + unit + '）' : ''}">${unit ? `<text x="0" y="9">${unit}</text>` : ''}${vals.map((x, i) => { const h = x / max * (H - 20); return `<rect class="bar ${i === sel ? 'sel' : ''}" data-i="${i}" x="${30 + i * bw + 4}" y="${H - h}" width="${bw - 8}" height="${h}" fill="#2f6fdb" tabindex="0" role="button" aria-label="${COURSES[i]} ${(+x.toFixed(1))}${unit}"></rect><text x="${30 + i * bw + bw / 2}" y="${H + 12}" text-anchor="middle">${COURSES[i]}</text><text x="${30 + i * bw + bw / 2}" y="${H - h - 3}" text-anchor="middle">${+x.toFixed(1)}</text>`; }).join('')}</svg>`; }
+function svgLine(vals, title, unit) { const W = 520, H = 120, max = Math.max(...vals), X = i => 30 + i * (W - 40) / (vals.length - 1), Y = x => H - x / max * (H - 24); return `<svg viewBox="0 0 ${W} ${H + 18}" role="img" aria-label="${title}每周${unit ? '（' + unit + '）' : ''}"><text x="0" y="9">${title}${unit ? '（' + unit + '）' : ''}</text><polyline fill="none" stroke="#2f6fdb" stroke-width="2" points="${vals.map((x, i) => X(i) + ',' + Y(x)).join(' ')}"/>${vals.map((x, i) => `<circle cx="${X(i)}" cy="${Y(x)}" r="2.5" fill="#2f6fdb"/><text x="${X(i)}" y="${H + 12}" text-anchor="middle">${i + 1}</text>`).join('')}</svg>`; }
+const STATE = {};
+function setupCharts(v) {
+  const host = $('c' + v);
+  if (v === 'A') {
+    // A：三处各自记录选择
+    let barSel = -1, lineSel = -1, filter = -1;
+    const render = () => {
+      const lineVals = lineSel < 0 ? MIN[0].map((x, w) => sum(MIN.map(c => c[w]))) : MIN[lineSel];
+      const total = filter < 0 ? sum(MIN.map(sum)) : sum(MIN[filter]);
+      host.innerHTML = `<div class="cbox"><div class="row"><label>课程 <select><option value="-1">全部</option>${COURSES.map((c, i) => `<option value="${i}" ${i === filter ? 'selected' : ''}>${c}</option>`).join('')}</select></label><span>合计 <span class="kpi" data-k="total">${(total / 100).toFixed(1)}</span> 小时</span></div><div class="charts"><div data-k="bars">${svgBars(MIN.map(c => sum(c) / 60), barSel, '')}</div><div data-k="line">${svgLine(lineVals, lineSel < 0 ? '全部课程' : COURSES[lineSel], '')}</div></div></div>`;
+      host.querySelector('select').onchange = e => { filter = +e.target.value; render(); };
+      host.querySelectorAll('.bar').forEach(b => b.onclick = () => { barSel = +b.dataset.i; render(); });
+    };
+    render(); STATE.A = { get: () => ({ barSel, lineSel, filter }) };
+  } else {
+    // B：一份选择状态，所有部分都从它和同一份数据算出
+    const S = { sel: -1 };
+    const render = () => {
+      const minutes = S.sel < 0 ? MIN[0].map((x, w) => sum(MIN.map(c => c[w]))) : MIN[S.sel];
+      const total = sum(minutes);
+      host.innerHTML = `<div class="cbox"><div class="row"><label>课程 <select><option value="-1">全部</option>${COURSES.map((c, i) => `<option value="${i}" ${i === S.sel ? 'selected' : ''}>${c}</option>`).join('')}</select></label><span>合计 <span class="kpi" data-k="total">${(total / 60).toFixed(1)}</span> 小时（${total} 分钟）</span>${S.sel >= 0 ? '<button type="button" data-a="clear">清除选择</button>' : ''}</div><div class="charts"><div data-k="bars">${svgBars(MIN.map(c => sum(c) / 60), S.sel, '小时')}</div><div data-k="line">${svgLine(minutes, S.sel < 0 ? '全部课程' : COURSES[S.sel], '分钟')}</div></div></div>`;
+      const set = i => { S.sel = i; render(); };
+      host.querySelector('select').onchange = e => set(+e.target.value);
+      host.querySelectorAll('.bar').forEach(b => { b.onclick = () => set(+b.dataset.i); b.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); set(+b.dataset.i); } }; });
+      const c = host.querySelector('[data-a=clear]'); if (c) c.onclick = () => set(-1);
+    };
+    render(); STATE.B = { get: () => ({ sel: S.sel }) };
+  }
+}
+// 读出页面上显示的内容，检查三处是否一致、合计是否等于数据
+function chartReport(v) {
+  const host = $('c' + v), bars = [...host.querySelectorAll('[data-k=bars] .bar')], sel = bars.findIndex(b => b.classList.contains('sel'));
+  const lineTitle = host.querySelector('[data-k=line] svg > text').textContent, filter = +host.querySelector('select').value;
+  const total = parseFloat(host.querySelector('[data-k=total]').textContent);
+  const truth = sel < 0 ? sum(MIN.map(sum)) / 60 : sum(MIN[sel]) / 60;
+  const linePoints = [...host.querySelectorAll('[data-k=line] circle')].length;
+  const units = [...host.querySelectorAll('svg')].map(s => s.getAttribute('aria-label'));
+  return { sel: sel < 0 ? '无' : COURSES[sel], line: lineTitle, filter: filter < 0 ? '全部' : COURSES[filter], total, truth: +truth.toFixed(1), units: units.map(u => /（.+）/.test(u) ? u.match(/（(.+)）/)[1] : '无单位'), linePoints };
+}
+setupViz('A'); setupViz('B'); setupCharts('A'); setupCharts('B');
+window.__ds = { MIC, V, energy, chartReport, fill: (id, h) => { $(id).innerHTML = h; } };
+</script>
+</body>
+</html>
