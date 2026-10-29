@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>项目 07 生成式图形海报：种子、参数、系列与导出</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; } table.t tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .poor { color: var(--bad); }
+  .tool { display: grid; grid-template-columns: 300px 220px minmax(0, 1fr); gap: 16px; align-items: start; }
+  canvas { display: block; border: 1px solid var(--line); border-radius: 4px; }
+  .form { display: grid; gap: 6px; } .form label { display: grid; gap: 2px; font-size: 12px; color: var(--muted); } .form input, .form select, .form button { font: inherit; }
+  .warn { color: #a15c00; font-size: 12px; margin: 0; min-height: 18px; }
+  .series { display: flex; gap: 8px; flex-wrap: wrap; } .series figure { margin: 0; font-size: 11px; color: var(--muted); text-align: center; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>项目 07：生成式图形海报（完成版的生成工具）</h2>
+  <div class="tool">
+    <canvas id="poster" width="300" height="420"></canvas>
+    <div class="form">
+      <label>种子 <input id="seed" type="number" value="12"></label>
+      <label>配色 <select id="palette"><option value="lake">湖</option><option value="dusk">黄昏</option><option value="ink">墨</option></select></label>
+      <label>结构密度（5—400） <input id="density" type="number" value="120"></label>
+      <label>标题 <input id="title" value="周末去湖边走走"></label>
+      <button id="export" type="button">导出 PNG（4 倍分辨率）</button>
+      <p class="warn" id="warn" role="status"></p>
+    </div>
+    <div><h2>参数说明</h2><table class="t" id="tParams"></table></div>
+  </div>
+  <h2>系列作品：同样的参数，种子 1—6</h2><div class="series" id="series"></div>
+</section>
+<section class="panel"><h2>验收：初版与完成版运行同一组检查</h2><p class="sub">初版是实验阶段的写法：用 Math.random()、固定 44 像素单行标题、密度直接换算格子数、导出屏幕上的画布。</p><table class="t" id="tAcc"></table></section>
+<script>
+const $ = id => document.getElementById(id);
+function mulberry32(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const PALETTES = { lake: { bg: '#e8f0ec', band: '#1e3a3a', ink: '#f4f1e8', shapes: ['#2f7f73', '#9cc9b9', '#f2a93b', '#1e3a3a'] }, dusk: { bg: '#f6e3d3', band: '#3b1f3f', ink: '#fbe9d7', shapes: ['#d9564a', '#f2a93b', '#7a3e6d', '#f6c7a8'] }, ink: { bg: '#f4f1e8', band: '#111111', ink: '#f4f1e8', shapes: ['#111111', '#8c8c8c', '#c94f3d', '#d9d4c5'] } };
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const lum = rgb => { const [r, g, b] = rgb.map(v => v / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+const contrast = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+function drawCell(g, rand, x, y, s, pal) {
+  const c = pal.shapes[Math.floor(rand() * pal.shapes.length)], k = Math.floor(rand() * 4); g.fillStyle = c; g.strokeStyle = c; g.lineWidth = Math.max(1, s * 0.12);
+  if (k === 0) { g.beginPath(); g.arc(x + s / 2, y + s / 2, s * 0.38, 0, Math.PI * 2); g.fill(); }
+  else if (k === 1) { const r = Math.floor(rand() * 4) * Math.PI / 2; g.beginPath(); g.arc(x + (r < 2 ? 0 : s), y + (r % Math.PI === 0 ? 0 : s), s / 2, 0, Math.PI * 2); g.stroke(); }
+  else if (k === 2) { g.fillRect(x + s * 0.1, y + s * 0.1, s * 0.8, s * 0.8); }
+  else { g.beginPath(); g.moveTo(x, y + s); g.lineTo(x + s / 2, y); g.lineTo(x + s, y + s); g.closePath(); g.fill(); }
+}
+// ---------- 完成版 ----------
+function generateB(canvas, p, scale = 1) {
+  const W = 300 * scale, H = 420 * scale, g = canvas.getContext('2d'), pal = PALETTES[p.palette], rand = mulberry32(p.seed), warnings = [];
+  let density = Number(p.density); if (!Number.isFinite(density)) { density = 120; warnings.push('密度不是数字，使用默认值 120'); }
+  if (density < 5 || density > 400) { warnings.push(`密度 ${p.density} 超出 5—400，已限制为 ${Math.min(400, Math.max(5, density))}`); density = Math.min(400, Math.max(5, density)); }
+  canvas.width = W; canvas.height = H; g.fillStyle = pal.bg; g.fillRect(0, 0, W, H);
+  const band = H * 0.27, area = H - band, s = Math.sqrt(W * area / density), cols = Math.ceil(W / s), rows = Math.ceil(area / s);
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) drawCell(g, rand, c * s, r * s, s, pal);
+  g.fillStyle = pal.band; g.fillRect(0, area, W, band);   // 标题放在单色色带上，对比度不受图案影响
+  const m = 18 * scale, maxW = W - 2 * m; let size = 44 * scale, lines;
+  const wrap = sz => { g.font = `700 ${sz}px "Noto Sans SC"`; const out = []; let line = ''; for (const ch of String(p.title || '未命名')) { if (g.measureText(line + ch).width > maxW && line) { out.push(line); line = ch; } else line += ch; } out.push(line); return out; };
+  while (true) { lines = wrap(size); if ((lines.length <= 3 && lines.length * size * 1.25 <= band - 2 * m) || size <= 18 * scale) break; size -= 2 * scale; }
+  if (lines.length > 3 || lines.length * size * 1.25 > band - 2 * m) { const fit = Math.max(1, Math.floor((band - 2 * m) / (size * 1.25))); lines = lines.slice(0, fit); let last = lines[fit - 1]; while (g.measureText(last + '…').width > maxW) last = last.slice(0, -1); lines[fit - 1] = last + '…'; warnings.push('标题过长，已截断'); }
+  g.fillStyle = pal.ink; g.textBaseline = 'top'; lines.forEach((l, i) => g.fillText(l, m, area + m + i * size * 1.25));
+  return { warnings, size: size / scale, lines: lines.length, box: { x: m, y: area + m, w: Math.max(...lines.map(l => g.measureText(l).width)), h: lines.length * size * 1.25 }, ink: pal.ink, under: pal.band };
+}
+// ---------- 初版 ----------
+function generateA(canvas, p) {
+  const W = 300, H = 420, g = canvas.getContext('2d'), pal = PALETTES[p.palette], rand = Math.random;
+  canvas.width = W; canvas.height = H; g.fillStyle = pal.bg; g.fillRect(0, 0, W, H);
+  const n = Math.round(Math.sqrt(p.density)), s = W / n;   // 密度为 0 时 n = 0，一个格子也不画
+  for (let r = 0; r < n * 1.4; r++) for (let c = 0; c < n; c++) drawCell(g, rand, c * s, r * s, s, pal);
+  g.font = '700 44px "Noto Sans SC"'; g.fillStyle = pal.shapes[3]; g.textBaseline = 'top'; g.fillText(p.title, 20, H - 70);
+  return { warnings: [], size: 44, lines: 1, box: { x: 20, y: H - 70, w: g.measureText(p.title).width, h: 55 }, ink: pal.shapes[3], under: null };
+}
+const params = () => ({ seed: +$('seed').value, palette: $('palette').value, density: $('density').value === '' ? NaN : +$('density').value, title: $('title').value });
+let last = null;
+function draw() { last = generateB($('poster'), params()); $('warn').textContent = last.warnings.join('；'); renderSeries(); }
+function renderSeries() { $('series').innerHTML = ''; for (let s = 1; s <= 6; s++) { const c = document.createElement('canvas'); generateB(c, { ...params(), seed: s }); c.style.width = '100px'; c.style.height = '140px'; const f = document.createElement('figure'); f.append(c); f.insertAdjacentHTML('beforeend', `<figcaption>种子 ${s}</figcaption>`); $('series').append(f); } }
+['seed', 'palette', 'density', 'title'].forEach(id => $(id).addEventListener('input', draw));
+$('export').onclick = () => { const c = document.createElement('canvas'), p = params(); generateB(c, p, 4); const a = document.createElement('a'); a.download = `poster-seed${p.seed}-${p.palette}-d${p.density}.png`; a.href = c.toDataURL('image/png'); window.__lastExport = { name: a.download, w: c.width, h: c.height }; };
+$('tParams').innerHTML = `<tr><th>参数</th><th>范围</th><th>作用</th></tr><tr><th>种子</th><td>整数</td><td>决定每个格子画什么图形、用什么颜色；同样的种子和参数一定得到同样的海报</td></tr><tr><th>配色</th><td>湖、黄昏、墨</td><td>背景、色带、文字与四种图形颜色；文字与色带对比度都大于 7</td></tr><tr><th>结构密度</th><td>5—400</td><td>图案区大约有多少个格子；越界时限制到边界并提示</td></tr><tr><th>标题</th><td>任意文字</td><td>从 44 像素开始缩小到放得下（最多 3 行，最小 18 像素）；仍放不下时截断并提示</td></tr><tr><th>导出</th><td>4 倍分辨率</td><td>1200 × 1680 像素；文件名记录种子、配色与密度</td></tr>`;
+document.fonts.load('700 40px "Noto Sans SC"').then(draw);
+// ---------- 测量工具 ----------
+function hash(canvas) { const d = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data; let h = 2166136261; for (let i = 0; i < d.length; i += 7) { h ^= d[i]; h = Math.imul(h, 16777619); } return (h >>> 0).toString(16); }
+function coverage(canvas, bg) { const g = canvas.getContext('2d'), d = g.getImageData(0, 0, canvas.width, Math.floor(canvas.height * 0.7)).data, b = hex(bg); let n = 0, t = 0; for (let i = 0; i < d.length; i += 16) { t++; if (Math.abs(d[i] - b[0]) + Math.abs(d[i + 1] - b[1]) + Math.abs(d[i + 2] - b[2]) > 30) n++; } return n / t; }
+// 文字背后的颜色：去掉文字本身的像素后取亮度中位数
+function medianUnder(canvas, box, ink) { const g = canvas.getContext('2d'), d = g.getImageData(Math.max(0, box.x), Math.max(0, box.y), Math.min(canvas.width - box.x, box.w), Math.min(canvas.height - box.y, box.h)).data, L = [], k = hex(ink); for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - k[0]) + Math.abs(d[i + 1] - k[1]) + Math.abs(d[i + 2] - k[2]) > 40) L.push([d[i], d[i + 1], d[i + 2]]); L.sort((a, b) => lum(a) - lum(b)); return L[Math.floor(L.length / 2)]; }
+window.__gp = { generateA, generateB, hash, coverage, medianUnder, contrast, hex, PALETTES,
+  report(R) { const rows = [['同一配置画两次，像素完全相同', 'repro'], ['种子 1—6 得到 6 张不同的海报', 'series'], ['40 字长标题', 'long'], ['密度 0', 'd0'], ['密度 1000', 'd1000'], ['标题与背后颜色的对比度（三种配色中最低）', 'contrast'], ['导出尺寸', 'export']];
+    $('tAcc').innerHTML = `<tr><th>检查</th><th>初版</th><th>完成版</th></tr>` + rows.map(([n, k]) => `<tr><th>${n}</th>${['A', 'B'].map(v => `<td class="${R[v][k].ok ? 'good' : 'poor'}">${R[v][k].text}</td>`).join('')}</tr>`).join(''); } };
+</script>
+</body>
+</html>
