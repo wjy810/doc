@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>项目 02 同一内容的三种视觉方向：简约、编辑设计与科技</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --warn: #a15c00; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; } table.t tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .poor { color: var(--bad); } .mid { color: var(--warn); }
+  .cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; } .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+  .tag { font-size: 11px; color: var(--muted); margin: 6px 0 2px; }
+  .screen { width: 100%; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
+  .board { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; font-size: 11px; color: var(--muted); } .board i { display: inline-block; width: 16px; height: 16px; border-radius: 4px; border: 1px solid #0002; }
+
+  /* —— 方向一：简约 —— */
+  .d-min { background: #ffffff; color: #1d2330; font-family: "Noto Sans SC", system-ui, sans-serif; padding: 16px; }
+  .d-min .k { font-size: 13px; color: #5b6475; margin: 0 0 8px; } .d-min h3 { font-size: 22px; line-height: 1.35; margin: 0 0 8px; } .d-min p { font-size: 15px; margin: 0 0 16px; color: #1d2330; }
+  .d-min .row { display: flex; justify-content: space-between; border-top: 1px solid #e5e7eb; padding: 8px 0; font-size: 15px; } .d-min .row span:last-child { color: #5b6475; font-size: 13px; }
+  .d-min .btn { display: inline-flex; align-items: center; height: 40px; padding: 0 16px; border: 1px solid #2f6fdb; color: #2f6fdb; border-radius: 8px; font-size: 15px; background: #fff; }
+  .d-min .stat { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0 0 16px; } .d-min .stat b { display: block; font-size: 22px; } .d-min .stat span { font-size: 13px; color: #5b6475; }
+  .d-min .empty { text-align: center; padding: 24px 8px; } .d-min .empty p { color: #5b6475; }
+
+  /* —— 方向二：编辑设计 —— */
+  .d-ed { background: #f7f3ea; color: #23201b; font-family: "Noto Serif SC", "Noto Serif CJK SC", serif; padding: 20px 20px 24px; }
+  .d-ed .k { font: 700 12px/1.6 "Noto Sans SC", sans-serif; letter-spacing: .12em; color: #8a2a1e; margin: 0 0 12px; border-bottom: 2px solid #23201b; padding-bottom: 4px; }
+  .d-ed h3 { font-size: 30px; line-height: 1.25; margin: 0 0 12px; font-weight: 700; } .d-ed p { font-size: 15px; line-height: 1.8; margin: 0 0 24px; color: #3b362e; }
+  .d-ed .row { display: grid; grid-template-columns: 40px 1fr; gap: 12px; border-top: 1px solid #23201b; padding: 12px 0; font-size: 15px; } .d-ed .row span:first-child { font: 700 12px/1.6 "Noto Sans SC", sans-serif; color: #8a2a1e; }
+  .d-ed .btn { display: inline-flex; align-items: center; height: 40px; padding: 0 20px; background: #23201b; color: #f7f3ea; font: 700 15px "Noto Sans SC", sans-serif; }
+  .d-ed .stat { display: flex; gap: 24px; margin: 0 0 24px; font-size: 15px; } .d-ed .stat b { font-size: 30px; display: block; line-height: 1.1; } .d-ed .stat span { font: 12px "Noto Sans SC", sans-serif; color: #5d564b; }
+  .d-ed .empty { padding: 24px 0; border-top: 2px solid #23201b; } .d-ed .empty p { font-style: italic; }
+
+  /* —— 方向三：科技 —— */
+  .d-tech { background: #0b1020; color: #e6f7ff; font-family: "Noto Sans SC", system-ui, sans-serif; padding: 14px; }
+  .d-tech .k { font: 11px ui-monospace, monospace; color: #3ee6ff; margin: 0 0 6px; letter-spacing: .08em; } .d-tech h3 { font-size: 26px; margin: 0 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #ffffff; }
+  .d-tech p { font-size: 14px; margin: 0 0 18px; color: #4a5a7a; }
+  .d-tech .row { display: flex; justify-content: space-between; border: 1px solid #1d2a4a; padding: 6px 10px; margin-bottom: 6px; font-size: 13px; border-radius: 2px; } .d-tech .row span:last-child { color: #3d4b69; font: 12px ui-monospace, monospace; }
+  .d-tech .btn { display: inline-flex; align-items: center; height: 36px; padding: 0 14px; border: 1px solid #3ee6ff; color: #3ee6ff; font: 16px ui-monospace, monospace; background: transparent; box-shadow: 0 0 12px #3ee6ff55; }
+  .d-tech .btn.small { height: 30px; font-size: 13px; }
+  .d-tech .stat { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 0 0 18px; } .d-tech .stat b { display: block; font: 34px ui-monospace, monospace; color: #3ee6ff; } .d-tech .stat span { font-size: 11px; color: #4a5a7a; }
+  .d-tech .empty { padding: 18px 10px; border: 1px dashed #1d2a4a; text-align: center; } .d-tech .empty p { font-size: 18px; color: #4a5a7a; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>项目 02：同一内容的三种视觉方向</h2>
+  <p class="sub">产品是一款为演示而构造的“城市步行路线”应用。三个方向使用完全相同的文字和数据，各做首页片段、详情和空状态三屏，只改变视觉组织：版式、字体、色彩与图形处理。下方的表格由脚本从页面上测得。</p>
+  <div class="cols" id="cols"></div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>比较：层级、可读性、一致性与实际内容适配</h2><table class="t" id="tCmp"></table></div>
+    <div><h2>方向板与取舍说明</h2><table class="t" id="tBoard"></table><p class="m" id="choice"></p><h2 style="margin-top:6px">评审意见</h2><table class="t" id="tReview"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const CONTENT = { label: '本周推荐', title: '湖边樱花步道', intro: '沿湖一圈，平坦、遮阴多，适合推婴儿车。', routes: [['湖边樱花步道', '3.2 公里'], ['山顶观景台', '5.6 公里']], stats: [['3.2', '公里'], ['48', '分钟'], ['2', '个补水点']], cta: '开始导航', emptyTitle: '还没有收藏的路线', emptyText: '在路线详情页点“收藏”，会出现在这里。', emptyCta: '浏览路线' };
+const LONG = '湖边樱花步道：把补水点、遮阴路段、无障碍坡道与实时人流放在同一张地图上的周末路线';
+const DIRS = { min: '简约', ed: '编辑设计', tech: '科技' };
+function screens(dir, c) {
+  const rows = dir === 'ed' ? c.routes.map(([n, d], i) => `<div class="row"><span>0${i + 1}</span><span>${n} · ${d}</span></div>`).join('') : c.routes.map(([n, d]) => `<div class="row"><span>${n}</span><span>${d}</span></div>`).join('');
+  const stats = `<div class="stat">${c.stats.map(([b, s]) => `<div><b>${b}</b><span>${s}</span></div>`).join('')}</div>`;
+  const small = dir === 'tech' ? ' small' : '';
+  return [
+    ['首页片段', `<p class="k">${c.label}</p><h3>${c.title}</h3><p>${c.intro}</p>${rows}`],
+    ['详情', `<p class="k">${c.label}</p><h3>${c.title}</h3>${stats}<span class="btn">${c.cta}</span>`],
+    ['空状态', `<div class="empty"><h3>${c.emptyTitle}</h3><p>${c.emptyText}</p><span class="btn${small}">${c.emptyCta}</span></div>`]];
+}
+function render(host, dir, c) { host.innerHTML = screens(dir, c).map(([n, h]) => `<p class="tag">${DIRS[dir]} · ${n}</p><div class="screen d-${dir}" data-dir="${dir}">${h}</div>`).join(''); }
+const cols = {}; for (const dir of Object.keys(DIRS)) { const col = document.createElement('div'); $('cols').append(col); render(col, dir, CONTENT); cols[dir] = col; }
+// ---------- 测量 ----------
+const rgb = c => c.match(/[\d.]+/g).map(Number);
+const lum = c => { const [r, g, b] = rgb(c).slice(0, 3).map(v => v / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+const bgOf = el => { for (let e = el; e; e = e.parentElement) { const c = getComputedStyle(e).backgroundColor; if (rgb(c)[3] !== 0 && c !== 'rgba(0, 0, 0, 0)') return c; } return 'rgb(255, 255, 255)'; };
+function measure(col) {
+  const texts = [...col.querySelectorAll('.screen *')].filter(el => [...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim()));
+  const sizes = new Set(), colors = new Set(), spacing = []; let minBody = 99, minAll = 99;
+  texts.forEach(el => { const cs = getComputedStyle(el), r = ratio(cs.color, bgOf(el)); sizes.add(cs.fontSize); colors.add(cs.color); minAll = Math.min(minAll, r); if (el.tagName === 'P' && !el.classList.contains('k')) minBody = Math.min(minBody, r); });
+  col.querySelectorAll('.screen, .screen *').forEach(el => { const cs = getComputedStyle(el); colors.add(cs.backgroundColor); ['marginBottom', 'paddingTop', 'paddingLeft', 'gap'].forEach(k => { const v = parseFloat(cs[k]); if (v > 0) spacing.push(v); }); });
+  const h3 = parseFloat(getComputedStyle(col.querySelector('h3')).fontSize), p = parseFloat(getComputedStyle(col.querySelector('.screen p:not(.k)')).fontSize);
+  const btnH = new Set([...col.querySelectorAll('.btn')].map(b => Math.round(b.getBoundingClientRect().height)));
+  colors.delete('rgba(0, 0, 0, 0)');
+  return { minBody, minAll, sizes: sizes.size, colors: colors.size, grid4: spacing.filter(v => v % 4 === 0).length / spacing.length, scale: h3 / p, btnH: btnH.size, hasEmptyCta: !!col.querySelector('.empty .btn') };
+}
+function longTitle(dir) {   // 实际内容适配：换成 40 字的长标题，检查截断与溢出
+  const host = document.createElement('div'); host.style.cssText = `position:absolute;left:-9999px;top:0;width:${cols[dir].clientWidth}px`; document.body.append(host);
+  render(host, dir, { ...CONTENT, title: LONG });
+  let cut = 0; host.querySelectorAll('h3').forEach(h => { if (h.scrollWidth > h.clientWidth + 1) cut++; });
+  host.remove(); return cut;
+}
+function run() {
+  const M = {}; for (const dir of Object.keys(DIRS)) M[dir] = { ...measure(cols[dir]), cut: longTitle(dir) };
+  // 固定内容：每个方向都包含全部内容文字，去掉这些文字（以及编号、分隔符）后不剩其他文字
+  const parts = [CONTENT.label, CONTENT.title, CONTENT.intro, ...CONTENT.routes.flat(), ...CONTENT.stats.flat(), CONTENT.cta, CONTENT.emptyTitle, CONTENT.emptyText, CONTENT.emptyCta].map(t => t.replace(/\s+/g, '')).sort((a, b) => b.length - a.length);
+  const same = Object.values(cols).every(c => { let t = c.innerText.replace(/\s+/g, '').replace(/(简约|编辑设计|科技)·(首页片段|详情|空状态)/g, '').replace(/·/g, '').replace(/0[1-9](?=[^\d.])/g, ''); if (!parts.every(p => t.includes(p))) return false; parts.forEach(p => t = t.split(p).join('')); return t === ''; });
+  const rows = [
+    ['正文最低对比度', m => m.minBody.toFixed(2), m => m.minBody >= 4.5],
+    ['所有文字最低对比度', m => m.minAll.toFixed(2), m => m.minAll >= 4.5],
+    ['字号种类', m => m.sizes, m => m.sizes <= 5],
+    ['颜色种类（文字与背景）', m => m.colors, m => m.colors <= 8],
+    ['间距是 4 的倍数', m => (m.grid4 * 100).toFixed(0) + '%', m => m.grid4 >= 0.9],
+    ['标题／正文字号比（层级）', m => m.scale.toFixed(2) + ' 倍', m => m.scale >= 1.4],
+    ['按钮高度种类（一致性）', m => m.btnH, m => m.btnH === 1],
+    ['40 字长标题：被截断的标题', m => m.cut + ' 处', m => m.cut === 0],
+    ['空状态给出下一步操作', m => m.hasEmptyCta ? '有' : '没有', m => m.hasEmptyCta]];
+  $('tCmp').innerHTML = `<tr><th>检查</th>${Object.values(DIRS).map(n => `<th>${n}</th>`).join('')}</tr><tr><th>三个方向内容相同</th><td colspan="3" class="${same ? 'good' : 'poor'}">${same ? '相同（文字逐字一致）' : '不同'}</td></tr>` + rows.map(([n, f, ok]) => `<tr><th>${n}</th>${Object.keys(DIRS).map(d => `<td class="${ok(M[d]) ? 'good' : 'poor'}">${f(M[d])}</td>`).join('')}</tr>`).join('');
+  $('tBoard').innerHTML = `<tr><th>方向</th><th>方向板</th><th>适合的用户与内容</th></tr>
+    <tr><th>简约</th><td><span class="board"><i style="background:#fff"></i><i style="background:#1d2330"></i><i style="background:#2f6fdb"></i>无衬线；细分隔线；大量留白</span></td><td>第一次使用、想快速找到路线的人；信息量中等的工具页面</td></tr>
+    <tr><th>编辑设计</th><td><span class="board"><i style="background:#f7f3ea"></i><i style="background:#23201b"></i><i style="background:#8a2a1e"></i>衬线大标题；编号；粗分隔线</span></td><td>愿意读路线介绍、把出行当成休闲的人；以文字介绍为主的内容</td></tr>
+    <tr><th>科技</th><td><span class="board"><i style="background:#0b1020"></i><i style="background:#3ee6ff"></i><i style="background:#4a5a7a"></i>深色底；等宽数字；发光描边</span></td><td>关注实时数据（人流、配速）的跑步与骑行用户；以数字为主的内容</td></tr>`;
+  $('choice').innerHTML = `<b>取舍说明</b>：选择“编辑设计”继续完善。路线以文字介绍为主，衬线大标题和编号让每条路线像一篇短文；测量上它的层级最明显（标题是正文的 ${M.ed.scale.toFixed(1)} 倍），所有检查都通过。“科技”方向的次要文字对比度只有 ${M.tech.minAll.toFixed(2)}，用了 ${M.tech.sizes} 种字号和 2 种按钮高度，长标题被省略号截断；如果以后做“实时人流”页面，可以借用它的等宽数字。“简约”方向全部通过，但与同类应用区别不大。`;
+  $('tReview').innerHTML = `<tr><th>评审人</th><th>意见</th><th>处理</th></tr><tr><td>未填写</td><td>未填写（评审后记录原话）</td><td>未填写</td></tr><tr><td colspan="3">这里只记录真实评审中的意见；上面的比较表是脚本测量，不代替评审。</td></tr>`;
+  return M;
+}
+window.__td = { run };
+</script>
+</body>
+</html>
