@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>文字与图像特效：动态文字、液态扭曲、粒子文字与鼠标闪电</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; } .tag { font-size: 11px; color: var(--muted); margin: 0 0 2px; }
+  .stage { border: 1px solid var(--line); border-radius: 8px; height: 150px; position: relative; overflow: hidden; background: #11162a; }
+  .stage canvas { display: block; width: 100%; height: 100%; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  /* 1 动态文字 */
+  .kt { margin: 0; position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font: 700 36px/1 "Noto Sans SC", system-ui, sans-serif; }
+  .kt span { display: inline-block; }
+  .kt.B span { animation: rise .5s cubic-bezier(.2, .8, .2, 1) both; }
+  @keyframes rise { from { transform: translateY(18px); opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .kt.B span { animation: none; } }
+  .toggle { position: absolute; right: 6px; bottom: 6px; font: inherit; font-size: 11px; border: 0; border-radius: 6px; padding: 2px 8px; background: rgba(255, 255, 255, .85); cursor: pointer; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div><h2>1 动态文字：语义文本与可读性</h2><p class="sub">标题逐字出现。A 把文字画在画布上并一直晃动；B 给读屏软件一份完整的标题文字，看得见的那份逐字播放动画、对读屏软件隐藏且不参与选中，动画 0.8 秒内结束，用户要求减少动态效果时不播放。</p><div class="pair"><div><p class="tag">A</p><div class="stage" id="kA"><canvas width="270" height="150" aria-hidden="true"></canvas></div></div><div><p class="tag">B</p><div class="stage" id="kB"><h3 class="kt B"><span class="sr">听见城市</span><span aria-hidden="true" id="kBv" style="user-select:none"></span></h3></div></div></div><table class="t" id="tK"></table></div>
+    <div><h2>2 图片液态扭曲：资源比例与性能</h2><p class="sub">着色器按噪声偏移采样坐标，让图片像水面一样流动。原图里是正圆。A 把 0—1 的纹理坐标直接铺满画布，像素比 2、噪声 6 层；B 按图片比例裁切（像 cover），像素比 1、噪声 3 层，用户要求减少动态效果时停在第一帧。</p><div class="pair"><div><p class="tag">A</p><div class="stage" id="wA"><canvas></canvas></div></div><div><p class="tag">B</p><div class="stage" id="wB"><canvas></canvas></div></div></div><table class="t" id="tW"></table></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>3 粒子聚合成文字：数量与恢复稳定性</h2><p class="sub">从文字的像素里取点，每个点是一个被弹簧拉回原位的粒子。A 每 2 像素取一个点、不加阻尼、时间步不设上限；B 每 4 像素取一个点、加阻尼、单步最多 1/30 秒。测试脚本先用“鼠标”推开粒子，再模拟一次切走标签页后回来的 0.5 秒间隔。</p><div class="pair"><div><p class="tag">A</p><div class="stage" id="pA"><canvas></canvas></div></div><div><p class="tag">B</p><div class="stage" id="pB"><canvas></canvas></div></div></div><table class="t" id="tP"></table></div>
+    <div><h2>4 鼠标闪电：闪烁强度与可关闭</h2><p class="sub">指针划过时画出带分叉的折线，亮度随生命期衰减。A 指针每移动 80 像素就放一道闪电并让整个画面闪白；B 每 0.4 秒最多一道、不闪白，有“关闭闪电”按钮，用户要求减少动态效果时默认关闭。表中按 WCAG 的定义统计每秒画面整体变亮又变暗的次数。</p><div class="pair"><div><p class="tag">A</p><div class="stage" id="zA"><canvas></canvas></div></div><div><p class="tag">B</p><div class="stage" id="zB"><canvas></canvas><button class="toggle" type="button" aria-pressed="false">关闭闪电</button></div></div></div><table class="t" id="tZ"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const frame = () => new Promise(r => requestAnimationFrame(r));
+const TITLE = '听见城市';
+const fit = cv => { const r = cv.getBoundingClientRect(); cv.width = Math.round(r.width); cv.height = Math.round(r.height); return cv.getContext('2d'); };
+// ---------- 1 动态文字 ----------
+let kRunA = true;
+function setupKinetic() {
+  const cv = $('kA').querySelector('canvas'), g = fit(cv), t0 = performance.now();
+  const draw = now => { const t = (now - t0) / 1000; g.clearRect(0, 0, cv.width, cv.height); g.fillStyle = '#fff'; g.font = '700 36px "Noto Sans SC", system-ui'; g.textBaseline = 'middle'; [...TITLE].forEach((ch, i) => { g.save(); g.translate(cv.width / 2 - 72 + i * 40, cv.height / 2 + Math.sin(t * 4 + i) * 10); g.rotate(Math.sin(t * 3 + i) * 0.35); g.fillText(ch, -18, 0); g.restore(); }); if (kRunA) requestAnimationFrame(draw); };
+  requestAnimationFrame(draw);
+  $('kBv').innerHTML = [...TITLE].map((ch, i) => `<span style="animation-delay:${i * 0.08}s">${ch}</span>`).join('');
+}
+// ---------- 2 液态扭曲（WebGL） ----------
+const W = {};
+function makeImage() { const c = document.createElement('canvas'); c.width = 512; c.height = 512; const g = c.getContext('2d'); const gr = g.createLinearGradient(0, 0, 512, 512); gr.addColorStop(0, '#2c5aa0'); gr.addColorStop(1, '#86a9e0'); g.fillStyle = gr; g.fillRect(0, 0, 512, 512); g.fillStyle = '#ffd34d'; g.beginPath(); g.arc(256, 256, 140, 0, 7); g.fill(); return c; }
+function setupWarp() {
+  const img = makeImage();
+  for (const v of ['A', 'B']) {
+    const cv = $('w' + v).querySelector('canvas'), r = cv.getBoundingClientRect(), pr = v === 'A' ? 2 : 1;
+    cv.width = Math.round(r.width * pr); cv.height = Math.round(r.height * pr);
+    const gl = cv.getContext('webgl', { preserveDrawingBuffer: true });
+    const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); return o; };
+    const vs = 'attribute vec2 p; varying vec2 uv; void main(){ uv = p * 0.5 + 0.5; gl_Position = vec4(p, 0, 1); }';
+    // 片元着色器：多层值噪声偏移采样坐标；B 先按比例把画布坐标换算成图片坐标
+    const fs = `precision mediump float; varying vec2 uv; uniform sampler2D img; uniform float t, amp; uniform vec2 scale; uniform int oct;
+      float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float n(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(h(i), h(i + vec2(1, 0)), f.x), mix(h(i + vec2(0, 1)), h(i + vec2(1, 1)), f.x), f.y); }
+      void main(){ vec2 q = (uv - 0.5) * scale + 0.5; float s = 0.0, a = 0.5; vec2 pp = q * 4.0 + t * 0.3; for (int k = 0; k < 6; k++) { if (k >= oct) break; s += a * n(pp); pp *= 2.0; a *= 0.5; }
+        gl_FragColor = texture2D(img, q + (s - 0.5) * amp); }`;
+    const prog = gl.createProgram(); gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(prog); gl.useProgram(prog);
+    const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const aspect = cv.width / cv.height;   // 画布比图片（1:1）宽
+    gl.uniform2f(gl.getUniformLocation(prog, 'scale'), v === 'A' ? 1 : 1, v === 'A' ? 1 : 1 / aspect);
+    gl.uniform1i(gl.getUniformLocation(prog, 'oct'), v === 'A' ? 6 : 3);
+    const uT = gl.getUniformLocation(prog, 't'), uA = gl.getUniformLocation(prog, 'amp');
+    W[v] = { gl, cv, draw: (t, amp) => { gl.viewport(0, 0, cv.width, cv.height); gl.uniform1f(uT, t); gl.uniform1f(uA, amp); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); } };
+  }
+}
+// 圆的长宽比：静止（扭曲幅度 0）时读回像素，找黄色区域的宽和高
+function circleAspect(v) { const { gl, cv, draw } = W[v]; draw(0, 0); const px = new Uint8Array(cv.width * cv.height * 4); gl.readPixels(0, 0, cv.width, cv.height, gl.RGBA, gl.UNSIGNED_BYTE, px); let x0 = 1e9, x1 = -1, y0 = 1e9, y1 = -1; for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) { const i = (y * cv.width + x) * 4; if (px[i] > 200 && px[i + 1] > 170 && px[i + 2] < 120) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); } } return (x1 - x0 + 1) / (y1 - y0 + 1); }
+async function warpCost(v, ms = 1000) { const ts = []; let last = 0; const t0 = performance.now(); while (performance.now() - t0 < ms) { const now = await frame(); if (last) ts.push(now - last); last = now; W[v].draw((now - t0) / 1000, 0.08); } ts.sort((a, b) => a - b); return { p50: ts[ts.length >> 1], p95: ts[Math.floor(ts.length * 0.95)], px: W[v].cv.width * W[v].cv.height }; }
+// ---------- 3 粒子文字 ----------
+const P = {};
+function setupParticles() {
+  for (const v of ['A', 'B']) {
+    const cv = $('p' + v).querySelector('canvas'), g = fit(cv), step = v === 'A' ? 2 : 4;
+    const off = document.createElement('canvas'); off.width = cv.width; off.height = cv.height; const o = off.getContext('2d'); o.fillStyle = '#fff'; o.font = '700 64px "Noto Sans SC", system-ui'; o.textAlign = 'center'; o.textBaseline = 'middle'; o.fillText(TITLE, cv.width / 2, cv.height / 2);
+    const d = o.getImageData(0, 0, off.width, off.height).data, pts = [];
+    for (let y = 0; y < off.height; y += step) for (let x = 0; x < off.width; x += step) if (d[(y * off.width + x) * 4 + 3] > 128) pts.push({ tx: x, ty: y, x, y, vx: 0, vy: 0 });
+    P[v] = { pts, g, cv, damp: v === 'B', maxDt: v === 'B' ? 1 / 30 : Infinity };
+  }
+}
+function stepParticles(v, dt) { const S = P[v], k = 60, c = S.damp ? 10 : 0; dt = Math.min(dt, S.maxDt); for (const p of S.pts) { const ax = -k * (p.x - p.tx) - c * p.vx, ay = -k * (p.y - p.ty) - c * p.vy; p.vx += ax * dt; p.vy += ay * dt; p.x += p.vx * dt; p.y += p.vy * dt; } }
+function drawParticles(v) { const { g, cv, pts } = P[v]; g.fillStyle = '#11162a'; g.fillRect(0, 0, cv.width, cv.height); g.fillStyle = '#9cc0ff'; for (const p of pts) g.fillRect(p.x, p.y, 1.6, 1.6); }
+const err = v => P[v].pts.reduce((a, p) => a + Math.hypot(p.x - p.tx, p.y - p.ty), 0) / P[v].pts.length;
+function push(v, cx, cy) { for (const p of P[v].pts) { const dx = p.x - cx, dy = p.y - cy, dd = Math.hypot(dx, dy); if (dd < 60) { p.vx += dx / (dd + 1) * 400; p.vy += dy / (dd + 1) * 400; } } }
+async function runParticles(v, ms) { const ts = []; let last = 0; const t0 = performance.now(), trace = []; while (performance.now() - t0 < ms) { const now = await frame(); const dt = last ? (now - last) / 1000 : 1 / 60; if (last) ts.push(now - last); last = now; stepParticles(v, dt); drawParticles(v); trace.push([now - t0, err(v)]); } ts.sort((a, b) => a - b); return { p50: ts[ts.length >> 1], trace }; }
+// ---------- 4 鼠标闪电 ----------
+const Z = { A: { bolts: [], flash: 0, last: 0, on: true }, B: { bolts: [], flash: 0, last: 0, on: !matchMedia('(prefers-reduced-motion: reduce)').matches } };
+function bolt(x0, y0, x1, y1, depth, out) { if (depth === 0) { out.push([x0, y0, x1, y1]); return; } const mx = (x0 + x1) / 2 + (Math.random() - 0.5) * 30 / (4 - depth), my = (y0 + y1) / 2 + (Math.random() - 0.5) * 30 / (4 - depth); bolt(x0, y0, mx, my, depth - 1, out); bolt(mx, my, x1, y1, depth - 1, out); if (depth === 2 && Math.random() < 0.6) bolt(mx, my, mx + (Math.random() - 0.3) * 50, my + Math.random() * 40, depth - 1, out); }
+function setupLightning() {
+  for (const v of ['A', 'B']) {
+    const st = $('z' + v), cv = st.querySelector('canvas'), g = fit(cv), S = Z[v];
+    st.addEventListener('pointermove', e => {
+      const now = performance.now(), r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top; if (!S.on) return;
+      // A：指针每移动 80 像素放一道并闪白；B：每 0.4 秒最多一道，不闪白
+      if (v === 'A' && Math.hypot(x - (S.lx ?? -999), y - (S.ly ?? -999)) < 80) return; if (v === 'B' && now - S.last < 400) return; S.last = now; S.lx = x; S.ly = y;
+      const segs = []; bolt(cv.width / 2, 0, e.clientX - r.left, e.clientY - r.top, 3, segs); S.bolts.push({ segs, born: now });
+      if (v === 'A') S.flash = 1;
+    });
+    const tg = st.querySelector('.toggle'); if (tg) { if (!S.on) { tg.textContent = '打开闪电'; tg.setAttribute('aria-pressed', 'true'); } tg.onclick = () => { S.on = !S.on; tg.textContent = S.on ? '关闭闪电' : '打开闪电'; tg.setAttribute('aria-pressed', String(!S.on)); }; }
+    const draw = now => {
+      g.fillStyle = `rgba(${255 * S.flash | 0}, ${255 * S.flash | 0}, ${255 * S.flash | 0}, 1)`; if (!S.flash) g.fillStyle = '#11162a'; g.fillRect(0, 0, cv.width, cv.height); S.flash = Math.max(0, S.flash - 0.5);
+      S.bolts = S.bolts.filter(b => now - b.born < 350);
+      for (const b of S.bolts) { const life = 1 - (now - b.born) / 350; g.strokeStyle = `rgba(190, 215, 255, ${life})`; g.lineWidth = 1.5; g.beginPath(); for (const [a, c, d, e] of b.segs) { g.moveTo(a, c); g.lineTo(d, e); } g.stroke(); }
+      if (S.rec) S.rec.push([now, meanLum(cv)]);   // 记录实际画出的每一帧的平均亮度
+      requestAnimationFrame(draw);
+    };
+    requestAnimationFrame(draw);
+  }
+}
+// 画面平均亮度（缩小到 32×18 再读回）
+const small = document.createElement('canvas'); small.width = 32; small.height = 18; const sg = small.getContext('2d', { willReadFrequently: true });
+function meanLum(cv) { sg.drawImage(cv, 0, 0, 32, 18); const d = sg.getImageData(0, 0, 32, 18).data; let s = 0; for (let i = 0; i < d.length; i += 4) s += (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255; return s / (d.length / 4); }
+// 统计“先变亮再变暗”的次数：平均亮度比之前的暗处高出 0.1 算变亮，回到暗处附近算一次闪烁
+// 返回每次闪烁的时刻；WCAG 2.3.1 要求任意 1 秒内不超过 3 次
+function flashTimes(rec) { const out = []; let up = false, base = rec[0][1]; for (const [t, l] of rec) { if (!up && l - base > 0.1) up = true; if (up && l < base + 0.03) { out.push(t); up = false; } if (!up) base = Math.min(base, l); } return out; }
+const maxPerSecond = ts => ts.reduce((m, t, i) => Math.max(m, ts.filter(u => u >= t && u < t + 1000).length), 0);
+const startRec = v => { Z[v].rec = []; Z[v].t0 = performance.now(); };
+const stopRec = v => { const rec = Z[v].rec, sec = (performance.now() - Z[v].t0) / 1000, ts = flashTimes(rec); Z[v].rec = null; return { flashes: ts.length, perSec: maxPerSecond(ts), max: Math.max(...rec.map(x => x[1])), sec, frames: rec.length }; };
+setupKinetic(); setupWarp(); setupParticles(); setupLightning();
+window.__tx = { W, P, Z, circleAspect, warpCost, push, runParticles, stepParticles, err, startRec, stopRec, stopKA: () => { kRunA = false; }, fill: (id, h) => { $(id).innerHTML = h; } };
+</script>
+</body>
+</html>
