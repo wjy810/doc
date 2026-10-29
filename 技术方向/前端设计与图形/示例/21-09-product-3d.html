@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>项目 08 三维产品展示：视角、标注、恢复默认、加载失败与低性能设备</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .note { max-width: 1140px; margin: 0 0 10px; padding: 6px 12px; border-radius: 8px; background: #fff6e0; border: 1px solid #f0d9a8; font-size: 12px; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; } table.t tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .poor { color: var(--bad); }
+  .product { display: grid; grid-template-columns: minmax(0, 640px) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .stage { position: relative; width: 100%; aspect-ratio: 16 / 10; border-radius: 10px; overflow: hidden; background: linear-gradient(#eef0f3, #dfe3e8); }
+  .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .poster { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; color: var(--muted); padding: 16px; }
+  .poster img { max-height: 70%; }
+  .poster:empty { display: none; }   /* 空的占位层不能挡住画布的拖动 */
+  .lab { position: absolute; transform: translate(-50%, -100%); background: #1d2330e6; color: #fff; font-size: 12px; padding: 1px 8px; border-radius: 10px; white-space: nowrap; pointer-events: none; }
+  .lab::after { content: ""; position: absolute; left: 50%; bottom: -5px; width: 2px; height: 5px; background: #1d2330e6; }
+  .info h3 { margin: 0 0 4px; font-size: 18px; } .info dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 6px 0; } .info dt { color: var(--muted); }
+  .views { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; } .views button { font: inherit; border: 1px solid var(--accent); background: #fff; color: var(--accent); border-radius: 6px; padding: 2px 10px; cursor: pointer; } .views button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+  .parts { margin: 4px 0 0; padding-left: 18px; }
+  @media (max-width: 700px) { body { padding: 10px; } .product { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<p class="note">“模型、贴图、环境光”三项资源用定时器模拟加载（模拟数据）：模型 1.2 秒、贴图 0.8 秒、环境光 0.4 秒；地址带 <code>?fail=model</code> 时模型在 1 秒后加载失败。产品为演示而构造。</p>
+<section class="panel">
+  <h2 id="ver"></h2>
+  <div class="product" id="product">
+    <div><div class="stage" id="stage"><canvas id="cv"></canvas><div id="labels"></div><div class="poster" id="poster"></div></div></div>
+    <div class="info" id="info"></div>
+  </div>
+</section>
+<section class="panel">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
+    <div><h2>资产清单</h2><table class="t" id="tAssets"></table><h2 style="margin-top:6px">加载与性能记录</h2><table class="t" id="tPerf"></table></div>
+    <div><h2>验收：初版与完成版运行同一组检查</h2><table class="t" id="tAcc"></table></div>
+  </div>
+</section>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+const $ = id => document.getElementById(id);
+const Q = new URLSearchParams(location.search), V = Q.get('v') === 'a' ? 'A' : 'B', FAIL = Q.get('fail');
+$('ver').textContent = (V === 'A' ? '初版' : '完成版') + '：便携音箱（演示产品）';
+const PARTS = [
+  { name: '网罩', pos: [0, 0.9, 0.63], n: [0, 0, 1], text: '金属网罩，防泼溅' }, { name: '按键', pos: [0, 1.43, 0.25], n: [0, 1, 0], text: '音量与播放三键' },
+  { name: '提手', pos: [0, 1.82, 0], n: [0, 1, 0], text: '可承重 5 千克' }, { name: '充电口', pos: [0, 0.35, -0.61], n: [0, 0, -1], text: 'USB-C，背面' }];
+const ASSETS = [['模型（glTF）', 'speaker.glb', '1.8 MB', 1200, '外形与部件'], ['贴图', 'fabric_2k.webp', '1.2 MB', 800, '网罩纹理'], ['环境光', 'studio_1k.hdr', '0.6 MB', 400, '反射与阴影']];
+$('tAssets').innerHTML = `<tr><th>资源</th><th>文件</th><th>大小</th><th>用途</th><th>失败时</th></tr>` + ASSETS.map(([n, f, s, , u]) => `<tr><th>${n}</th><td><code>${f}</code></td><td>${s}</td><td>${u}</td><td>${n.startsWith('模型') ? '显示静态图与重试' : '换成纯色或默认光照'}</td></tr>`).join('');
+const load = (name, ms) => new Promise((res, rej) => setTimeout(() => (FAIL === 'model' && name.startsWith('模型') ? rej(new Error('模型加载失败')) : res(name)), FAIL === 'model' && name.startsWith('模型') ? 1000 : ms));
+// ---------- 页面文字：完成版先给出可读内容 ----------
+const T0 = performance.now(), PERF = { firstText: null, modelReady: null };
+if (V === 'B') {
+  $('info').innerHTML = `<h3>便携音箱</h3><p class="sub">拖动旋转，滚轮或双指缩放；也可以用下面的按钮切换视角。</p><dl><dt>尺寸</dt><dd>直径 12 厘米，高 18 厘米</dd><dt>重量</dt><dd>860 克</dd><dt>续航</dt><dd>14 小时</dd></dl><div class="views" id="views"><button type="button" data-view="front">正面</button><button type="button" data-view="side">侧面</button><button type="button" data-view="top">顶部</button><button type="button" data-view="reset">恢复默认</button></div><h3 style="font-size:14px">部件</h3><ul class="parts" id="partList">${PARTS.map(p => `<li><b>${p.name}</b>：${p.text}</li>`).join('')}</ul>`;
+  $('poster').innerHTML = `<div role="status" id="loadText">正在加载三维模型（约 3.6 MB）……右侧的规格和部件说明可以先看。</div>`;
+  PERF.firstText = performance.now() - T0;
+}
+// ---------- 场景 ----------
+const cv = $('cv'), stage = $('stage');
+const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true, preserveDrawingBuffer: true });
+const DPR = V === 'A' ? devicePixelRatio : Math.min(devicePixelRatio, 1.5);   // 完成版把像素比限制在 1.5
+renderer.setPixelRatio(DPR); renderer.shadowMap.enabled = true;
+const scene = new THREE.Scene(), cam = new THREE.PerspectiveCamera(35, 1.6, 0.1, 50);
+const DEFAULT = { az: 30, polar: 70, dist: 5.2 }, target = new THREE.Vector3(0, 0.9, 0);
+const ctl = new OrbitControls(cam, cv); ctl.target.copy(target); ctl.enableDamping = false;
+if (V === 'B') { ctl.minDistance = 3; ctl.maxDistance = 9; ctl.maxPolarAngle = Math.PI * 0.49; cv.style.touchAction = 'pan-y'; }   // 竖向滑动留给页面滚动
+let frames = 0, renderMs = [];
+function render() { const t = performance.now(); renderer.render(scene, cam); renderMs.push(performance.now() - t); frames++; placeLabels(); }
+function setView(az, polar, dist) { const a = az * Math.PI / 180, p = polar * Math.PI / 180; cam.position.set(target.x + dist * Math.sin(p) * Math.sin(a), target.y + dist * Math.cos(p), target.z + dist * Math.sin(p) * Math.cos(a)); cam.lookAt(target); ctl.update(); }
+function fitDist() { const asp = cam.aspect; return V === 'A' ? DEFAULT.dist : DEFAULT.dist * Math.max(1, 1.45 / asp); }   // 窄屏时把相机拉远，让产品完整显示
+function resize() { const w = stage.clientWidth, h = stage.clientHeight; renderer.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); if (V === 'B') { const d = cam.position.distanceTo(target); if (Math.abs(d - fitDist()) > 0.01 && !resize.touched) setView(DEFAULT.az, DEFAULT.polar, fitDist()); } render(); }
+new ResizeObserver(resize).observe(stage);
+let model = null;
+async function build() {
+  try {
+    await Promise.all(ASSETS.map(([n, , , ms]) => load(n, ms)));
+  } catch (e) {
+    if (V === 'A') throw e;   // 初版没有处理失败
+    $('poster').innerHTML = `<div><img alt="便携音箱的静态图" src="data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="200"><rect x="30" y="40" width="100" height="150" rx="50" fill="#5b6475"/><rect x="30" y="70" width="100" height="70" fill="#8a93a3"/><path d="M50 40 Q80 0 110 40" stroke="#1d2330" stroke-width="8" fill="none"/></svg>')}"><p role="alert">三维模型没有加载成功（${e.message}），这是产品的静态图。<button type="button" id="retry">重试</button></p></div>`;
+    return;
+  }
+  const metal = new THREE.MeshStandardMaterial({ color: 0x5b6475, metalness: 0.3, roughness: 0.5 }), mesh = new THREE.MeshStandardMaterial({ color: 0x8a93a3, roughness: 0.9 }), dark = new THREE.MeshStandardMaterial({ color: 0x1d2330, roughness: 0.6 });
+  model = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 1.4, 48), metal); body.position.y = 0.7;
+  const grille = new THREE.Mesh(new THREE.CylinderGeometry(0.615, 0.615, 0.7, 48, 1, true), mesh); grille.position.y = 0.9;
+  const handle = new THREE.Mesh(new THREE.TorusGeometry(0.38, 0.06, 12, 32, Math.PI), dark); handle.position.y = 1.4;
+  model.add(body, grille, handle);
+  for (let i = -1; i <= 1; i++) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.05, 0.12), dark); b.position.set(i * 0.18, 1.42, 0.25); model.add(b); }
+  const port = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.04), dark); port.position.set(0, 0.35, -0.6); model.add(port);
+  model.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(3, 48), new THREE.MeshStandardMaterial({ color: 0xe5e7eb })); ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
+  const sun = new THREE.DirectionalLight(0xffffff, 2.2); sun.position.set(2, 4, 3); sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
+  scene.add(model, ground, sun, new THREE.HemisphereLight(0xffffff, 0x9aa2b1, 1.2));
+  $('poster').innerHTML = ''; PERF.modelReady = performance.now() - T0;
+  setView(DEFAULT.az, DEFAULT.polar, fitDist()); render();
+  if (V === 'A') { const loop = () => { render(); requestAnimationFrame(loop); }; loop(); $('info').innerHTML = ''; }   // 初版一直在重画
+  else ctl.addEventListener('change', () => { resize.touched = true; render(); });   // 完成版只在视角变化时重画
+}
+// ---------- 标注 ----------
+const labels = PARTS.map(p => { const d = document.createElement('div'); d.className = 'lab'; d.textContent = p.name; $('labels').append(d); return d; });
+function placeLabels() {
+  const w = stage.clientWidth, h = stage.clientHeight, narrow = w < 500, dir = new THREE.Vector3();
+  PARTS.forEach((p, i) => {
+    const v = new THREE.Vector3(...p.pos).project(cam), el = labels[i];
+    dir.subVectors(cam.position, new THREE.Vector3(...p.pos)).normalize();
+    const facing = dir.dot(new THREE.Vector3(...p.n)) > 0.1;
+    const show = model && (V === 'A' || (facing && !narrow));   // 完成版：背对相机的部件不标注；窄屏时改看右侧（下方）的部件列表
+    el.style.display = show ? '' : 'none'; el.style.left = (v.x + 1) / 2 * w + 'px'; el.style.top = (1 - v.y) / 2 * h + 'px';
+  });
+}
+// ---------- 视角按钮 ----------
+if (V === 'B') $('info').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.id === 'retry') return location.reload();
+  const VIEWS = { front: [0, 75], side: [90, 75], top: [0, 12], reset: [DEFAULT.az, DEFAULT.polar] }, [az, polar] = VIEWS[b.dataset.view];
+  setView(az, polar, fitDist()); resize.touched = b.dataset.view !== 'reset'; render();
+  $('views').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b && b.dataset.view !== 'reset'));
+});
+stage.addEventListener('click', e => { if (e.target.id === 'retry') location.reload(); });
+if (V === 'A') $('poster').innerHTML = '';
+build();
+// ---------- 给验收脚本用的接口 ----------
+window.__p3 = { V, PERF, frames: () => frames, renderMs: () => renderMs.slice(-30), dpr: DPR, pixels: () => cv.width * cv.height,
+  view: () => { const off = cam.position.clone().sub(target), d = off.length(); return { dist: d, polar: Math.acos(off.y / d) * 180 / Math.PI, az: Math.atan2(off.x, off.z) * 180 / Math.PI }; },
+  ready: () => !!model, overlaps: () => { const r = labels.filter(l => l.style.display !== 'none').map(l => l.getBoundingClientRect()); let n = 0; for (let i = 0; i < r.length; i++) for (let j = i + 1; j < r.length; j++) if (r[i].left < r[j].right && r[j].left < r[i].right && r[i].top < r[j].bottom && r[j].top < r[i].bottom) n++; return { shown: r.length, n }; }, visibleLabels: () => labels.filter(l => l.style.display !== 'none').map(l => l.textContent),
+  backLabelsShown: () => PARTS.filter((p, i) => { const dir = cam.position.clone().sub(new THREE.Vector3(...p.pos)).normalize(); return dir.dot(new THREE.Vector3(...p.n)) <= 0.1 && labels[i].style.display !== 'none'; }).map(p => p.name),
+  fit: () => { if (!model) return null; const b = new THREE.Box3().setFromObject(model), m = 0; let mx = 0; for (const x of [b.min.x, b.max.x]) for (const y of [b.min.y, b.max.y]) for (const z of [b.min.z, b.max.z]) { const v = new THREE.Vector3(x, y, z).project(cam); mx = Math.max(mx, Math.abs(v.x), Math.abs(v.y)); } return mx; },
+  forceRender: n => { for (let i = 0; i < n; i++) render(); return renderMs.slice(-n).reduce((a, b) => a + b, 0) / n; },
+  report(R, P) {
+    const rows = [['模型未就绪时（0.3 秒）能读到什么', 'early'], ['模型加载失败时', 'fail'], ['静止 2 秒内重画的帧数', 'idle'], ['每帧绘制的像素（设备像素比 2）', 'pixels'], ['触屏：竖向滑过三维区域', 'touchScroll'], ['触屏：横向拖动', 'touchRotate'], ['切换到顶部视角，再恢复默认', 'views'], ['转到背面：标注了背对相机的部件', 'labels'], ['375 像素宽：标注与文字说明', 'narrow']];
+    document.getElementById('tAcc').innerHTML = `<tr><th>检查</th><th>初版</th><th>完成版</th></tr>` + rows.map(([n, k]) => `<tr><th>${n}</th>${['A', 'B'].map(v => `<td class="${R[v][k].ok ? 'good' : 'poor'}">${R[v][k].text}</td>`).join('')}</tr>`).join('');
+    document.getElementById('tPerf').innerHTML = `<tr><th>项目</th><th>初版</th><th>完成版</th></tr>` + P.map(r => `<tr><th>${r[0]}</th><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('');
+  } };
+</script>
+</body>
+</html>
