@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>完整拆解：滚动驱动的产品拆解演示</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js" } }
+</script>
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; } .tag { font-size: 11px; color: var(--muted); margin: 0 0 2px; }
+  .shots { display: flex; gap: 10px; } .shots figure { margin: 0; font-size: 11px; color: var(--muted); } .shots img { display: block; border: 1px solid var(--line); border-radius: 6px; }
+  /* ---------- 拆解演示 ---------- */
+  .wrap { width: 550px; }
+  .nav { display: flex; gap: 4px; margin-bottom: 4px; } .nav button { font: inherit; font-size: 11.5px; border: 1px solid var(--line); background: #fff; border-radius: 12px; padding: 0 9px; cursor: pointer; } .nav button[aria-current="step"] { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .story { height: 320px; border: 1px solid var(--line); border-radius: 8px; position: relative; display: grid; grid-template-columns: 56% 44%; background: #fafbfc; }
+  .story.A { overflow: hidden; } .story.B { overflow-y: auto; }
+  .stick { position: sticky; top: 0; height: 318px; }
+  .stick canvas { display: block; width: 100%; height: 100%; }
+  .stick svg { position: absolute; inset: 0; pointer-events: none; } .stick svg text { font: 11px "Noto Sans SC", system-ui, sans-serif; fill: #1d2330; }
+  .chapters { padding: 0 10px; } .ch { height: 320px; display: grid; align-content: center; gap: 4px; }
+  .ch h3 { margin: 0; font-size: 15px; } .ch p { margin: 0; font-size: 12px; color: #444b57; }
+  .fallback { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 6px; font-size: 12px; color: var(--muted); background: #fafbfc; padding: 10px; text-align: center; }
+  :focus-visible { outline: 3px solid #f2a93b; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>滚动驱动的产品拆解：同一个故事的两种实现</h2>
+  <p class="sub">往下读，台灯从完整外观逐步拆开：灯罩、支臂、底座各占一章，左边的三维画面跟着章节变化，部件旁边有说明。A 拦截滚轮事件、每收到一次就把部件往目标“挪一点”，章节导航只改滚动位置，说明的位置写死，模型失败时整个故事都不显示；B 用原生滚动，把滚动进度直接换算成确定的场景状态（同一个进度永远是同一个画面），说明跟着部件的投影位置走，模型失败时保留文字与示意图，用户要求减少动态效果时镜头不转动。</p>
+  <div class="two"><div><p class="tag">A</p><div id="hostA"></div></div><div><p class="tag">B</p><div id="hostB"></div></div></div>
+  <div class="shots" id="shots"></div>
+  <table class="t" id="res"></table><p class="m" id="mres"></p>
+</section>
+<script type="module">
+import * as THREE from 'three';
+const $ = id => document.getElementById(id);
+const CH = [['完整外观', '一盏可调角度的台灯：底座、两段支臂和灯罩。'], ['灯罩', '铝制灯罩，内侧喷涂白漆，把光反射到桌面。'], ['支臂', '两段支臂用阻尼关节连接，停在任何角度都不会下垂。'], ['底座', '铸铁底座，重 1.2 千克，防止台灯被碰倒。']];
+// 每章的部件偏移（世界坐标）与镜头水平角度；进度 p 在 0—3 之间，两章之间线性插值
+const KEY = [
+  { head: [0, 0, 0], arm2: [0, 0, 0], arm1: [0, 0, 0], base: [0, 0, 0], yaw: 0.6 },
+  { head: [-0.5, 0.6, 0], arm2: [0, 0, 0], arm1: [0, 0, 0], base: [0, 0, 0], yaw: 0.9 },
+  { head: [-0.5, 0.6, 0], arm2: [-0.2, 0.35, 0.3], arm1: [0.3, 0.1, -0.3], base: [0, 0, 0], yaw: 1.3 },
+  { head: [-0.5, 0.6, 0], arm2: [-0.2, 0.35, 0.3], arm1: [0.3, 0.1, -0.3], base: [0, -0.45, 0], yaw: 1.7 }];
+const PART_OF = [null, 'head', 'arm2', 'base'];
+const lerp = (a, b, t) => a.map((x, i) => x + (b[i] - x) * t);
+function stateAt(p) { const i = Math.min(2, Math.floor(p)), t = Math.min(1, Math.max(0, p - i)), a = KEY[i], b = KEY[i + 1]; return { head: lerp(a.head, b.head, t), arm2: lerp(a.arm2, b.arm2, t), arm1: lerp(a.arm1, b.arm1, t), base: lerp(a.base, b.base, t), yaw: a.yaw + (b.yaw - a.yaw) * t }; }
+function lampParts() {
+  const metal = new THREE.MeshStandardMaterial({ color: 0x3a3f4a, metalness: 0.6, roughness: 0.4 }), shade = new THREE.MeshStandardMaterial({ color: 0xf2a93b, roughness: 0.5, side: THREE.DoubleSide });
+  const P = { base: new THREE.Group(), arm1: new THREE.Group(), arm2: new THREE.Group(), head: new THREE.Group() };
+  const b = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.7, 0.12, 40), metal); b.position.y = 0.06; P.base.add(b);
+  const a1 = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.2, 12), metal); a1.position.set(0.15, 0.65, 0); a1.rotation.z = -0.25; P.arm1.add(a1);
+  const a2 = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.9, 12), metal); a2.position.set(0.05, 1.42, 0); a2.rotation.z = 1.0; P.arm2.add(a2);
+  const h = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.45, 32, 1, true), shade); h.position.set(-0.4, 1.55, 0); h.rotation.z = 2.4; P.head.add(h);
+  // 每个部件的中心（用来放说明）
+  for (const k in P) { const box = new THREE.Box3().setFromObject(P[k]); P[k].userData.center = box.getCenter(new THREE.Vector3()); }
+  return P;
+}
+const S = {};
+function mount(v, opts = {}) {
+  const host = $('host' + v);
+  host.innerHTML = `<div class="wrap" id="w${v}"><nav class="nav" aria-label="章节">${CH.map((c, i) => `<button type="button" data-i="${i}">${c[0]}</button>`).join('')}</nav><div class="story ${v}" id="s${v}" ${v === 'B' ? 'tabindex="0" aria-label="台灯拆解故事，可以滚动阅读"' : ''}><div class="stick"><canvas></canvas><svg></svg></div><div class="chapters"></div></div></div>`;
+  const story = $('s' + v), cv = story.querySelector('canvas'), svg = story.querySelector('svg'), chs = story.querySelector('.chapters'), nav = host.querySelector('.nav');
+  const X = S[v] = { p: 0, cur: stateAt(0), failed: !!opts.fail, events: 0 };
+  const writeText = () => { chs.innerHTML = CH.map((c, i) => `<div class="ch" id="${v}-ch${i}"><h3 tabindex="-1">${i + 1}. ${c[0]}</h3><p>${c[1]}</p></div>`).join(''); };
+  if (opts.fail) {
+    // 模型下载失败
+    if (v === 'B') { writeText(); story.querySelector('.stick').innerHTML = `<div class="fallback" role="img" aria-label="台灯示意图：底座、支臂、灯罩"><svg width="120" height="120" viewBox="0 0 120 120" style="position:static"><rect x="25" y="100" width="70" height="10" rx="3" fill="#3a3f4a"/><line x1="60" y1="100" x2="50" y2="55" stroke="#3a3f4a" stroke-width="5"/><line x1="50" y1="55" x2="80" y2="35" stroke="#3a3f4a" stroke-width="4"/><path d="M70 20 L100 30 L85 50 Z" fill="#f2a93b"/></svg><span>三维模型没有加载出来，先看文字与示意图。</span><button type="button" style="font:inherit;font-size:12px">重新加载</button></div>`; }
+    return;
+  }
+  if (v === 'B') writeText();
+  const ren = new THREE.WebGLRenderer({ canvas: cv, antialias: true, preserveDrawingBuffer: true }); ren.setPixelRatio(1); ren.outputColorSpace = THREE.SRGBColorSpace;
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(0xfafbfc); scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8f99, 1.6)); const dl = new THREE.DirectionalLight(0xffffff, 1.6); dl.position.set(2, 4, 3); scene.add(dl);
+  const cam = new THREE.PerspectiveCamera(38, 1, 0.1, 50), P = lampParts(); for (const k in P) scene.add(P[k]);
+  const size = () => { const r = cv.getBoundingClientRect(); if (!r.width || !r.height) return;   // 画布已被移除
+    if (v === 'B' || !X.sized) { ren.setSize(r.width, r.height, false); cam.aspect = r.width / r.height; cam.updateProjectionMatrix(); X.sized = true; } };
+  size();
+  const reduce = () => v === 'B' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function apply(st) {
+    for (const k of ['head', 'arm2', 'arm1', 'base']) P[k].position.set(...st[k]);
+    const yaw = reduce() ? 0.6 : st.yaw; cam.position.set(Math.sin(yaw) * 5.2, 2.3, Math.cos(yaw) * 5.2); cam.lookAt(0, 1.0, 0);
+    ren.render(scene, cam);
+    // 说明：B 放在部件的投影位置旁边；A 用写死的位置
+    const r = cv.getBoundingClientRect(), chap = Math.round(X.p), part = PART_OF[chap];
+    if (!part) { svg.innerHTML = ''; X.label = null; return; }
+    let px, py;
+    if (v === 'B') { const c = P[part].userData.center.clone().add(P[part].position).project(cam); px = (c.x + 1) / 2 * r.width; py = (1 - c.y) / 2 * r.height; }
+    else { px = [0, 120, 150, 150][chap]; py = [0, 70, 150, 270][chap]; }
+    const lx = Math.min(r.width - 70, px + 40), ly = Math.max(16, py - 30);
+    svg.innerHTML = `<line x1="${px}" y1="${py}" x2="${lx}" y2="${ly}" stroke="#1d2330"/><circle cx="${px}" cy="${py}" r="3" fill="#1d2330"/><text x="${lx + 3}" y="${ly - 3}">${CH[chap][0]}</text>`;
+    // 记录说明指向的点与部件实际投影中心的距离
+    const c = P[part].userData.center.clone().add(P[part].position).project(cam); X.label = { part, dist: Math.hypot(px - (c.x + 1) / 2 * r.width, py - (1 - c.y) / 2 * r.height) };
+  }
+  X.apply = apply; X.P = P; X.cam = cam;
+  const markNav = () => nav.querySelectorAll('button').forEach((b, i) => b.setAttribute('aria-current', i === Math.round(X.p) ? 'step' : 'false'));
+  if (v === 'B') {
+    // B：进度 = 滚动位置 ÷ 每章高度；场景状态只由进度决定
+    let queued = false;
+    story.addEventListener('scroll', () => { X.events++; if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; X.p = Math.min(3, story.scrollTop / 320); X.cur = stateAt(X.p); apply(X.cur); markNav(); }); }, { passive: true });
+    nav.addEventListener('click', e => { const b = e.target.closest('[data-i]'); if (!b) return; const i = +b.dataset.i; story.scrollTo({ top: i * 320, behavior: reduce() ? 'auto' : 'smooth' }); $(`B-ch${i}`).querySelector('h3').focus({ preventScroll: true }); });
+    new ResizeObserver(() => { size(); apply(X.cur); }).observe(cv);
+  } else {
+    // A：拦截滚轮；每收到一次事件，部件就向目标挪 15%
+    story.addEventListener('wheel', e => {
+      e.preventDefault(); X.events++;
+      story.scrollTop += e.deltaY; X.p = Math.min(3, story.scrollTop / 320);
+      const target = stateAt(X.p); for (const k of ['head', 'arm2', 'arm1', 'base']) X.cur[k] = lerp(X.cur[k], target[k], 0.15); X.cur.yaw += (target.yaw - X.cur.yaw) * 0.15;
+      apply(X.cur); markNav();
+    }, { passive: false });
+    nav.addEventListener('click', e => { const b = e.target.closest('[data-i]'); if (!b) return; story.scrollTop = +b.dataset.i * 320; });
+    // A：文字等模型准备好才写进页面
+    writeText();
+  }
+  apply(X.cur); markNav();
+}
+// 实际画面状态与“这个滚动位置应有的状态”之间的差距（部件偏移的最大误差）
+function stateError(v) { const X = S[v], want = stateAt(Math.min(3, $('s' + v).scrollTop / 320)); let e = 0; for (const k of ['head', 'arm2', 'arm1', 'base']) { const p = X.P[k].position; e = Math.max(e, Math.hypot(p.x - want[k][0], p.y - want[k][1], p.z - want[k][2])); } return e; }
+const frames = n => new Promise(r => { const f = () => (--n ? requestAnimationFrame(f) : r()); requestAnimationFrame(f); });
+mount('A'); mount('B');
+window.__sx = { S, mount, stateAt, stateError, frames, aspect: v => { const cv = $('s' + v).querySelector('canvas'), r = cv.getBoundingClientRect(); return { buffer: cv.width / cv.height, css: r.width / r.height }; }, visibleText: v => { const c = $('s' + v).querySelector('.chapters'); return c ? c.textContent.replace(/\s/g, '').length : 0; }, fill: (id, h) => { $(id).innerHTML = h; }, shot: h => $('shots').insertAdjacentHTML('beforeend', h) };
+</script>
+</body>
+</html>
