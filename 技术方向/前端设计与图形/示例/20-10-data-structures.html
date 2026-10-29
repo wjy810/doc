@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>数据模型与数据结构：编辑器状态、历史、空间索引与缓存</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  pre.code { margin: 0; font: 10.5px/1.45 ui-monospace, Menlo, Consolas, monospace; background: #f6f7f9; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div><h2>1 数据模型：文档、节点、选区、视图、历史</h2><p class="sub">同一个小编辑器的两种状态设计。A 把一切放进一个对象：节点里存屏幕坐标和“是否选中”，缩放时把坐标乘上比例并取整到像素，每次改动都保存整个对象作为历史。B 把文档（节点）、选区、视图（缩放与平移）分开，屏幕坐标在绘制时才计算，只有文档的改动进入历史。两边执行同一串操作：新建 3 个节点 → 选中第 2 个 → 把它移动 (15, 7) → 用滚轮缩小 10 格、再放大 10 格（每格 1.1 倍，回到 100%）→ 撤销一次。</p><div class="two"><pre class="code" id="codeA"></pre><pre class="code" id="codeB"></pre></div><table class="t" id="tModel"></table></div>
+    <div><h2>2 历史：保存快照还是保存操作</h2><p class="sub">一个 2000 个节点的文档，做 200 次随机移动。A 每次改动前保存整个文档的副本；B 只记录“哪个节点、移动了多少”，撤销时反向执行。占用空间按序列化后的字符数估计。最后把 200 步全部撤销再全部重做，检查结果是否与原来一致。</p><table class="t" id="tHist"></table>
+      <h2 style="margin-top:6px">3 列表与空间索引：点击命中测试</h2><p class="sub">4000 × 4000 的画布上有 20000 个矩形，随机点击 2000 次，找出点击位置最上层的矩形。A 从列表末尾（最上层）往前逐个检查；B 先把矩形登记到 100 × 100 的网格里，只检查点击位置所在格子里的矩形。两边结果逐一核对。</p><table class="t" id="tHit"></table></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>4 缓存：命中率取决于访问方式</h2><p class="sub">“测量一段文字的排版尺寸”很慢，结果用最近最少使用（LRU）缓存保存。2000 条内容，两种访问方式各 20000 次：滚动浏览（每次只看相邻的一屏 30 条，来回滚动）和随机跳转。</p><table class="t" id="tCache"></table></div>
+    <div><h2>5 缓存失效：内容改了，缓存还在</h2><p class="sub">滚动浏览的同时，每次访问有 2% 的概率修改某一条的文字。A 以“内容编号”作为缓存的键；B 以“编号 + 版本号”作为键，修改时版本号加 1。“过期结果”是缓存返回的尺寸与当前文字不一致。</p><table class="t" id="tStale"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+// ---------- 1 数据模型 ----------
+const START = [[100, 100], [233, 147], [371, 59]];
+function modelA() {
+  let state = { zoom: 1, nodes: [] }; const history = [];
+  const commit = fn => { history.push(JSON.stringify(state)); fn(); };   // 任何改动都整体保存
+  const api = {
+    add: (x, y) => commit(() => state.nodes.push({ id: state.nodes.length + 1, x, y, w: 80, h: 40, selected: false })),
+    select: id => commit(() => state.nodes.forEach(n => n.selected = n.id === id)),
+    move: (dx, dy) => commit(() => state.nodes.filter(n => n.selected).forEach(n => { n.x += Math.round(dx * state.zoom); n.y += Math.round(dy * state.zoom); })),
+    zoom: f => commit(() => { state.zoom *= f; state.nodes.forEach(n => { n.x = Math.round(n.x * f); n.y = Math.round(n.y * f); }); }),   // 存的是屏幕坐标
+    undo: () => { state = JSON.parse(history.pop()); },
+    docPos: id => { const n = state.nodes.find(n => n.id === id); return [n.x / state.zoom, n.y / state.zoom]; },
+    save: () => JSON.stringify(state), zoomNow: () => state.zoom, selected: () => state.nodes.filter(n => n.selected).map(n => n.id) };
+  return api;
+}
+function modelB() {
+  const doc = { nodes: new Map(), order: [] }, selection = new Set(), view = { zoom: 1, panX: 0, panY: 0 }, undoStack = [];
+  const apply = cmd => { cmd.do(); undoStack.push(cmd); };   // 只有文档的改动进入历史
+  const api = {
+    add: (x, y) => { const id = doc.order.length + 1; apply({ do: () => { doc.nodes.set(id, { x, y, w: 80, h: 40 }); doc.order.push(id); }, undo: () => { doc.nodes.delete(id); doc.order.pop(); }, label: '新建节点' }); },
+    select: id => { selection.clear(); selection.add(id); },
+    move: (dx, dy) => { const ids = [...selection]; apply({ do: () => ids.forEach(i => { const n = doc.nodes.get(i); n.x += dx; n.y += dy; }), undo: () => ids.forEach(i => { const n = doc.nodes.get(i); n.x -= dx; n.y -= dy; }), label: '移动节点' }); },
+    zoom: f => { view.zoom *= f; },   // 视图状态：不改文档、不进历史
+    undo: () => { const c = undoStack.pop(); c.undo(); return c.label; },
+    docPos: id => { const n = doc.nodes.get(id); return [n.x, n.y]; },
+    save: () => JSON.stringify({ order: doc.order, nodes: [...doc.nodes] }), zoomNow: () => view.zoom, selected: () => [...selection] };
+  return api;
+}
+function dataModel() {
+  const out = {};
+  for (const [v, make] of [['A', modelA], ['B', modelB]]) {
+    const m = make(); START.forEach(([x, y]) => m.add(x, y)); m.select(2); m.move(15, 7);
+    const afterMove = m.docPos(2), savedBefore = m.save();
+    for (let i = 0; i < 10; i++) m.zoom(1 / 1.1);   // 滚轮缩小 10 格
+    for (let i = 0; i < 10; i++) m.zoom(1.1);       // 再放大 10 格，回到 100%
+    const afterZoom = m.docPos(2), node1 = m.docPos(1), node3 = m.docPos(3), savedAfter = m.save(), zoomBeforeUndo = m.zoomNow();
+    m.undo(); const afterUndo = m.docPos(2);
+    out[v] = { drift: Math.hypot(afterZoom[0] - afterMove[0], afterZoom[1] - afterMove[1]), drift1: Math.hypot(node1[0] - START[0][0], node1[1] - START[0][1]), drift3: Math.hypot(node3[0] - START[2][0], node3[1] - START[2][1]), fileChanged: savedBefore !== savedAfter, undoMovedBack: Math.hypot(afterUndo[0] - START[1][0], afterUndo[1] - START[1][1]) < 1e-9, zoomChangedByUndo: Math.abs(m.zoomNow() - zoomBeforeUndo) > 1e-12, extraFields: /selected|zoom/.test(savedAfter), selected: m.selected() };
+  }
+  $('codeA').textContent = `// A：一个对象装下所有东西
+state = { zoom, nodes: [{ id, x, y, w, h, selected }] }
+zoom(f): 所有节点 x = round(x * f) …
+每次改动：history.push(整个 state)`;
+  $('codeB').textContent = `// B：按职责分开
+doc = { nodes: Map<id, {x, y, w, h}>, order }
+selection = Set<id>;  view = { zoom, panX, panY }
+history = [ { do, undo, label } ]  // 只记文档改动`;
+  const yes = (b, good) => `<td class="${b === good ? 'good' : 'poor'}">${b ? '是' : '否'}</td>`;
+  $('tModel').innerHTML = `<tr><th></th><th>缩放回到 100% 后三个节点的位置偏差</th><th>只是缩放，保存的文件就变了</th><th>文件里混入选区或缩放</th><th>撤销一次后节点回到原处</th><th>撤销改变了缩放</th></tr>` + ['A', 'B'].map(v => { const o = out[v]; return `<tr><th>${v}</th><td class="num ${Math.max(o.drift, o.drift1, o.drift3) > 0.01 ? 'poor' : 'good'}">${[o.drift1, o.drift, o.drift3].map(d => d.toFixed(2)).join('／')} 像素</td>${yes(o.fileChanged, false)}${yes(o.extraFields, false)}${yes(o.undoMovedBack, true)}${yes(o.zoomChangedByUndo, false)}</tr>`; }).join('') + `<tr><td colspan="6">A 的撤销只撤掉了最后一次缩放，用户要按 21 次撤销才能把节点移回去；B 的视图与选区不进历史，撤销直接回到“移动节点”之前。</td></tr>`;
+  return out;
+}
+// ---------- 2 历史 ----------
+function historyTest() {
+  const R = rng(5), N = 2000, E = 200, make = () => Array.from({ length: N }, (_, i) => ({ id: i, x: Math.round(R() * 4000), y: Math.round(R() * 4000), w: 40, h: 30, text: '节点 ' + i + ' 的说明文字' }));
+  const base = make(), edits = Array.from({ length: E }, () => ({ id: Math.floor(R() * N), dx: Math.round(R() * 40 - 20), dy: Math.round(R() * 40 - 20) })), out = {};
+  // A：快照
+  { const doc = structuredClone(base), stack = [], redo = []; let bytes = 0; const t0 = performance.now();
+    for (const e of edits) { const snap = JSON.stringify(doc); bytes += snap.length; stack.push(snap); doc[e.id].x += e.dx; doc[e.id].y += e.dy; }
+    const tEdit = performance.now() - t0, final = JSON.stringify(doc); let cur = doc; const t1 = performance.now();
+    while (stack.length) { redo.push(JSON.stringify(cur)); cur = JSON.parse(stack.pop()); } const tUndo = performance.now() - t1, backToStart = JSON.stringify(cur) === JSON.stringify(base);
+    while (redo.length) cur = JSON.parse(redo.pop());
+    out.A = { bytes, tEdit, tUndo, backToStart, redoOk: JSON.stringify(cur) === final }; }
+  // B：操作
+  { const doc = structuredClone(base), stack = [], redo = []; let bytes = 0; const t0 = performance.now();
+    for (const e of edits) { doc[e.id].x += e.dx; doc[e.id].y += e.dy; stack.push(e); bytes += JSON.stringify(e).length; }
+    const tEdit = performance.now() - t0, final = JSON.stringify(doc), t1 = performance.now();
+    while (stack.length) { const e = stack.pop(); doc[e.id].x -= e.dx; doc[e.id].y -= e.dy; redo.push(e); } const tUndo = performance.now() - t1, backToStart = JSON.stringify(doc) === JSON.stringify(base);
+    while (redo.length) { const e = redo.pop(); doc[e.id].x += e.dx; doc[e.id].y += e.dy; }
+    out.B = { bytes, tEdit, tUndo, backToStart, redoOk: JSON.stringify(doc) === final }; }
+  const kb = b => b > 1e6 ? (b / 1e6).toFixed(1) + ' 百万字符' : (b / 1e3).toFixed(1) + ' 千字符';
+  $('tHist').innerHTML = `<tr><th></th><th>200 步历史占用</th><th>200 次改动耗时</th><th>全部撤销耗时</th><th>撤销后与原文档一致</th><th>重做后与最终文档一致</th></tr>` + [['A', '快照'], ['B', '操作']].map(([v, n]) => { const o = out[v]; return `<tr><th>${v} ${n}</th><td class="num ${o.bytes > 1e6 ? 'poor' : 'good'}">${kb(o.bytes)}</td><td class="num">${o.tEdit.toFixed(1)} 毫秒</td><td class="num">${o.tUndo.toFixed(1)} 毫秒</td><td class="${o.backToStart ? 'good' : 'poor'}">${o.backToStart ? '是' : '否'}</td><td class="${o.redoOk ? 'good' : 'poor'}">${o.redoOk ? '是' : '否'}</td></tr>`; }).join('') + `<tr><td colspan="6">快照实现简单、不会漏掉字段，适合小文档；文档大、改动小时记录操作更省。操作记录要求每种操作都写出准确的反向操作，常见做法是用测试“执行 → 撤销 → 比较”覆盖每一种操作。</td></tr>`;
+  return out;
+}
+// ---------- 3 空间索引 ----------
+function hitTest() {
+  const R = rng(9), N = 20000, Q = 2000, C = 100, rects = Array.from({ length: N }, () => { const w = 10 + R() * 50, h = 10 + R() * 50; return [R() * (4000 - w), R() * (4000 - h), w, h]; });
+  const qs = Array.from({ length: Q }, () => [R() * 4000, R() * 4000]), inside = (r, p) => p[0] >= r[0] && p[0] <= r[0] + r[2] && p[1] >= r[1] && p[1] <= r[1] + r[3];
+  let t0 = performance.now(), checkedA = 0; const resA = qs.map(p => { for (let i = N - 1; i >= 0; i--) { checkedA++; if (inside(rects[i], p)) return i; } return -1; }); const tA = performance.now() - t0;
+  t0 = performance.now(); const G = 4000 / C, grid = Array.from({ length: G * G }, () => []);
+  rects.forEach((r, i) => { for (let gy = Math.floor(r[1] / C); gy <= Math.floor((r[1] + r[3]) / C); gy++) for (let gx = Math.floor(r[0] / C); gx <= Math.floor((r[0] + r[2]) / C); gx++) grid[Math.min(G - 1, gy) * G + Math.min(G - 1, gx)].push(i); });
+  const tBuild = performance.now() - t0;
+  t0 = performance.now(); let checkedB = 0; const resB = qs.map(p => { const cell = grid[Math.min(G - 1, Math.floor(p[1] / C)) * G + Math.min(G - 1, Math.floor(p[0] / C))]; for (let k = cell.length - 1; k >= 0; k--) { checkedB++; if (inside(rects[cell[k]], p)) return cell[k]; } return -1; }); const tB = performance.now() - t0;
+  const same = resA.every((r, i) => r === resB[i]), hits = resA.filter(r => r >= 0).length, out = { A: { t: tA, checked: checkedA / Q }, B: { t: tB, checked: checkedB / Q, build: tBuild }, same, hits };
+  $('tHit').innerHTML = `<tr><th></th><th>每次点击平均检查的矩形</th><th>2000 次点击耗时</th><th>准备时间</th></tr><tr><th>A 列表</th><td class="num poor">${out.A.checked.toFixed(0)}</td><td class="num">${tA.toFixed(1)} 毫秒</td><td class="num">0</td></tr><tr><th>B 网格索引</th><td class="num good">${out.B.checked.toFixed(1)}</td><td class="num">${tB.toFixed(1)} 毫秒</td><td class="num">${tBuild.toFixed(1)} 毫秒</td></tr><tr><td colspan="4">两边结果${same ? '完全一致' : '不一致'}（${hits} 次点中了矩形）。网格中每个格子里的矩形按原来的先后顺序登记，所以“最上层”的判断不变。矩形移动时要更新它所在的格子；大小差别很大或分布很不均匀时，改用四叉树或 R 树。耗时随设备不同。</td></tr>`;
+  return out;
+}
+// ---------- 4、5 缓存 ----------
+class LRU { constructor(cap) { this.cap = cap; this.map = new Map(); this.hit = 0; this.miss = 0; } get(k, compute) { if (this.map.has(k)) { const v = this.map.get(k); this.map.delete(k); this.map.set(k, v); this.hit++; return v; } this.miss++; const v = compute(); this.map.set(k, v); if (this.map.size > this.cap) this.map.delete(this.map.keys().next().value); return v; } }
+const measure = text => ({ w: text.length * 13, lines: Math.ceil(text.length / 18) });   // 代表一次很慢的排版测量
+function patterns(R) {
+  const N = 2000, A = 20000, scroll = [], rand = []; let top = 0, dir = 1;
+  for (let i = 0; i < A; i++) { if (R() < 0.01) dir = -dir; top = Math.max(0, Math.min(N - 30, top + dir * (R() < 0.3 ? 1 : 0))); scroll.push(top + Math.floor(R() * 30)); rand.push(Math.floor(R() * N)); }
+  return { '滚动浏览': scroll, '随机跳转': rand };
+}
+function cacheTest() {
+  const R = rng(13), P = patterns(R), texts = Array.from({ length: 2000 }, (_, i) => '第 ' + i + ' 条内容'.repeat(1 + i % 5)), out = {};
+  for (const cap of [50, 200, 1000]) { out[cap] = {}; for (const [name, seq] of Object.entries(P)) { const c = new LRU(cap); seq.forEach(i => c.get(i, () => measure(texts[i]))); out[cap][name] = c.hit / seq.length; } }
+  $('tCache').innerHTML = `<tr><th>缓存容量</th>${Object.keys(P).map(n => `<th>${n}的命中率</th>`).join('')}</tr>` + Object.entries(out).map(([cap, o]) => `<tr><th class="num">${cap} 条</th>${Object.values(o).map(r => `<td class="num ${r > 0.8 ? 'good' : r < 0.3 ? 'poor' : ''}">${(r * 100).toFixed(1)}%</td>`).join('')}</tr>`).join('') + `<tr><td colspan="3">滚动时反复访问的只是附近几屏，50 条的缓存就能命中 80% 以上，200 条达到 95%；随机跳转时命中率约等于“缓存容量 ÷ 内容总数”，加大缓存只是按比例换内存。先观察实际的访问方式，再决定要不要缓存、缓存多大。</td></tr>`;
+  return out;
+}
+function staleTest() {
+  const R = rng(21), seq = patterns(R)['滚动浏览'], out = {};
+  for (const v of ['A', 'B']) {
+    const R2 = rng(77), texts = Array.from({ length: 2000 }, (_, i) => '第 ' + i + ' 条'), ver = new Array(2000).fill(0), c = new LRU(200); let stale = 0, edits = 0;
+    for (const i of seq) {
+      if (R2() < 0.02) { const j = Math.max(0, Math.min(1999, i + Math.floor(R2() * 10 - 5))); texts[j] += '（已编辑）'; ver[j]++; edits++; }
+      const key = v === 'A' ? i : i + ':' + ver[i], got = c.get(key, () => measure(texts[i])), now = measure(texts[i]);
+      if (got.w !== now.w) stale++;
+    }
+    out[v] = { stale, edits, rate: stale / seq.length, hit: c.hit / seq.length };
+  }
+  $('tStale').innerHTML = `<tr><th></th><th>修改次数</th><th>返回过期结果的次数</th><th>命中率</th></tr><tr><th>A 键 = 编号</th><td class="num">${out.A.edits}</td><td class="num poor">${out.A.stale}（${(out.A.rate * 100).toFixed(1)}%）</td><td class="num">${(out.A.hit * 100).toFixed(1)}%</td></tr><tr><th>B 键 = 编号 + 版本号</th><td class="num">${out.B.edits}</td><td class="num good">${out.B.stale}</td><td class="num">${(out.B.hit * 100).toFixed(1)}%</td></tr><tr><td colspan="4">过期结果表现为文字被截断、重叠或留白。把会影响结果的所有输入（文字、字体、宽度、语言）都放进键里；B 的命中率略低，是因为修改后的内容必须重新测量。</td></tr>`;
+  return out;
+}
+window.__ds = { run: () => ({ model: dataModel(), history: historyTest(), hit: hitTest(), cache: cacheTest(), stale: staleTest() }) };
+</script>
+</body>
+</html>
