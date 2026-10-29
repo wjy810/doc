@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>项目 05 连贯的动效流程：列表、详情、编辑、保存与返回</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; } table.t tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .poor { color: var(--bad); }
+  .two { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 16px; align-items: start; }
+  /* 手机框 */
+  .phone { position: relative; width: 360px; height: 520px; border: 1px solid var(--line); border-radius: 18px; overflow: hidden; background: #f7f7f5; touch-action: pan-y; }
+  .list { padding: 14px; display: grid; gap: 10px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px; cursor: pointer; }
+  .card h3, .detail h3 { margin: 0 0 4px; font-size: 16px; line-height: 1.4; } .card p { margin: 0; color: var(--muted); font-size: 13px; }
+  .detail { position: absolute; inset: 0; background: #fff; border-radius: 12px; padding: 16px; transform-origin: 0 0; display: grid; align-content: start; gap: 10px; }
+  .detail[hidden] { display: none; }
+  .bar { display: flex; justify-content: space-between; align-items: center; } .bar button, .detail .save { font: inherit; border: 1px solid var(--accent); color: var(--accent); background: #fff; border-radius: 6px; padding: 2px 10px; cursor: pointer; }
+  .detail .save { background: var(--accent); color: #fff; justify-self: start; } .detail .save:disabled { opacity: .6; }
+  .detail input, .detail textarea { font: inherit; width: 100%; border: 1px solid #8a93a3; border-radius: 6px; padding: 6px 8px; } .detail textarea { height: 120px; }
+  .toast { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); background: #1d2330; color: #fff; padding: 4px 12px; border-radius: 14px; font-size: 12px; }
+  /* 初版：关键帧动画（不能从中途反向） */
+  @keyframes a-open { from { transform: translate(var(--fx), var(--fy)) scale(var(--sx), var(--sy)); border-radius: 30px; } to { transform: none; } }
+  @keyframes a-close { from { transform: none; } to { transform: translate(var(--fx), var(--fy)) scale(var(--sx), var(--sy)); } }
+  .detail.a-opening { animation: a-open 320ms ease-out both; } .detail.a-closing { animation: a-close 320ms ease-in both; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <div class="two">
+    <div><h2 id="ver"></h2><div class="phone" id="phone"><div class="list" id="list"></div><div class="detail" id="detail" hidden></div></div></div>
+    <div><h2>动效说明</h2><table class="t" id="tSpec"></table><h2 style="margin-top:6px">验收：同一组操作，初版与完成版</h2><p class="sub" id="accNote">由脚本实际点击、触摸与切换“减少动态效果”，并逐帧记录详情面板的位置。</p><table class="t" id="tAcc"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const V = new URLSearchParams(location.search).get('v') === 'a' ? 'A' : 'B';
+$('ver').textContent = V === 'A' ? '初版' : '完成版';
+const NOTES = [{ id: 1, title: '周末路线', body: '湖边樱花步道，带水和防晒。' }, { id: 2, title: '买菜清单', body: '番茄、鸡蛋、面条。' }, { id: 3, title: '读书笔记', body: '第三章讲到“先处理数据关系，再设计交互状态”。' }, { id: 4, title: '待办', body: '周三前交项目报告。' }];
+let state = { view: 'list', id: null, saving: false }, anim = null, savedRect = null, dir = '';
+const reduce = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const phone = $('phone'), detail = $('detail'), list = $('list');
+function renderList() { list.innerHTML = NOTES.map(n => `<div class="card" data-id="${n.id}" role="button" tabindex="0"><h3>${n.title}</h3><p>${n.body}</p></div>`).join(''); }
+function renderDetail() {
+  const n = NOTES.find(n => n.id === state.id); if (!n) return;
+  detail.innerHTML = state.view === 'edit'
+    ? `<div class="bar"><button type="button" data-act="back">返回</button><span>编辑</span></div><input id="eTitle" value="${n.title}"><textarea id="eBody">${n.body}</textarea><button class="save" type="button" data-act="save" ${state.saving ? 'disabled' : ''}>${state.saving ? '保存中…' : '保存'}</button>`
+    : `<div class="bar"><button type="button" data-act="back">返回</button><button type="button" data-act="edit">编辑</button></div><h3>${n.title}</h3><p>${n.body}</p>`;
+}
+const cardEl = id => list.querySelector(`[data-id="${id}"]`);
+function rectIn(el) { const r = el.getBoundingClientRect(), p = phone.getBoundingClientRect(); return { x: r.left - p.left - 1, y: r.top - p.top - 1, w: r.width, h: r.height }; }
+const invert = r => `translate(${r.x}px, ${r.y}px) scale(${r.w / phone.clientWidth}, ${r.h / phone.clientHeight})`;
+// ---------- 初版 ----------
+function openA(id) {
+  state = { ...state, view: 'detail', id }; savedRect = rectIn(cardEl(id));   // 只在打开时量一次
+  const r = savedRect; detail.style.setProperty('--fx', r.x + 'px'); detail.style.setProperty('--fy', r.y + 'px'); detail.style.setProperty('--sx', r.w / phone.clientWidth); detail.style.setProperty('--sy', r.h / phone.clientHeight);
+  detail.hidden = false; detail.innerHTML = ''; detail.className = 'detail a-opening';
+  setTimeout(() => renderDetail(), 320);   // 动画结束后再放内容
+}
+function backA() {
+  state = { ...state, view: 'list' }; detail.className = 'detail a-closing';
+  setTimeout(() => { detail.hidden = true; detail.className = 'detail'; renderList(); }, 320);   // 不管这时的状态是什么
+}
+// ---------- 完成版 ----------
+function openB(id) {
+  if (state.view !== 'list' && state.id === id && dir === 'close' && anim?.playState === 'running') { state = { ...state, view: 'detail' }; dir = 'open'; anim.reverse(); return; }   // 收回途中又点开：从当前位置反向
+  anim?.cancel();
+  state = { ...state, view: 'detail', id }; renderDetail(); detail.hidden = false; dir = 'open';
+  const from = invert(rectIn(cardEl(id)));
+  anim = detail.animate([{ transform: from, borderRadius: '30px' }, { transform: 'none', borderRadius: '12px' }], { duration: reduce() ? 0 : 320, easing: 'cubic-bezier(.2, .8, .2, 1)' });
+}
+function backB() {
+  state = { ...state, view: 'list' };
+  if (dir === 'open' && anim?.playState === 'running') { dir = 'close'; anim.reverse(); anim.finished.then(() => { if (state.view === 'list') detail.hidden = true; }, () => {}); return; }   // 动画被取消时 finished 会拒绝，忽略即可   // 打开途中返回：从当前位置反向
+  anim?.cancel(); renderList(); dir = 'close';
+  const to = invert(rectIn(cardEl(state.id)));   // 返回时重新测量卡片（内容可能已经变了）
+  anim = detail.animate([{ transform: 'none', borderRadius: '12px' }, { transform: to, borderRadius: '30px' }], { duration: reduce() ? 0 : 320, easing: 'cubic-bezier(.4, 0, .6, 1)', fill: 'forwards' });
+  anim.finished.then(() => { if (state.view === 'list') { detail.hidden = true; anim.cancel(); } }, () => {});   // 只在状态仍是“列表”时才隐藏
+}
+const open = id => V === 'A' ? openA(id) : openB(id), back = () => V === 'A' ? backA() : backB();
+list.addEventListener('click', e => { const c = e.target.closest('.card'); if (c) open(+c.dataset.id); });
+list.addEventListener('keydown', e => { const c = e.target.closest('.card'); if (c && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open(+c.dataset.id); } });
+detail.addEventListener('click', async e => {
+  const act = e.target.dataset.act; if (!act) return;
+  if (act === 'back') back();
+  if (act === 'edit') { state = { ...state, view: 'edit' }; renderDetail(); }
+  if (act === 'save') {
+    const n = NOTES.find(n => n.id === state.id); n.title = $('eTitle').value; n.body = $('eBody').value;
+    state = { ...state, saving: true }; renderDetail(); await new Promise(r => setTimeout(r, 400));
+    state = { ...state, saving: false, view: 'detail' }; renderDetail();
+    const t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status'); t.textContent = '已保存'; phone.append(t); setTimeout(() => t.remove(), 1200);
+  }
+});
+// 手势：在详情页向右滑动超过 80 像素返回（完成版）
+if (V === 'B') { let sx = null; detail.addEventListener('pointerdown', e => { sx = e.clientX; }); detail.addEventListener('pointerup', e => { if (sx !== null && e.clientX - sx > 80 && state.view !== 'list') back(); sx = null; }); detail.addEventListener('pointercancel', () => sx = null); }
+renderList();
+// ---------- 动效说明 ----------
+$('tSpec').innerHTML = `<tr><th>动画</th><th>触发</th><th>目标</th><th>持续与曲线</th><th>中途取消</th><th>恢复与替代</th></tr>
+<tr><th>打开详情</th><td>点卡片、Enter、空格</td><td>卡片放大成整页，内容立即可读</td><td>320 毫秒，先快后慢</td><td>返回：从当前位置反向收回</td><td>减少动态效果时直接切换</td></tr>
+<tr><th>返回列表</th><td>返回按钮、右滑 80 像素</td><td>整页收回到卡片当前的位置</td><td>320 毫秒，缓入缓出</td><td>再点开：从当前位置反向展开</td><td>动画结束时只按当前状态决定是否隐藏</td></tr>
+<tr><th>进入编辑</th><td>编辑按钮</td><td>标题、正文变成输入框</td><td>不做位移</td><td>—</td><td>焦点留在页面内</td></tr>
+<tr><th>保存</th><td>保存按钮</td><td>按钮变“保存中…”，完成后提示“已保存”</td><td>提示停留 1.2 秒</td><td>保存中按钮禁用</td><td>提示用 role="status" 读出</td></tr>`;
+// ---------- 测量 ----------
+const REC = []; let recOn = false;
+function sample() { if (recOn) { const r = detail.hidden ? null : detail.getBoundingClientRect(); REC.push(r ? { t: performance.now(), x: r.left, y: r.top, w: r.width, h: r.height } : { t: performance.now(), hidden: true }); requestAnimationFrame(sample); } }
+window.__mf = { V, open, back, state: () => ({ ...state }),
+  visual: () => { const r = detail.getBoundingClientRect(), p = phone.getBoundingClientRect(); return { shown: !detail.hidden && Math.abs(r.width - p.width + 2) < 3, hidden: detail.hidden }; },
+  rec(on) { if (on) { REC.length = 0; recOn = true; requestAnimationFrame(sample); } else recOn = false; return REC.slice(); },
+  cardRect: id => { const r = cardEl(id).getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; },
+  anims: () => document.getAnimations().filter(a => a.playState === 'running').length,
+  report(R) {
+    const rows = [['快速切换：打开、返回交替点 10 次', 'rapid'], ['打开途中返回：反向那一帧的跳动', 'reverse'], ['内容变长后返回：收回终点与卡片的差', 'content'], ['触屏：点开后右滑返回', 'touch'], ['减少动态效果：点开后的动画数', 'reduced'], ['键盘：Enter 打开', 'keyboard']];
+    $('tAcc').innerHTML = `<tr><th>检查</th><th>初版</th><th>完成版</th></tr>` + rows.map(([n, k]) => `<tr><th>${n}</th>${['A', 'B'].map(v => `<td class="${R[v][k].ok ? 'good' : 'poor'}">${R[v][k].text}</td>`).join('')}</tr>`).join('');
+  } };
+</script>
+</body>
+</html>
