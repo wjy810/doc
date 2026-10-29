@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>课程作品展（被测页面）</title>
+<script>
+// 先注册观察器：第一次绘制、LCP 与长任务
+const M = { fcp: null, lcp: [], longtasks: [] };
+function label(n) { for (let e = n; e && e.nodeType === 1; e = e.parentElement) if (e.dataset.name) return e.dataset.name; return n && n.nodeType === 1 ? n.tagName.toLowerCase() : null; }
+function observe(type, cb) { try { new PerformanceObserver(l => l.getEntries().forEach(cb)).observe({ type, buffered: true }); } catch (e) { (M.unsupported ||= []).push(type); } }
+observe('paint', e => { if (e.name === 'first-contentful-paint') M.fcp = e.startTime; });
+observe('largest-contentful-paint', e => M.lcp.push({ t: e.startTime, el: label(e.element) }));
+observe('longtask', e => M.longtasks.push({ t: e.startTime, d: e.duration }));
+</script>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js" } }
+</script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; display: grid; grid-template-rows: 36px auto 1fr; background: #f6f7f9; color: #1d2330; font: 13px/1.5 system-ui, "PingFang SC", "Microsoft YaHei", "WenQuanYi Zen Hei", sans-serif; overflow: hidden; }
+  header { background: #1d2330; color: #fff; display: flex; align-items: center; gap: 10px; padding: 0 12px; } header .sp { flex: 1; } header small { color: #aeb6c5; }
+  #bar { font-size: 11.5px; color: #5b6475; padding: 3px 10px; display: flex; gap: 8px; align-items: center; min-height: 24px; }
+  #bar .track { flex: 1; height: 6px; background: #e3e7ee; border-radius: 3px; overflow: hidden; } #bar .fill { height: 100%; width: 0; background: #2f6fdb; }
+  #bar { grid-row: 2; } #main { grid-row: 3; display: grid; min-height: 0; } body.vA #bar { display: none; } #main.split { grid-template-columns: minmax(0, 1fr) 180px; }
+  .stage { position: relative; min-height: 0; overflow: hidden; }
+  .stage canvas { display: block; width: 100%; height: 100%; }
+  .poster { background: linear-gradient(180deg, #d9dde4 0 62%, #b9bfc9 62%); }
+  .loading { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 8px; color: #5b6475; background: #eceff3; }
+  .ring { width: 28px; height: 28px; border-radius: 50%; border: 3px solid #dde1e7; border-top-color: #2f6fdb; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .ring { animation: none; } }
+  .list { overflow: auto; border-left: 1px solid #dde1e7; background: #fff; padding: 4px; display: grid; align-content: start; gap: 2px; }
+  .list button { font: inherit; font-size: 12px; text-align: left; border: 0; background: none; border-radius: 6px; padding: 3px 6px; cursor: pointer; color: #1d2330; }
+  .list button[aria-pressed="true"] { background: #e8eefb; color: #1f4fae; } .list button:focus-visible { outline: 3px solid #f2a93b; outline-offset: -3px; }
+  .list button small { color: #5b6475; }
+  .thumbs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px; align-content: start; overflow: auto; height: 100%; }
+  .thumbs img, .thumbs .sk { width: 100%; aspect-ratio: 3 / 2; border-radius: 6px; display: block; background: #e3e7ee; }
+  .panel { position: absolute; left: 8px; right: 8px; bottom: 8px; background: #fff; border-radius: 8px; box-shadow: 0 2px 10px rgba(0, 0, 0, .18); padding: 8px; display: grid; grid-template-columns: 96px 1fr; gap: 8px; font-size: 12px; }
+  .panel img { width: 96px; height: 64px; border-radius: 4px; object-fit: cover; } .panel b { font-size: 13px; } .panel p { margin: 2px 0 0; color: #444b57; }
+  .note { font-size: 11.5px; color: #5b6475; }
+</style>
+</head>
+<body>
+<header><b>课程作品展</b><small>2026 秋季 · 12 件作品</small><span class="sp"></span><small id="tierLabel"></small></header>
+<div id="bar"></div>
+<div id="main"></div>
+<script type="module">
+const P = new URLSearchParams(location.search), V = ['A', 'B', 'S'].includes(P.get('v')) ? P.get('v') : 'B', FIX = P.get('tier');
+const $ = id => document.getElementById(id);
+const marks = {}, nextFrame = cb => requestAnimationFrame(() => cb());
+const mark = n => nextFrame(() => { if (marks[n] == null) marks[n] = performance.now(); });
+// 作品与作者为演示而构造
+const WORKS = [
+  ['城市噪声地图', '林 · 数据可视化', 215, '把一周的噪声监测数据画成可以拖动时间的地图，夜间施工的噪声在地图上一目了然。'],
+  ['手写体的节奏', '周 · 字体设计', 30, '从 200 张手写便条里提取笔画节奏，做成一套可变字体。'],
+  ['潮汐时钟', '陈 · 交互装置', 190, '用潮汐数据驱动的时钟，指针在涨潮时变慢。'],
+  ['旧校区记忆', '王 · 摄影与叙事', 40, '旧校区拆除前的 60 张照片和采访录音。'],
+  ['公交等待的心情', '赵 · 服务设计', 0, '在三个车站记录等车时的焦虑感，并重新设计到站提示。'],
+  ['声音的颜色', '孙 · 多感官', 280, '把乐器音色映射到颜色与纹理，供听障同学一起欣赏音乐会。'],
+  ['一棵树的一年', '吴 · 动态影像', 110, '每天同一时间拍摄一棵树，拼成一分钟的影片。'],
+  ['食堂排队模拟', '郑 · 数据模拟', 10, '模拟不同窗口安排下的排队时间，并给出改进建议。'],
+  ['无障碍校园路线', '冯 · 地图', 160, '实地测量坡道与台阶，生成轮椅可通行的路线图。'],
+  ['折纸结构灯', '褚 · 数字制造', 50, '用激光切割的折纸结构做成可以压平运输的台灯。'],
+  ['方言词典', '卫 · 语言与界面', 330, '收集 300 个方言词，录音并做成可搜索的小词典。'],
+  ['光与影的练习', '蒋 · 三维渲染', 240, '同一个静物在十种光照下的渲染对比。']
+];
+const TARGET = 0;
+const TIERS = {
+  low: { name: '低', pr: 1, shadow: 0, tex: 256, knot: [128, 16] },
+  mid: { name: '中', pr: 1.5, shadow: 1024, tex: 512, knot: [400, 48] },
+  high: { name: '高', pr: 2, shadow: 2048, tex: 1024, knot: [1200, 100] }
+};
+const ORDER = ['low', 'mid', 'high'];
+// 下载大小按 JPEG 与压缩后的模型估算（字节）；带宽固定 2 MB/s，一次下载一个文件
+const TEX_BYTES = { 256: 15e3, 512: 120e3, 1024: 450e3 }, KNOT_BYTES = { low: 0.1e6, mid: 0.8e6, high: 3.0e6 }, BW = 2e6;
+const net = { loaded: 0, total: 0, queue: [], active: null, seq: 0 };
+// 三维场景的状态（简化模式里不会用到）
+let THREE, renderer, scene, camera, sun, knot, ready = false, tier = null, works = [], tierLog = [], tierChangedAt = 0, settled = false, pending = true, flight = null, angle0 = 0, readyAt = 0, selected = null, sharpWanted = new Set(), builtDone;
+const built = new Promise(r => { builtDone = r; });
+const texSize = {}, frames = [];
+function download(name, bytes, pri = 0) { net.total += bytes; progress(); return new Promise(res => { net.queue.push({ name, bytes, pri, res, seq: net.seq++ }); pump(); }); }
+function pump() {
+  if (net.active || !net.queue.length) return;
+  net.queue.sort((a, b) => b.pri - a.pri || a.seq - b.seq);
+  const job = net.active = net.queue.shift();
+  setTimeout(() => { net.loaded += job.bytes; net.active = null; progress(); job.res(); pump(); }, job.bytes / BW * 1000);
+}
+const raise = (name, pri) => { const j = net.queue.find(q => q.name === name); if (j) j.pri = Math.max(j.pri, pri); };
+const mb = b => (b / 1e6).toFixed(1);
+function progress() {
+  if (V === 'A') return;
+  const sharp = Object.values(texSize).filter(s => s >= (TIERS[tier] || TIERS.low).tex).length;
+  $('bar').innerHTML = `<span>${V === 'S' ? '简化模式：不加载三维场景' : '三维场景'}</span><span class="track"><span class="fill" style="width:${net.total ? net.loaded / net.total * 100 : 0}%"></span></span><span>已下载 ${mb(net.loaded)}／${mb(net.total)} MB</span>` + (V === 'B' ? `<span>贴图 ${sharp}／12</span>` : '');
+}
+
+// 作品画面：渐变、几何形和标题（真实页面里是照片或截图）
+function art(i, w) {
+  const h = Math.round(w * 2 / 3), c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'), hue = WORKS[i][2];
+  const grad = g.createLinearGradient(0, 0, w, h); grad.addColorStop(0, `hsl(${hue} 50% 35%)`); grad.addColorStop(1, `hsl(${hue + 30} 60% 70%)`); g.fillStyle = grad; g.fillRect(0, 0, w, h);
+  let s = 17 + i * 31; const rnd = () => (s = s * 16807 % 2147483647) / 2147483647;
+  for (let k = 0; k < 18; k++) { g.fillStyle = `hsl(${hue + rnd() * 90} 70% ${55 + rnd() * 35}% / .7)`; g.beginPath(); if (k % 2) g.arc(rnd() * w, rnd() * h, w * (0.02 + rnd() * 0.08), 0, 7); else g.rect(rnd() * w, rnd() * h, w * rnd() * 0.25, h * rnd() * 0.25); g.fill(); }
+  g.strokeStyle = 'rgba(255,255,255,.6)'; g.lineWidth = w / 200; g.beginPath(); for (let x = 0; x <= w; x += w / 40) g.lineTo(x, h * (0.5 + 0.2 * Math.sin(x / w * 9 + i))); g.stroke();
+  g.fillStyle = '#fff'; g.font = `700 ${Math.round(h / 9)}px system-ui, sans-serif`; g.fillText(WORKS[i][0], w * 0.05, h * 0.9);
+  return c;
+}
+const thumbURL = {}, thumb = i => thumbURL[i] ||= art(i, 192).toDataURL('image/jpeg', 0.8);
+
+// ---------- 页面结构 ----------
+const main = $('main');
+document.body.classList.add('v' + V);
+const listHTML = () => `<div class="list" data-name="作品列表" role="list">${WORKS.map((w, i) => `<button type="button" id="w-${i}" aria-pressed="false">${w[0]}<br><small>${w[1]}</small></button>`).join('')}</div>`;
+let stage, panelEl;
+function openPanel(i) {
+  document.querySelectorAll('.list button').forEach((b, k) => b.setAttribute('aria-pressed', String(k === i)));
+  panelEl ||= Object.assign(document.createElement('div'), { className: 'panel' });
+  panelEl.dataset.name = '作品说明';
+  panelEl.innerHTML = `<img src="${thumb(i)}" alt="《${WORKS[i][0]}》缩略图"><div><b>《${WORKS[i][0]}》</b> <span class="note">${WORKS[i][1]}</span><p>${WORKS[i][3]}</p></div>`;
+  stage.append(panelEl);
+  selected = i;
+  mark('任务完成');
+  if (V === 'B') { flyTo(i); sharpen(i); }
+}
+if (V === 'A') {
+  main.innerHTML = '<div class="stage" id="stage"><canvas id="c"></canvas><div class="loading" data-name="加载提示"><span class="ring"></span>正在加载作品…</div></div>';
+} else {
+  main.className = 'split';
+  main.innerHTML = (V === 'S' ? '<div class="stage" id="stage"><div class="thumbs" id="thumbs">' + WORKS.map(() => '<span class="sk"></span>').join('') + '</div></div>' : '<div class="stage poster" id="stage"><canvas id="c"></canvas></div>') + listHTML();
+  main.querySelector('.list').addEventListener('click', e => { const b = e.target.closest('button'); if (b) openPanel(+b.id.slice(2)); });
+}
+stage = $('stage');
+progress();
+mark('首个内容');
+if (V !== 'A') mark('可操作（列表）');
+
+// ---------- 简化模式：缩略图与列表，不加载三维库 ----------
+if (V === 'S') {
+  Promise.all(WORKS.map((w, i) => download(`缩略图 ${i}`, TEX_BYTES[256]).then(() => { const img = new Image(); img.src = thumb(i); img.alt = `《${w[0]}》`; $('thumbs').children[i].replaceWith(img); }))).then(() => mark('全部加载'));
+}
+
+// ---------- 三维场景 ----------
+const knotGeo = t => new THREE.TorusKnotGeometry(0.36, 0.12, ...TIERS[t].knot);
+function setTexture(i, size) {
+  const t = new THREE.CanvasTexture(art(i, size)); t.colorSpace = THREE.SRGBColorSpace;
+  const m = works[i].material; if (m.map) m.map.dispose(); m.map = t; m.color.set(0xffffff); m.needsUpdate = true; texSize[i] = size; progress();
+}
+function build(t) {
+  renderer = new THREE.WebGLRenderer({ canvas: $('c'), antialias: V === 'A' });
+  const r = stage.getBoundingClientRect(); renderer.setSize(r.width, r.height, false);
+  scene = new THREE.Scene(); scene.background = new THREE.Color(0xd9dde4);
+  camera = new THREE.PerspectiveCamera(50, r.width / r.height, 0.1, 40);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8f99, 1.6));
+  sun = new THREE.DirectionalLight(0xffffff, 1.8); sun.position.set(3, 7, 4); sun.shadow.camera.left = sun.shadow.camera.bottom = -6; sun.shadow.camera.right = sun.shadow.camera.top = 6; scene.add(sun);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(10, 10), new THREE.MeshStandardMaterial({ color: 0xb9bfc9, roughness: 0.9 })); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0xeef0f3, roughness: 1 });
+  [[0, -5, 0], [-5, 0, Math.PI / 2], [5, 0, -Math.PI / 2], [0, 5, Math.PI]].forEach(([x, z, ry]) => { const w = new THREE.Mesh(new THREE.PlaneGeometry(10, 3.2), wallMat); w.position.set(x, 1.6, z); w.rotation.y = ry; w.receiveShadow = true; scene.add(w); });
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0x2a2f3a, roughness: 0.6 });
+  // 每面墙四件作品：后墙、左墙、右墙
+  WORKS.forEach((w, i) => {
+    const wall = Math.floor(i / 4), along = [-3.3, -1.1, 1.1, 3.3][i % 4];
+    const g = new THREE.Group(), fr = new THREE.Mesh(new THREE.BoxGeometry(1.62, 1.12, 0.05), frameMat), pic = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.0), new THREE.MeshStandardMaterial({ color: new THREE.Color(`hsl(${w[2]}, 40%, 60%)`), roughness: 0.8 }));
+    pic.position.z = 0.03; pic.userData.i = i; g.add(fr, pic); fr.castShadow = true;
+    if (wall === 0) { g.position.set(along, 1.6, -4.97); } else if (wall === 1) { g.position.set(-4.97, 1.6, along); g.rotation.y = Math.PI / 2; } else { g.position.set(4.97, 1.6, -along); g.rotation.y = -Math.PI / 2; }
+    scene.add(g); works.push(pic);
+  });
+  const ped = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.3, 0.7), frameMat); ped.position.y = 0.15; ped.castShadow = ped.receiveShadow = true; scene.add(ped);
+  knot = new THREE.Mesh(knotGeo(t), new THREE.MeshStandardMaterial({ color: 0xc9a36b, metalness: 0.7, roughness: 0.3 })); knot.position.y = 0.78; knot.castShadow = true; scene.add(knot);
+  applyTier(t);
+  // 初始视角对准后墙左侧的目标作品
+  angle0 = 0.35;
+  $('c').addEventListener('click', pick);
+}
+function applyTier(t) {
+  const down = tier && ORDER.indexOf(t) < ORDER.indexOf(tier);
+  tier = t; const T = TIERS[t];
+  // 降级时同时换回已下载的低精度模型和贴图，释放显存；用户选中的作品保留清晰图
+  if (down) { const old = knot.geometry; knot.geometry = knotGeo(t); old.dispose(); works.forEach((w, i) => { if (texSize[i] > T.tex && !sharpWanted.has(i)) setTexture(i, T.tex); }); }
+  renderer.setPixelRatio(T.pr); const r = stage.getBoundingClientRect(); renderer.setSize(r.width, r.height, false);
+  renderer.shadowMap.enabled = !!T.shadow; sun.castShadow = !!T.shadow;
+  if (T.shadow) { sun.shadow.mapSize.set(T.shadow, T.shadow); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
+  scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
+  $('tierLabel').textContent = `画质：${T.name}` + (FIX || V === 'A' ? '（固定）' : '（自动）');
+  tierChangedAt = performance.now(); progress();
+}
+// 升级画质：先下载对应的模型与贴图，到达后替换；选中的作品优先
+async function upgradeAssets(t) {
+  const T = TIERS[t];
+  download(`雕塑 ${t}`, KNOT_BYTES[t]).then(() => { if (tier !== t) return; const old = knot.geometry; knot.geometry = knotGeo(t); old.dispose(); });
+  await Promise.all(works.map((w, i) => (texSize[i] || 0) >= T.tex ? null : download(`贴图 ${i} ${T.tex}`, TEX_BYTES[T.tex], sharpWanted.has(i) ? 2 : 0).then(() => { if ((texSize[i] || 0) < T.tex) setTexture(i, T.tex); })));
+}
+function sharpen(i) {
+  sharpWanted.add(i);
+  if ((texSize[i] || 0) >= 1024) return mark('清晰图');
+  const name = `贴图 ${i} 1024`; if (net.queue.some(q => q.name === name)) return raise(name, 2);
+  download(name, TEX_BYTES[1024], 2).then(() => built).then(() => { setTexture(i, 1024); mark('清晰图'); });
+}
+const pct = (a, p) => { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(s.length * p))]; };
+// 自动画质：每次调整后丢掉 0.3 秒，再看 40 帧的第 90 百分位帧时间
+function autoTier(now) {
+  if (settled || pending || FIX || V !== 'B') return;
+  const fr = frames.filter(f => f[0] > tierChangedAt + 300);
+  if (fr.length < 40) return;
+  const p90 = pct(fr.slice(-40).map(f => f[1]), 0.9), k = ORDER.indexOf(tier), log = (txt, to) => tierLog.push({ t: now, p90, from: TIERS[tier].name, to: to ? TIERS[to].name : null, txt });
+  if (p90 > 33.4 && k > 0) { const to = ORDER[k - 1]; log('超过 33 毫秒，降一级并停止调整', to); applyTier(to); settled = true; mark('画质确定'); }
+  else if (p90 <= 20 && k < 2) { const to = ORDER[k + 1]; log('不超过 20 毫秒，升一级', to); applyTier(to); pending = true; upgradeAssets(to).then(() => { tierChangedAt = performance.now(); pending = false; }); }
+  else { log(p90 > 33.4 ? '已是最低档，提示可改用简化模式' : '保持', null); settled = true; mark('画质确定'); if (p90 > 50) $('bar').insertAdjacentHTML('beforeend', '<a href="?v=S">画面较卡，改用简化模式</a>'); }
+}
+function cameraAt(now) {
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let a = angle0 + (reduce ? 0 : (now - readyAt) / 1000 * 0.12);
+  if (flight) { const k = Math.min(1, (now - flight.t0) / 600), e = k * k * (3 - 2 * k); a = flight.from + (flight.to - flight.from) * e; if (k === 1) { angle0 = flight.to - (reduce ? 0 : (now - readyAt) / 1000 * 0.12); flight = null; } }
+  // 镜头略高于雕塑，视线越过雕塑看向对面墙上的作品
+  camera.position.set(Math.sin(a) * 3.2, 1.95, Math.cos(a) * 3.2); camera.lookAt(-Math.sin(a) * 2, 1.45, -Math.cos(a) * 2);
+  return a;
+}
+let curA = 0;
+function flyTo(i) {
+  if (!ready) return;
+  const p = new THREE.Vector3(); works[i].getWorldPosition(p);
+  let to = Math.atan2(-p.x, -p.z); while (to - curA > Math.PI) to -= 2 * Math.PI; while (curA - to > Math.PI) to += 2 * Math.PI;
+  flight = { from: curA, to, t0: performance.now() };
+}
+function pick(e) {
+  const r = $('c').getBoundingClientRect(), v = new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  const rc = new THREE.Raycaster(); rc.setFromCamera(v, camera);
+  const hit = rc.intersectObjects([...works, knot])[0];
+  if (hit && hit.object.userData.i != null) openPanel(hit.object.userData.i);
+}
+let last = 0;
+function loop(now) {
+  requestAnimationFrame(loop);
+  if (!ready) return;
+  if (last) frames.push([now, now - last]); last = now;
+  curA = cameraAt(now); knot.rotation.y = now / 2000;
+  renderer.render(scene, camera);
+  autoTier(now);
+}
+async function start3D() {
+  THREE = await import('three');
+  if (V === 'A') {
+    // 原始版：模型与 12 张高清贴图全部下载完，才生成场景并显示第一帧
+    await Promise.all([download('雕塑 high', KNOT_BYTES.high), ...WORKS.map((w, i) => download(`贴图 ${i} 1024`, TEX_BYTES[1024]))]);
+    build('high'); WORKS.forEach((w, i) => setTexture(i, 1024));
+  } else {
+    // 改进版：房间和低精度雕塑先到，先显示；贴图逐张替换；然后按实测帧时间调整画质
+    await download('房间与低精度雕塑', KNOT_BYTES.low + 50e3);
+    build(FIX || 'low');
+  }
+  builtDone();
+  ready = true; readyAt = performance.now(); curA = cameraAt(readyAt); renderer.render(scene, camera);
+  stage.querySelector('.loading')?.remove();
+  mark('首个三维画面'); mark(V === 'A' ? '可操作' : '可操作（三维）');
+  requestAnimationFrame(loop);
+  if (V === 'A') { mark('全部加载'); return; }
+  if (selected != null) flyTo(selected);
+  await Promise.all(WORKS.map((w, i) => download(`贴图 ${i} 256`, TEX_BYTES[256], sharpWanted.has(i) ? 2 : 1).then(() => { if (!texSize[i]) setTexture(i, 256); })));
+  // 低精度贴图全部到达后才开始按帧时间判断画质
+  tierChangedAt = performance.now(); pending = false;
+  if (FIX && FIX !== 'low') await upgradeAssets(FIX);
+  const idle = () => !net.active && !net.queue.length && (FIX || settled) ? mark('全部加载') : setTimeout(idle, 100);
+  idle();
+}
+if (V !== 'S') start3D().catch(err => { stage.insertAdjacentHTML('beforeend', `<div class="loading">三维场景无法显示（${err.message}）。<a href="?v=S">改用简化模式</a></div>`); });
+
+// ---------- 供测试脚本读取 ----------
+const stats = fr => { const d = fr.map(f => f[1]); return d.length ? { n: d.length, p50: pct(d, 0.5), p95: pct(d, 0.95), max: Math.max(...d), over33: d.filter(x => x > 33.4).length } : { n: 0 }; };
+function memory() {
+  if (!renderer) return { texMB: document.querySelectorAll('.thumbs img').length * 192 * 128 * 4 / 1e6, textures: 0, calls: 0, triangles: 0 };   // 简化模式：解码后的缩略图
+  // 贴图估算：宽 × 高 × 4 字节 × 4/3（多级纹理）；阴影贴图另算
+  const tex = Object.values(texSize).reduce((s, w) => s + w * Math.round(w * 2 / 3) * 4 * 4 / 3, 0), sh = TIERS[tier].shadow ? TIERS[tier].shadow ** 2 * 4 : 0;
+  return { texMB: tex / 1e6, shadowMB: sh / 1e6, textures: renderer.info.memory.textures, geometries: renderer.info.memory.geometries, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, pr: renderer.getPixelRatio(), aa: V === 'A', shadow: TIERS[tier].shadow };
+}
+window.__g = {
+  marks, TARGET, tierLog, net,
+  stop: () => { ready = false; if (renderer) { renderer.dispose(); renderer.forceContextLoss(); } },
+  screenPos: i => { const p = new THREE.Vector3(); works[i].getWorldPosition(p); p.project(camera); const r = $('c').getBoundingClientRect(); return { x: r.left + (p.x + 1) / 2 * r.width, y: r.top + (1 - p.y) / 2 * r.height, z: p.z }; },
+  window: ms => { const t0 = performance.now(), lt0 = M.longtasks.length; return new Promise(res => setTimeout(() => res({ ...stats(frames.filter(f => f[0] >= t0)), from: t0, to: performance.now(), trace: frames.filter(f => f[0] >= t0).map(f => [Math.round(f[0] - t0), +f[1].toFixed(1)]), longtasks: M.longtasks.length - lt0 }), ms)); },
+  report: () => ({ v: V, fix: FIX, marks, fcp: M.fcp, lcp: M.lcp[M.lcp.length - 1] || null, longtasks: M.longtasks, tier: tier && TIERS[tier].name, tierLog, mem: memory(), bytes: net.total, heapMB: performance.memory ? performance.memory.usedJSHeapSize / 1e6 : null, unsupported: M.unsupported || [] })
+};
+</script>
+</body>
+</html>
