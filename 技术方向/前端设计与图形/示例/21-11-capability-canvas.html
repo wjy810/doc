@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>项目 10 可编辑的能力画布：节点、关系、缩放、搜索、撤销与保存</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; } table.t tr > th:first-child { white-space: nowrap; }
+  .good { color: var(--ok); } .poor { color: var(--bad); }
+  .app { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 12px; }
+  .board { position: relative; height: 430px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fbfaf7; }
+  .board svg { width: 100%; height: 100%; display: block; cursor: default; user-select: none; }
+  .node rect { stroke-width: 1.5; } .node.sel rect { stroke: #c26a00; stroke-width: 3; } .node.hit rect { stroke: #2f6fdb; stroke-width: 3; }
+  .node text { font: 12px "Noto Sans SC", sans-serif; fill: #1d2330; } .node .kind { font-size: 10px; fill: #5b6475; }
+  .edge { fill: none; stroke-width: 1.5; } .edge.cycle { stroke: #b3261e !important; stroke-dasharray: 5 3; stroke-width: 2.5; }
+  .side { display: grid; gap: 8px; align-content: start; font-size: 12px; } .side h3 { margin: 0; font-size: 13px; }
+  .side input, .side select, .side button, .toolbar button, .toolbar select { font: inherit; }
+  .toolbar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 12px; }
+  .problems { margin: 0; padding-left: 16px; color: var(--bad); } .problems:empty::before { content: "没有发现问题"; color: var(--ok); margin-left: -16px; }
+  .edit { position: absolute; font: 12px "Noto Sans SC", sans-serif; padding: 2px 4px; border: 2px solid #c26a00; }
+  .legend span { display: inline-flex; align-items: center; gap: 4px; margin-right: 8px; } .legend i { display: inline-block; width: 18px; height: 3px; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2 id="ver"></h2>
+  <div class="toolbar" id="toolbar"></div>
+  <div class="app"><div class="board" id="board"><svg id="svg"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="context-stroke"/></marker></defs><g id="world"></g></svg></div><div class="side" id="side"></div></div>
+  <p class="sub">操作：单击选中；双击改名；选中一个节点后按 L 再点另一个节点，连一条当前类型的关系；Delete 删除；Ctrl+Z 撤销；滚轮缩放；拖动空白处平移，拖动节点移动。画布内容为演示而构造。</p>
+</section>
+<section class="panel"><div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start"><div><h2>数据结构与交互规则</h2><table class="t" id="tModel"></table></div><div><h2>验收：初版与完成版运行同一组检查</h2><table class="t" id="tAcc"></table></div></div></section>
+<script>
+const $ = id => document.getElementById(id);
+const V = new URLSearchParams(location.search).get('v') === 'a' ? 'A' : 'B', KEY = 'capability-canvas-' + V;
+$('ver').textContent = (V === 'A' ? '初版' : '完成版') + '：前端图形方向能力画布';
+// ---------- 数据模型：文档（节点、关系）与配置分开；视图、选区、历史不进文档 ----------
+const CONFIG = { kinds: { 目标: { color: '#fde9c9', level: 0 }, 任务: { color: '#dbe6fb', level: 1 }, 技能: { color: '#d7efe3', level: 2 }, 知识: { color: '#ece6f5', level: 3 } }, edgeTypes: { 依赖: { color: '#b3261e', directed: true, meaning: '箭头指向的内容要先学' }, 支撑: { color: '#2f6fdb', directed: true, meaning: '箭头指向被支撑的目标或任务' }, 相关: { color: '#9aa2b1', directed: false, meaning: '彼此相关，没有先后' } }, direction: 'top-down' };
+const SAMPLE = () => ({ nodes: [
+  [1, '目标', '做出三维产品页'], [2, '任务', '项目 08 三维产品展示'], [3, '技能', 'three.js 场景'], [4, '技能', '着色器基础'], [5, '技能', '性能分析'], [6, '知识', '向量与矩阵'], [7, '知识', '坐标与单位'], [8, '知识', '光照模型'], [9, '知识', '生成艺术']]
+  .map(([id, kind, label]) => ({ id, kind, label })), edges: [[2, 1, '支撑'], [3, 2, '支撑'], [5, 2, '支撑'], [4, 2, '支撑'], [3, 7, '依赖'], [4, 6, '依赖'], [4, 8, '依赖'], [3, 6, '依赖'], [8, 6, '相关']].map(([from, to, type], i) => ({ id: i + 1, from, to, type })) });
+let doc = SAMPLE(), view = { x: 0, y: 0, k: 1 }, sel = null, linking = false, edgeType = '依赖', hist = [], seq = 100;
+// 层级布局：同一类节点排在同一行
+function layout(d) { const rows = {}; d.nodes.forEach(n => { if (n.x !== undefined) return; const lv = CONFIG.kinds[n.kind].level; (rows[lv] ||= []).push(n); }); Object.entries(rows).forEach(([lv, ns]) => ns.forEach((n, i) => { const along = 30 + i * 150, across = 20 + lv * 100; Object.assign(n, CONFIG.direction === 'top-down' ? { x: along, y: across } : { x: across, y: along }); })); }
+// 保存与恢复（完成版自动保存；读写失败不影响使用）
+function save() { if (V === 'A') return; try { localStorage.setItem(KEY, JSON.stringify(doc)); } catch (e) { /* 隐私模式等情况：不保存 */ } }
+let saveTimer = 0; const autosave = () => { clearTimeout(saveTimer); saveTimer = setTimeout(save, 200); };
+try { const s = V === 'B' && localStorage.getItem(KEY); if (s) doc = JSON.parse(s); } catch (e) { }
+layout(doc);
+// ---------- 绘制 ----------
+const W = 120, H = 54, byId = id => doc.nodes.find(n => n.id === id);
+function wrapLines(text, maxW, maxLines) {   // 完成版：按宽度折行，超过行数用省略号
+  const ctx = wrapLines.c ||= document.createElement('canvas').getContext('2d'); ctx.font = '12px "Noto Sans SC"'; const out = []; let line = '';
+  for (const ch of text) { if (ctx.measureText(line + ch).width > maxW && line) { out.push(line); line = ch; } else line += ch; }
+  out.push(line); if (out.length > maxLines) { const keep = out.slice(0, maxLines); let l = keep[maxLines - 1]; while (ctx.measureText(l + '…').width > maxW) l = l.slice(0, -1); keep[maxLines - 1] = l + '…'; return keep; } return out;
+}
+function cycles() {   // 只看“依赖”关系里的环
+  const adj = {}; doc.edges.filter(e => e.type === '依赖').forEach(e => (adj[e.from] ||= []).push(e.to)); const found = [], state = {}, stack = [];
+  const dfs = u => { state[u] = 1; stack.push(u); for (const v of adj[u] || []) { if (state[v] === 1) found.push(stack.slice(stack.indexOf(v)).concat(v)); else if (!state[v]) dfs(v); } state[u] = 2; stack.pop(); };
+  doc.nodes.forEach(n => { if (!state[n.id]) dfs(n.id); }); return found;
+}
+const isolated = () => doc.nodes.filter(n => !doc.edges.some(e => e.from === n.id || e.to === n.id));
+function edgePath(e) { const a = byId(e.from), b = byId(e.to); if (!a || !b) return ''; const ax = a.x + W / 2, ay = a.y + H / 2, bx = b.x + W / 2, by = b.y + H / 2, dx = bx - ax, dy = by - ay, t = Math.min(Math.abs((W / 2) / (dx || 1e-9)), Math.abs((H / 2) / (dy || 1e-9))); return `M${ax + dx * t},${ay + dy * t} L${bx - dx * t},${by - dy * t}`; }
+let renders = 0;
+function render() {
+  renders++; const cyc = V === 'B' ? cycles() : [], cycEdges = new Set();
+  cyc.forEach(c => { for (let i = 0; i + 1 < c.length; i++) { const e = doc.edges.find(e => e.from === c[i] && e.to === c[i + 1] && e.type === '依赖'); if (e) cycEdges.add(e.id); } });
+  const q = V === 'B' ? ($('search')?.value || '').trim() : '';
+  let h = doc.edges.map(e => { const t = CONFIG.edgeTypes[e.type]; return `<path class="edge${cycEdges.has(e.id) ? ' cycle' : ''}" d="${edgePath(e)}" stroke="${t.color}" ${t.directed ? 'marker-end="url(#arrow)"' : ''}/>`; }).join('');
+  h += doc.nodes.map(n => { const lines = V === 'B' ? wrapLines(n.label, W - 12, 2) : [n.label]; return `<g class="node${sel === n.id ? ' sel' : ''}${q && n.label.includes(q) ? ' hit' : ''}" data-id="${n.id}" transform="translate(${n.x},${n.y})"><title>${n.label}</title><rect width="${W}" height="${H}" rx="8" fill="${CONFIG.kinds[n.kind].color}" stroke="#9aa2b1"/><text class="kind" x="6" y="13">${n.kind}</text>${lines.map((l, i) => `<text class="label" x="6" y="${29 + i * 15}">${l}</text>`).join('')}</g>`; }).join('');
+  $('world').innerHTML = h; applyView();
+  if (V === 'B') { const probs = [...cyc.map(c => `循环依赖：${c.map(id => byId(id).label).join(' → ')}`), ...isolated().map(n => `未连接的节点：${n.label}`)]; $('problems').innerHTML = probs.map(p => `<li>${p}</li>`).join(''); $('histInfo').textContent = `可撤销 ${hist.length} 步`; }
+}
+function applyView() { $('world').setAttribute('transform', `translate(${view.x},${view.y}) scale(${view.k})`); }
+// ---------- 历史：每个操作记录自己的撤销方法 ----------
+function exec(cmd) { cmd.do(); hist.push(cmd); render(); autosave(); }
+function undo() { const c = hist.pop(); if (c) { c.undo(); render(); autosave(); } }
+function deleteNode(id) {
+  const n = byId(id), es = doc.edges.filter(e => e.from === id || e.to === id);
+  if (V === 'A') { doc.nodes = doc.nodes.filter(x => x !== n); doc.edges = doc.edges.filter(e => !es.includes(e)); hist.push({ undo: () => doc.nodes.push(n) }); render(); return; }   // 初版撤销只放回节点
+  exec({ do: () => { doc.nodes = doc.nodes.filter(x => x !== n); doc.edges = doc.edges.filter(e => !es.includes(e)); }, undo: () => { doc.nodes.push(n); doc.edges.push(...es); } });
+}
+function rename(id, label) { const n = byId(id), old = n.label; if (V === 'A') { n.label = label; render(); return; } exec({ do: () => n.label = label, undo: () => n.label = old }); }
+function connect(from, to, type) { if (from === to) return; const e = { id: ++seq, from, to, type }; if (V === 'A') { doc.edges.push(e); render(); return; } exec({ do: () => doc.edges.push(e), undo: () => doc.edges = doc.edges.filter(x => x !== e) }); }
+// ---------- 交互 ----------
+const svg = $('svg'), toWorld = (cx, cy) => { const r = svg.getBoundingClientRect(); return [(cx - r.left - view.x) / view.k, (cy - r.top - view.y) / view.k]; };
+let drag = null;
+svg.addEventListener('pointerdown', e => { const g = e.target.closest('.node'); const [wx, wy] = toWorld(e.clientX, e.clientY);
+  if (g) { const id = +g.dataset.id; if (linking && sel && sel !== id) { connect(sel, id, edgeType); linking = false; return; } sel = id; markSel(); const n = byId(id); drag = { node: n, dx: wx - n.x, dy: wy - n.y, moved: false }; }
+  else { sel = null; markSel(); drag = { pan: true, sx: e.clientX - view.x, sy: e.clientY - view.y }; } svg.setPointerCapture(e.pointerId); });
+// 选中只切换样式，不重建节点：按下鼠标时重画会让双击的两次点击落在不同的元素上，双击改名就失效了
+function markSel() { document.querySelectorAll('.node').forEach(g => g.classList.toggle('sel', +g.dataset.id === sel)); }
+svg.addEventListener('pointermove', e => { if (!drag) return; if (drag.pan) { view.x = e.clientX - drag.sx; view.y = e.clientY - drag.sy; applyView(); } else { const [wx, wy] = toWorld(e.clientX, e.clientY); drag.node.x = wx - drag.dx; drag.node.y = wy - drag.dy; drag.moved = true; render(); } });
+svg.addEventListener('pointerup', () => { if (drag?.moved) autosave(); drag = null; });
+svg.addEventListener('wheel', e => { e.preventDefault(); const f = e.deltaY < 0 ? 1.1 : 1 / 1.1, r = svg.getBoundingClientRect();
+  if (V === 'A') { view.k *= f; render(); return; }   // 初版：绕左上角缩放，而且每一格都重画整个画布
+  const px = e.clientX - r.left, py = e.clientY - r.top; view.x = px - (px - view.x) * f; view.y = py - (py - view.y) * f; view.k *= f; applyView(); }, { passive: false });   // 完成版：以指针为中心，只改变换
+// 按下时设置了指针捕获，双击事件的目标会变成整个画布，所以用刚选中的节点
+svg.addEventListener('dblclick', e => { const g = e.target.closest('.node') || (sel && document.querySelector(`.node[data-id="${sel}"]`)); if (!g) return; const n = byId(+g.dataset.id), r = svg.getBoundingClientRect(), inp = document.createElement('input');
+  inp.className = 'edit'; inp.value = n.label; inp.style.left = (n.x * view.k + view.x) + 'px'; inp.style.top = (n.y * view.k + view.y + 18) + 'px'; inp.style.width = W * view.k + 'px'; $('board').append(inp); inp.focus(); inp.select();
+  let finished = false; const done = ok => { if (finished) return; finished = true; if (ok && inp.value.trim()) rename(n.id, inp.value.trim()); inp.remove(); };   // 移除输入框会再触发一次 blur，只处理一次
+  inp.addEventListener('keydown', k => { if (k.key === 'Enter') done(true); if (k.key === 'Escape') done(false); }); inp.addEventListener('blur', () => done(true)); });
+document.addEventListener('keydown', e => { if (e.target.tagName === 'INPUT') return; if ((e.key === 'Delete' || e.key === 'Backspace') && sel) { deleteNode(sel); sel = null; } if (e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); undo(); } if (e.key.toLowerCase() === 'l' && sel) linking = true; });
+$('toolbar').innerHTML = `<label>关系类型 <select id="etype">${Object.keys(CONFIG.edgeTypes).map(k => `<option>${k}</option>`).join('')}</select></label>` + (V === 'A' ? '<button id="saveBtn" type="button">保存</button>' : '<button id="undoBtn" type="button">撤销</button><button id="fit" type="button">适合窗口</button>');
+$('etype').onchange = e => edgeType = e.target.value;
+if (V === 'B') {
+  $('side').innerHTML = `<h3>搜索</h3><input id="search" placeholder="输入节点名称"><h3>图例（可配置）</h3><div class="legend">${Object.entries(CONFIG.edgeTypes).map(([k, t]) => `<span><i style="background:${t.color}"></i>${k}：${t.meaning}</span>`).join('<br>')}</div><div class="legend">${Object.entries(CONFIG.kinds).map(([k, t]) => `<span><i style="background:${t.color};height:10px"></i>${k}</span>`).join('')}</div><h3>检查</h3><ul class="problems" id="problems"></ul><p class="sub" id="histInfo"></p>`;
+  $('search').addEventListener('input', () => { render(); const q = $('search').value.trim(), n = q && doc.nodes.find(n => n.label.includes(q)); if (n) { const r = svg.getBoundingClientRect(); view.x = r.width / 2 - (n.x + W / 2) * view.k; view.y = r.height / 2 - (n.y + H / 2) * view.k; applyView(); } });
+  $('undoBtn').onclick = undo;
+  $('fit').onclick = () => { const xs = doc.nodes.map(n => n.x), ys = doc.nodes.map(n => n.y), r = svg.getBoundingClientRect(), x0 = Math.min(...xs), y0 = Math.min(...ys), w = Math.max(...xs) + W - x0, h = Math.max(...ys) + H - y0; view.k = Math.min(r.width / (w + 40), r.height / (h + 40), 2); view.x = (r.width - w * view.k) / 2 - x0 * view.k; view.y = (r.height - h * view.k) / 2 - y0 * view.k; applyView(); };
+} else { $('side').innerHTML = '<p class="sub">初版：没有搜索、检查与撤销按钮；“保存”需要手动点击。</p>'; $('saveBtn').onclick = () => { try { localStorage.setItem(KEY, JSON.stringify(doc)); } catch (e) { } }; }
+render();
+$('tModel').innerHTML = `<tr><th>部分</th><th>表示方式</th><th>保存吗</th></tr><tr><th>配置</th><td>节点种类（颜色、层级）、关系类型（颜色、是否有方向、含义）、布局方向</td><td>随文档版本保存</td></tr><tr><th>文档</th><td>nodes：{ id, kind, label, x, y }；edges：{ id, from, to, type }</td><td>自动保存（200 毫秒防抖，读写失败不影响使用）</td></tr><tr><th>视图</th><td>{ x, y, k }：平移与缩放，只改变换，不重画节点</td><td>否</td></tr><tr><th>选区与连线状态</th><td>当前选中的节点；是否在连线</td><td>否</td></tr><tr><th>历史</th><td>每个操作记录 do／undo；删除节点时一并记下它的关系</td><td>否</td></tr><tr><th>检查</th><td>“依赖”关系里的环（深度优先搜索）；没有任何关系的节点</td><td>实时计算</td></tr>`;
+// ---------- 测量接口 ----------
+window.__cv = { V, KEY, doc: () => doc, view: () => ({ ...view }), renders: () => renders, render, cycles, isolated, nodeCenter: id => { const g = document.querySelector(`.node[data-id="${id}"] rect`).getBoundingClientRect(); return [g.left + g.width / 2, g.top + g.height / 2]; },
+  overflow: id => { const g = document.querySelector(`.node[data-id="${id}"]`); return Math.max(0, ...[...g.querySelectorAll('text.label')].map(t => t.getComputedTextLength() + 6 - W)); },
+  loadBig(n = 500, m = 700) { let s = 7; const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647, kinds = Object.keys(CONFIG.kinds); doc = { nodes: Array.from({ length: n }, (_, i) => ({ id: i + 1, kind: kinds[i % 4], label: '节点 ' + (i + 1), x: (i % 25) * 150, y: Math.floor(i / 25) * 90 })), edges: Array.from({ length: m }, (_, i) => ({ id: i + 1, from: 1 + Math.floor(rnd() * n), to: 1 + Math.floor(rnd() * n), type: '相关' })) }; hist = []; const t = performance.now(); render(); return performance.now() - t; },
+  hashDoc: () => JSON.stringify(doc.nodes.map(n => [n.id, n.label]).sort()) + JSON.stringify(doc.edges.map(e => [e.from, e.to, e.type]).sort()),
+  report(R) { const rows = [['大图（500 个节点、700 条关系）：滚轮缩放 10 格', 'big'], ['缩放时指针下的位置', 'anchor'], ['连出一个循环依赖', 'cycle'], ['断开的节点', 'isolated'], ['34 字的长名称', 'long'], ['误删节点后撤销', 'undo'], ['改名后刷新页面', 'reload'], ['搜索“光照”', 'search']];
+    $('tAcc').innerHTML = `<tr><th>检查</th><th>初版</th><th>完成版</th></tr>` + rows.map(([n, k]) => `<tr><th>${n}</th>${['A', 'B'].map(v => `<td class="${R[v][k].ok ? 'good' : 'poor'}">${R[v][k].text}</td>`).join('')}</tr>`).join(''); } };
+</script>
+</body>
+</html>
