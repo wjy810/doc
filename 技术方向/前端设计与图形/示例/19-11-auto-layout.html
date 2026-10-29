@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自动布局编辑器：约束、冲突、长文本与导出</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); }
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; align-items: start; } .tag { font-size: 11px; color: var(--muted); margin: 0 0 2px; }
+  .canvas { position: relative; height: 330px; border: 1px dashed #c9d0db; border-radius: 8px; background: #fafbfc; overflow: hidden; }
+  .canvas .n { position: absolute; font: 14px/21px "Noto Sans SC", system-ui, sans-serif; overflow: hidden; }
+  .canvas .frame { outline: 1px dotted rgba(47, 111, 219, .35); }
+  .canvas .text { color: #1d2330; }
+  .canvas .img { background: linear-gradient(135deg, #2c5aa0, #86a9e0); border-radius: 6px; }
+  .canvas .card { background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0, 0, 0, .12); }
+  .canvas .btn { background: var(--accent); border-radius: 6px; } .canvas .btn .text { color: #fff; }
+  .canvas .over { outline: 2px solid var(--bad); }
+  .msg { font-size: 11.5px; color: var(--bad); min-height: 18px; margin: 2px 0 0; } .msg.ok { color: var(--ok); }
+  .export { height: 330px; border: 1px dashed #c9d0db; border-radius: 8px; background: #fafbfc; overflow: hidden; position: relative; padding: 12px; }
+  pre.code { margin: 0; font: 10.5px/1.45 ui-monospace, Menlo, Consolas, monospace; background: #f6f7f9; border: 1px solid var(--line); border-radius: 6px; padding: 6px; max-height: 120px; overflow: hidden; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>自动布局编辑器：同一份数据，两种求解与导出</h2>
+  <p class="sub">编辑器里的卡片是一棵框架树：每个框架有方向、间距、内边距，宽和高可以是固定、包裹内容或填满父级。A 的求解器不检查冲突，文字固定一行高，导出时把每个元素的位置写死成绝对坐标；B 检查冲突并说明原因，文字按宽度换行、框架包裹内容，导出成弹性布局（flex）的 HTML 与 CSS。测试脚本依次：把按钮改成固定宽度 300（比卡片还宽）、把标题换成长文本、导出，并在导出的页面里再换一次更长的标题。</p>
+  <div class="grid4">
+    <div><p class="tag">A 编辑器</p><div class="canvas" id="eA"></div><p class="msg" id="mA"></p></div>
+    <div><p class="tag">A 导出后换成更长的标题</p><div class="export" id="xA"></div></div>
+    <div><p class="tag">B 编辑器</p><div class="canvas" id="eB"></div><p class="msg" id="mB" role="status"></p></div>
+    <div><p class="tag">B 导出后换成更长的标题</p><div class="export" id="xB"></div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><pre class="code" id="cA"></pre><pre class="code" id="cB"></pre></div>
+  <table class="t" id="res"></table>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// ---------- 数据模型 ----------
+function model() {
+  return { id: 'card', kind: 'frame', cls: 'card', dir: 'col', gap: 8, pad: [12, 12, 12, 12], w: { m: 'fixed', v: 240 }, h: { m: 'hug' }, kids: [
+    { id: 'img', kind: 'img', cls: 'img', w: { m: 'fill' }, h: { m: 'fixed', v: 96 } },
+    { id: 'title', kind: 'text', text: '数据可视化入门', bold: true, w: { m: 'fill' }, h: { m: 'hug' } },
+    { id: 'meta', kind: 'text', text: '12 周 · 林老师', w: { m: 'fill' }, h: { m: 'hug' } },
+    { id: 'row', kind: 'frame', dir: 'row', gap: 8, pad: [0, 0, 0, 0], justify: 'between', w: { m: 'fill' }, h: { m: 'hug' }, kids: [
+      { id: 'price', kind: 'text', text: '¥1,299', bold: true, w: { m: 'hug' }, h: { m: 'hug' } },
+      { id: 'btn', kind: 'frame', cls: 'btn', dir: 'row', gap: 0, pad: [4, 14, 4, 14], w: { m: 'hug' }, h: { m: 'hug' }, kids: [{ id: 'btnText', kind: 'text', text: '报名', w: { m: 'hug' }, h: { m: 'hug' } }] }] }] };
+}
+const find = (n, id) => n.id === id ? n : (n.kids || []).map(k => find(k, id)).find(Boolean);
+// ---------- 文字测量（与浏览器同一种字体） ----------
+const mc = document.createElement('canvas').getContext('2d');
+const font = n => `${n.bold ? 700 : 400} 14px "Noto Sans SC", system-ui, sans-serif`;
+function wrapLines(n, width) { mc.font = font(n); const lines = []; let cur = ''; for (const ch of n.text) { if (mc.measureText(cur + ch).width > width && cur) { lines.push(cur); cur = ch; } else cur += ch; } lines.push(cur); return lines; }
+const textWidth = n => { mc.font = font(n); return Math.ceil(mc.measureText(n.text).width); };
+// ---------- 求解：先自下而上量“包裹内容”的尺寸，再自上而下分配位置 ----------
+function solve(root, v, issues) {
+  const L = {};
+  function hugW(n) { if (n.w.m === 'fixed') return n.w.v; if (n.kind === 'text') return textWidth(n); if (n.kind !== 'frame') return 0; const ws = n.kids.map(hugW); return (n.dir === 'row' ? ws.reduce((a, b) => a + b, 0) + n.gap * (n.kids.length - 1) : Math.max(...ws)) + n.pad[1] + n.pad[3]; }
+  function place(n, x, y, availW) {
+    let w = n.w.m === 'fixed' ? n.w.v : n.w.m === 'fill' ? availW : Math.min(availW, hugW(n));
+    if (v === 'B' && n.w.m === 'fixed' && n.w.v > availW + 0.5 && !issues.some(t => t.includes(`“${n.id}”`))) { issues.push(`“${n.id}”固定宽度 ${n.w.v}，大于父级可用宽度 ${Math.round(availW)}；已按可用宽度显示。可以改成“填满”或把父级加宽。`); w = availW; }
+    let h;
+    if (n.kind === 'text') { const lines = v === 'B' ? wrapLines(n, w) : [n.text]; h = n.h.m === 'fixed' ? n.h.v : lines.length * 21; if (v === 'A') h = 21; L[n.id] = { x, y, w, h, lines }; return L[n.id]; }
+    if (n.kind === 'img') { h = n.h.v; L[n.id] = { x, y, w, h }; return L[n.id]; }
+    const iw = w - n.pad[1] - n.pad[3]; let cx = x + n.pad[3], cy = y + n.pad[0], rowH = 0;
+    const kids = n.kids.map(k => ({ k, w: k.w.m === 'fixed' ? k.w.v : k.w.m === 'fill' ? (n.dir === 'col' ? iw : 0) : Math.min(iw, hugW(k)) }));
+    if (n.dir === 'row' && v === 'B') { const used = kids.reduce((a, c) => a + c.w, 0) + n.gap * (kids.length - 1); if (used > iw + 0.5) { const f = kids.find(c => c.k.w.m === 'fixed'); if (f) { issues.push(`“${f.k.id}”固定宽度 ${f.k.w.v}，放不进父级的可用宽度 ${Math.round(iw)}；已先按剩余宽度显示。可以改成“包裹内容”或把父级加宽。`); f.w = Math.max(0, iw - (used - f.w)); } } }
+    if (n.dir === 'row') { const used = kids.reduce((a, c) => a + c.w, 0) + n.gap * (kids.length - 1); let gap = n.gap; if (n.justify === 'between' && kids.length > 1) gap = Math.max(n.gap, (iw - used + n.gap * (kids.length - 1)) / (kids.length - 1)); for (const c of kids) { const r = place(c.k, cx, cy, c.w); cx += r.w + gap; rowH = Math.max(rowH, r.h); } h = rowH + n.pad[0] + n.pad[2]; }
+    else { for (const c of kids) { const r = place(c.k, cx, cy, iw); cy += r.h + n.gap; } h = cy - n.gap - y + n.pad[2]; }
+    L[n.id] = { x, y, w, h }; return L[n.id];
+  }
+  place(root, 12, 12, 300);
+  return L;
+}
+// ---------- 编辑器画面 ----------
+function draw(host, root, L) {
+  let html = '';
+  const walk = n => { const b = L[n.id], cls = ['n', n.kind, n.cls || ''].join(' '); if (n.kind === 'text') html += `<div class="${cls}" data-id="${n.id}" style="left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px;font-weight:${n.bold ? 700 : 400};white-space:nowrap">${(b.lines || [n.text]).map(esc).join('<br>')}</div>`; else { html += `<div class="${cls}" data-id="${n.id}" style="left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px"></div>`; (n.kids || []).forEach(walk); } };
+  walk(root); host.innerHTML = html;
+  // 标出伸出父级的元素
+  const over = []; const chk = (n, p) => { const b = L[n.id]; if (p) { const q = L[p.id]; if (b.x + b.w > q.x + q.w + 0.5) over.push(n.id); } (n.kids || []).forEach(k => chk(k, n)); }; chk(root, null);
+  over.forEach(id => host.querySelector(`[data-id="${id}"]`).classList.add('over'));
+  // 文字被裁掉：浏览器里实际需要的高度大于分到的高度
+  const clipped = [...host.querySelectorAll('.text')].filter(t => t.scrollHeight > t.clientHeight + 1 || t.scrollWidth > t.clientWidth + 1).map(t => t.dataset.id);
+  return { over, clipped };
+}
+// ---------- 导出 ----------
+function exportA(root, L) { let css = '', html = ''; const walk = n => { const b = L[n.id]; css += `#${n.id}{position:absolute;left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px}\n`; html += n.kind === 'text' ? `<div id="${n.id}" class="text"${n.bold ? ' style="font-weight:700"' : ''}>${esc(n.text)}</div>` : `<div id="${n.id}" class="${n.kind} ${n.cls || ''}"></div>`; (n.kids || []).forEach(walk); }; walk(root); return { css, html }; }
+function exportB(root) {
+  let css = ''; const size = (m, p) => m.m === 'fixed' ? `${p}:${m.v}px;` : m.m === 'fill' ? (p === 'width' ? 'align-self:stretch;' : 'flex:1;') : '';
+  const walk = n => { const st = n.kind === 'frame' ? `display:flex;flex-direction:${n.dir === 'row' ? 'row' : 'column'};gap:${n.gap}px;padding:${n.pad.map(x => x + 'px').join(' ')};${n.justify === 'between' ? 'justify-content:space-between;align-items:flex-start;' : ''}` : n.kind === 'img' ? '' : 'overflow-wrap:anywhere;'; css += `#${n.id}{${st}${size(n.w, 'width')}${size(n.h, 'height')}}\n`; const inner = n.kind === 'text' ? esc(n.text) : (n.kids || []).map(walk).join(''); return `<div id="${n.id}" class="${n.kind} ${n.cls || ''}"${n.bold ? ' style="font-weight:700"' : ''}>${inner}</div>`; };
+  const html = walk(root);   // 先生成 HTML，样式在遍历时才写进 css
+  return { css, html };
+}
+// 把导出的结果放进一个独立的容器（用 Shadow DOM 隔开样式）
+function mountExport(host, ex) {
+  const sh = host.shadowRoot || host.attachShadow({ mode: 'open' });
+  sh.innerHTML = `<style>:host{display:block;position:relative} *{box-sizing:border-box} .wrap{position:relative;padding:12px;font:14px/21px "Noto Sans SC",system-ui,sans-serif;color:#1d2330} .text{white-space:normal} .img{background:linear-gradient(135deg,#2c5aa0,#86a9e0);border-radius:6px} .card{background:#fff;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.12)} .btn{background:#2f6fdb;border-radius:6px} .btn .text{color:#fff} ${ex.css}</style><div class="wrap">${ex.html}</div>`;
+  return sh;
+}
+// 导出页面里元素之间的重叠（同一个父级的子元素不应重叠）与伸出卡片的元素
+function overlaps(sh) {
+  const box = id => sh.getElementById(id).getBoundingClientRect(), pairs = [['title', 'meta'], ['meta', 'row'], ['img', 'title']];
+  // 用文字实际占据的范围判断：固定高度的框不会变高，但文字会溢出框外
+  const content = id => { const el = sh.getElementById(id), r = document.createRange(); r.selectNodeContents(el); const t = r.getBoundingClientRect(), e = el.getBoundingClientRect(); return { top: Math.min(t.top, e.top), bottom: Math.max(t.bottom, e.bottom) }; };
+  const bad = pairs.filter(([a, b]) => content(a).bottom > content(b).top + 1).map(p => p.join('与'));
+  const card = box('card'); const out = ['title', 'meta', 'row'].filter(id => content(id).bottom > card.bottom + 1);
+  return { bad, out };
+}
+window.__al = { model, find, solve, draw, exportA, exportB, mountExport, overlaps, fill: (id, h) => { $(id).innerHTML = h; }, text: (id, t) => { $(id).textContent = t; } };
+</script>
+</body>
+</html>
