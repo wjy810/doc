@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>项目 06 可探索的数据工作台：概览、筛选、趋势、分布与明细联动</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  .note { max-width: 1140px; margin: 0 0 10px; padding: 6px 12px; border-radius: 8px; background: #fff6e0; border: 1px solid #f0d9a8; font-size: 12px; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; } table.t tr > th:first-child { white-space: nowrap; } td.num { font-variant-numeric: tabular-nums; text-align: right; }
+  .good { color: var(--ok); } .poor { color: var(--bad); }
+  .controls { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; } .controls label { display: inline-flex; gap: 4px; align-items: center; } .controls button, .controls select { font: inherit; }
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; } .kpi { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; } .kpi b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; } .kpi span { color: var(--muted); font-size: 12px; }
+  .charts { display: grid; grid-template-columns: 700px minmax(0, 1fr); gap: 14px; } svg { display: block; } svg text { font: 10px "Noto Sans SC", sans-serif; fill: #5b6475; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+</style>
+</head>
+<body>
+<p class="note">本页数据是按下方“数据说明”里的规则由程序生成的模拟数据，不是真实的骑行记录；生成规则与缺失情况都写在页面上，可以复查。</p>
+<section class="panel">
+  <h2 id="ver"></h2>
+  <div class="controls" id="controls"></div>
+  <div class="kpis" id="kpis"></div>
+  <div class="charts"><div><p class="sub">每日骑行量（在图上拖动可以选择日期范围）</p><svg id="trend" width="700" height="210"></svg></div><div><p class="sub">日骑行量的分布（所选日期）</p><svg id="hist" width="400" height="210"></svg></div></div>
+  <div><p class="sub" id="tableCap"></p><table class="t" id="table"></table></div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>数据字典与数据说明</h2><table class="t" id="tDict"></table><p class="sub" id="notes"></p><h2 style="margin-top:6px">分析任务（由完成版回答，并与生成数据时的真实值核对）</h2><table class="t" id="tTasks"></table></div>
+    <div><h2>验收：同一组操作，初版与完成版</h2><p class="sub">脚本在图上真实拖动选择、勾选筛选条件、点击重置，再核对计算、单位、缺失值与图形映射。</p><table class="t" id="tAcc"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const V = new URLSearchParams(location.search).get('v') === 'a' ? 'A' : 'B';
+$('ver').textContent = (V === 'A' ? '初版' : '完成版') + '：城市共享单车骑行工作台（模拟数据）';
+// ---------- 生成数据 ----------
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const DISTRICTS = [['东城', 3200, 0.85], ['西城', 2800, 0.85], ['南湖', 1800, 1.6], ['北港', 2200, 0.9], ['新区', 1200, 0.9]];   // 名称、工作日基数、周末系数
+const DAYS = 56, start = Date.UTC(2026, 7, 3);   // 2026-08-03（星期一）起 8 周
+const dateOf = i => new Date(start + i * 864e5), fmt = i => { const d = dateOf(i); return `${d.getUTCMonth() + 1} 月 ${d.getUTCDate()} 日`; }, weekend = i => [0, 6].includes(dateOf(i).getUTCDay());
+const R = rng(2026), FULL = [];
+for (let i = 0; i < DAYS; i++) for (const [name, base, wk] of DISTRICTS) { const trips = Math.round(base * (weekend(i) ? wk : 1) * (1 + 0.004 * i) * (0.92 + 0.16 * R())); FULL.push({ i, district: name, trips, minutes: +(14 + 6 * R() + (weekend(i) ? 4 : 0)).toFixed(1) }); }
+const OUTAGE_ALL = 17, OUTAGE_NEW = [24, 25, 26, 27, 28, 29, 30];   // 8 月 20 日全市系统故障；新区 8 月 27 日—9 月 2 日传感器故障
+const DATA = FULL.map(r => (r.i === OUTAGE_ALL || (r.district === '新区' && OUTAGE_NEW.includes(r.i))) ? { ...r, trips: null, minutes: null } : r);
+// ---------- 状态与计算 ----------
+let S = { districts: new Set(DISTRICTS.map(d => d[0])), daytype: 'all', range: null };
+const dayOk = i => S.daytype === 'all' || (S.daytype === 'weekend') === weekend(i);
+const inRange = i => !S.range || (i >= S.range[0] && i <= S.range[1]);
+function daily(data = DATA) {   // 每天所选区域的合计；B 中有缺失的日子记为 null
+  const out = [];
+  for (let i = 0; i < DAYS; i++) { if (!dayOk(i)) continue; const rows = data.filter(r => r.i === i && S.districts.has(r.district)); const miss = rows.some(r => r.trips === null); out.push({ i, total: V === 'A' ? rows.reduce((s, r) => s + (r.trips ?? 0), 0) : (miss ? null : rows.reduce((s, r) => s + r.trips, 0)), missing: miss }); }
+  return out;
+}
+const tableRows = () => DATA.filter(r => S.districts.has(r.district) && dayOk(r.i) && (V === 'A' || inRange(r.i)));   // 初版的明细表不跟随日期范围
+function kpis() {
+  const d = daily().filter(x => inRange(x.i)), rows = DATA.filter(r => S.districts.has(r.district) && dayOk(r.i) && inRange(r.i));
+  const total = rows.reduce((s, r) => s + (r.trips ?? 0), 0), complete = d.filter(x => x.total !== null);
+  const avg = V === 'A' ? total / d.length : complete.reduce((s, x) => s + x.total, 0) / complete.length;
+  const mins = rows.filter(r => r.minutes !== null), avgMin = mins.reduce((s, r) => s + r.minutes * r.trips, 0) / mins.reduce((s, r) => s + r.trips, 0);
+  return { total, avg, avgMin, missing: rows.filter(r => r.trips === null).length, days: d.length, completeDays: complete.length };
+}
+const num = n => Math.round(n).toLocaleString('zh-CN');
+// ---------- 绘制 ----------
+function render() {
+  const k = kpis();
+  $('kpis').innerHTML = V === 'A'
+    ? `<div class="kpi"><b>${Math.round(k.total)}</b><span>骑行量</span></div><div class="kpi"><b>${Math.round(k.avg)}</b><span>日均</span></div><div class="kpi"><b>${k.avgMin.toFixed(1)}</b><span>平均时长</span></div><div class="kpi"><b>${k.days}</b><span>天数</span></div>`
+    : `<div class="kpi"><b>${num(k.total)} 次</b><span>骑行量合计</span></div><div class="kpi"><b>${num(k.avg)} 次／天</b><span>日均（只算数据完整的 ${k.completeDays} 天）</span></div><div class="kpi"><b>${k.avgMin.toFixed(1)} 分钟</b><span>平均每次骑行时长</span></div><div class="kpi"><b>${k.missing} 条</b><span>缺失记录（区 × 天）</span></div>`;
+  // 趋势：每日柱状图
+  const d = daily(), W = 700, H = 210, L = 46, B = 24, svg = $('trend'), vals = d.map(x => x.total).filter(v => v !== null);
+  const y0 = V === 'A' ? Math.min(...vals) * 0.95 : 0, y1 = Math.max(...vals) * 1.05, bw = (W - L - 6) / DAYS, Y = v => H - B - (v - y0) / (y1 - y0) * (H - B - 10);
+  let g = `<line x1="${L}" x2="${W}" y1="${H - B}" y2="${H - B}" stroke="#9aa2b1"/>`;
+  for (const t of [y0, (y0 + y1) / 2, y1]) g += `<text x="${L - 4}" y="${Y(t) + 3}" text-anchor="end">${V === 'A' ? Math.round(t) : num(t) + (t === y1 ? ' 次' : '')}</text>`;
+  if (S.range) g += `<rect id="brushRect" x="${L + S.range[0] * bw}" y="4" width="${(S.range[1] - S.range[0] + 1) * bw}" height="${H - B - 4}" fill="#2f6fdb" opacity=".1"/>`;
+  for (const x of d) { const X = L + x.i * bw; if (x.total === null) g += `<text x="${X + bw / 2}" y="${H - B - 4}" text-anchor="middle" fill="#b3261e" data-missing="1">缺</text>`; else g += `<rect class="bar" data-i="${x.i}" x="${X + 1}" y="${Y(x.total)}" width="${bw - 2}" height="${H - B - Y(x.total)}" fill="${inRange(x.i) ? (weekend(x.i) ? '#7ea6ea' : '#2f6fdb') : '#c9ced6'}"/>`; }
+  for (let w = 0; w < 8; w++) g += `<text x="${L + (w * 7 + 3.5) * bw}" y="${H - 8}" text-anchor="middle">${fmt(w * 7)}</text>`;
+  svg.innerHTML = g; svg.dataset.y0 = y0; svg.dataset.y1 = y1;
+  // 分布
+  const sel = d.filter(x => inRange(x.i)).map(x => x.total).filter(v => v !== null), hs = $('hist'), HW = 400, bins = 10, lo = V === 'A' ? 0 : Math.min(...sel), hi = Math.max(...sel) + 1, counts = new Array(bins).fill(0);
+  sel.forEach(v => counts[Math.min(bins - 1, Math.floor((v - lo) / (hi - lo) * bins))]++);
+  const cm = Math.max(...counts), hb = (HW - 40) / bins; let h = `<line x1="30" x2="${HW}" y1="${H - B}" y2="${H - B}" stroke="#9aa2b1"/>`;
+  counts.forEach((c, j) => { const hh = c / cm * (H - B - 14); h += `<rect class="hbar" x="${30 + j * hb + 1}" y="${H - B - hh}" width="${hb - 2}" height="${hh}" fill="#2f6fdb"/><text x="${30 + j * hb + hb / 2}" y="${H - B - hh - 3}" text-anchor="middle">${c}</text>`; });
+  h += `<text x="30" y="${H - 8}">${V === 'A' ? Math.round(lo) : num(lo) + ' 次'}</text><text x="${HW}" y="${H - 8}" text-anchor="end">${V === 'A' ? Math.round(hi) : num(hi) + ' 次'}</text>`;
+  hs.innerHTML = h; hs.dataset.n = sel.length;
+  // 明细
+  const rows = tableRows();
+  $('tableCap').textContent = `明细：共 ${rows.length} 行（下面显示前 6 行）`;
+  $('table').innerHTML = `<tr><th>日期</th><th>区</th><th>骑行量${V === 'B' ? '（次）' : ''}</th><th>平均时长${V === 'B' ? '（分钟）' : ''}</th></tr>` + rows.slice(0, 6).map(r => `<tr><td>${fmt(r.i)}</td><td>${r.district}</td><td class="num">${V === 'A' ? r.trips : (r.trips ?? '缺失')}</td><td class="num">${V === 'A' ? r.minutes : (r.minutes ?? '缺失')}</td></tr>`).join('');
+}
+// ---------- 交互 ----------
+$('controls').innerHTML = DISTRICTS.map(([n]) => `<label><input type="checkbox" value="${n}" checked>${n}</label>`).join('') + `<label>日期类型 <select id="daytype"><option value="all">全部</option><option value="weekday">工作日</option><option value="weekend">周末</option></select></label><button id="reset" type="button">重置选择</button>`;
+$('controls').addEventListener('change', e => { if (e.target.type === 'checkbox') { e.target.checked ? S.districts.add(e.target.value) : S.districts.delete(e.target.value); } if (e.target.id === 'daytype') S.daytype = e.target.value; render(); });
+$('reset').onclick = () => { S = { districts: new Set(DISTRICTS.map(d => d[0])), daytype: 'all', range: V === 'A' ? S.range : null }; $('controls').querySelectorAll('input').forEach(c => c.checked = true); $('daytype').value = 'all'; render(); };   // 初版忘了清除日期范围
+const trend = $('trend'); let drag = null;
+const dayAt = x => Math.max(0, Math.min(DAYS - 1, Math.floor((x - 46) / ((700 - 46 - 6) / DAYS))));
+trend.addEventListener('pointerdown', e => { drag = dayAt(e.offsetX); trend.setPointerCapture(e.pointerId); });
+trend.addEventListener('pointermove', e => { if (drag !== null) { const j = dayAt(e.offsetX); S.range = [Math.min(drag, j), Math.max(drag, j)]; render(); } });
+trend.addEventListener('pointerup', () => { drag = null; });
+render();
+// ---------- 数据说明与分析任务 ----------
+$('tDict').innerHTML = `<tr><th>字段</th><th>类型与单位</th><th>说明</th></tr><tr><th>日期</th><td>日期</td><td>2026-08-03 至 2026-09-27，共 56 天（8 周）</td></tr><tr><th>区</th><td>文本</td><td>东城、西城、南湖、北港、新区</td></tr><tr><th>骑行量</th><td>整数，次</td><td>当天在该区开始的骑行次数；缺失记为空，不记为 0</td></tr><tr><th>平均时长</th><td>小数，分钟</td><td>当天该区骑行时长的平均值；按骑行量加权汇总</td></tr>`;
+$('notes').innerHTML = `生成规则：每区有工作日基数（3200、2800、1800、2200、1200 次），周末乘以系数（南湖 1.6，其余 0.85—0.9），每天增长 0.4%，再乘以 0.92—1.08 的随机波动（种子 2026）。缺失：${fmt(OUTAGE_ALL)}全市系统故障；新区 ${fmt(OUTAGE_NEW[0])}—${fmt(OUTAGE_NEW.at(-1))}传感器故障，共 ${DATA.filter(r => r.trips === null).length} 条缺失记录。图表说明：柱状图纵轴从 0 开始；有缺失的日子标“缺”，不画柱子；日均只算数据完整的日子。`;
+function truth() {   // 用生成时的完整数据回答问题
+  const tot = i => FULL.filter(r => r.i === i).reduce((s, r) => s + r.trips, 0), all = [...Array(DAYS).keys()];
+  const avg = all.reduce((s, i) => s + tot(i), 0) / DAYS, low = all.reduce((a, b) => tot(b) < tot(a) ? b : a);
+  const nh = w => { const d = all.filter(i => weekend(i) === w); return d.reduce((s, i) => s + FULL.find(r => r.i === i && r.district === '南湖').trips, 0) / d.length; };
+  return { avg, low, lowV: tot(low), nanhu: nh(true) / nh(false) - 1 };
+}
+window.__wb = { V, S: () => ({ districts: [...S.districts], daytype: S.daytype, range: S.range }), kpis, truth, tableRows: () => tableRows().length, tableSum: () => tableRows().reduce((s, r) => s + (r.trips ?? 0), 0),
+  lowest: () => { const d = daily().filter(x => x.total !== null); const m = d.reduce((a, b) => b.total < a.total ? b : a); return { i: m.i, label: fmt(m.i), v: m.total, isOutage: m.i === OUTAGE_ALL || OUTAGE_NEW.includes(m.i) }; },
+  histInfo: () => { const c = [...document.querySelectorAll('#hist .hbar')].map(b => +b.getAttribute('height')); const sel = daily().filter(x => inRange(x.i)).map(x => x.total).filter(v => v !== null); return { nonEmpty: c.filter(h => h > 0).length, bins: c.length, zeros: sel.filter(v => v === 0).length }; },
+  histCount: () => +$('hist').dataset.n, hasUnits: () => /次|分钟/.test($('kpis').innerText) && /次/.test($('trend').textContent), fmt,
+  report(R, T) {
+    const rows = [['日均骑行量与真实值的误差', 'avg'], ['“哪一天最少”的回答', 'low'], ['分布图：有数据的分组／缺失记成 0 的天数', 'hist'], ['选中第 3—4 周的周末后：表格行数／应有行数', 'link'], ['同上：指标合计与表格合计', 'sum'], ['数字带单位', 'units'], ['重置后：指标回到全部数据', 'reset']];
+    $('tAcc').innerHTML = `<tr><th>检查</th><th>初版</th><th>完成版</th></tr>` + rows.map(([n, k]) => `<tr><th>${n}</th>${['A', 'B'].map(v => `<td class="${R[v][k].ok ? 'good' : 'poor'}">${R[v][k].text}</td>`).join('')}</tr>`).join('');
+    $('tTasks').innerHTML = `<tr><th>任务</th><th>完成版的回答</th><th>真实值</th></tr>` + T.map(t => `<tr><th>${t[0]}</th><td>${t[1]}</td><td>${t[2]}</td></tr>`).join('');
+  } };
+</script>
+</body>
+</html>
