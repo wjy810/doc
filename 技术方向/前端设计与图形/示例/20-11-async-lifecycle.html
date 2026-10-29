@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>异步、生命周期与软件结构：过期结果、清理与把实验代码变成组件</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --warn: #a15c00; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); } .mid { color: var(--warn); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  pre.code { margin: 0; font: 10.5px/1.45 ui-monospace, Menlo, Consolas, monospace; background: #f6f7f9; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; }
+  #host { position: absolute; left: -9999px; top: 0; }
+</style>
+</head>
+<body>
+<div id="host"></div>
+<section class="panel">
+  <div class="two">
+    <div><h2>1 网络：重复请求与过期结果</h2><p class="sub">搜索框里依次输入 g、gr、gra、grap、graph，每个字间隔 30～90 毫秒，输入 gra 后停顿 160～260 毫秒；模拟服务器的响应时间是 30～250 毫秒，后发的请求可能先回来。A 每输入一个字就请求一次，哪个先回来就显示哪个；B 停止输入 150 毫秒后才请求，发新请求前取消旧请求（AbortController），返回时再核对是不是最新的请求。各模拟 40 次输入。</p><pre class="code" id="codeSearch"></pre><table class="t" id="tSearch"></table></div>
+    <div><h2>2 组件销毁：动画、计时器、事件、请求与设备</h2><p class="sub">一个组件挂载时启动：每帧动画（requestAnimationFrame）、每 20 毫秒的轮询、窗口尺寸变化的监听、一个 150 毫秒后返回的请求，以及一路画布视频流（代表摄像头这类设备）。挂载 50 毫秒后销毁，重复 20 次。A 销毁时只把元素移出页面；B 用一个 AbortController 统一撤销监听与请求，并停止动画、轮询与视频轨道。全部销毁 300 毫秒后再触发三次窗口尺寸变化，统计还在运行的东西。</p><pre class="code" id="codeLife"></pre><table class="t" id="tLife"></table></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>3 软件结构：把实验代码变成可交付的组件</h2><p class="sub">一个网格排版函数：把若干卡片排成等宽多列。A 是实验时写的版本，只考虑“正常”的输入；B 补齐了输入约束、异常处理、文档和必要检查。用 500 组随机输入测试（模糊测试），输入里混有空值、负数、字符串形式的数字、非数组等。“悄悄出错”指没有报错但结果不合理：出现 NaN、负的宽度、超出容器宽度或者离谱的坐标。</p><table class="t" id="tFuzz"></table><table class="t" id="tFuzzEx"></table></div>
+    <div><h2>B 版本的写法（节选）</h2><pre class="code" id="codeB"></pre><table class="t" id="tFour"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+// ---------- 1 搜索 ----------
+function fakeFetch(q, latency, { signal } = {}) {
+  return new Promise((res, rej) => {
+    const id = setTimeout(() => res({ q, items: [q + ' 的结果'] }), latency);
+    signal?.addEventListener('abort', () => { clearTimeout(id); rej(new DOMException('请求已取消', 'AbortError')); });
+  });
+}
+function searchBox(variant, R, stats) {
+  let shown = null, timer = 0, ctrl = null, reqId = 0, seq = 0, lastSeq = 0;
+  const render = r => { stats.renders++; if (r.seq < lastSeq) stats.stale++; lastSeq = Math.max(lastSeq, r.seq); shown = r.q; };   // 先发的请求晚回来，覆盖了后发的结果
+  const request = q => { stats.requests++; const n = ++seq; return fakeFetch(q, 30 + R() * 220, ctrl ? { signal: ctrl.signal } : {}).then(r => ({ ...r, seq: n })); };
+  const onInput = q => {
+    if (variant === 'A') { request(q).then(render); return; }
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      ctrl?.abort(); ctrl = new AbortController(); const my = ++reqId;
+      try { const r = await request(q); if (my === reqId) render(r); }
+      catch (e) { if (e.name === 'AbortError') stats.aborted++; else throw e; }
+    }, 150);
+  };
+  return { onInput, shown: () => shown };
+}
+async function searchTest() {
+  const out = {};
+  for (const v of ['A', 'B']) {
+    const sessions = Array.from({ length: 40 }, (_, s) => (async () => {
+      const R = rng(100 + s), stats = { requests: 0, renders: 0, stale: 0, aborted: 0 }, box = searchBox(v, R, stats);
+      for (const q of ['g', 'gr', 'gra', 'grap', 'graph']) { box.onInput(q); await sleep(q === 'gra' ? 160 + R() * 100 : 30 + R() * 60); }   // 输入 gra 后停顿一下
+      await sleep(700);
+      return { ...stats, finalOk: box.shown() === 'graph' };
+    })());
+    const res = await Promise.all(sessions), sum = k => res.reduce((a, r) => a + r[k], 0);
+    out[v] = { requests: sum('requests') / 40, renders: sum('renders') / 40, staleSessions: res.filter(r => r.stale > 0).length, finalWrong: res.filter(r => !r.finalOk).length, aborted: sum('aborted') };
+  }
+  $('codeSearch').textContent = `// B：防抖 + 取消 + 核对
+clearTimeout(timer);
+timer = setTimeout(async () => {
+  ctrl?.abort(); ctrl = new AbortController(); const my = ++reqId;
+  try { const r = await fetch(url(q), { signal: ctrl.signal }); if (my === reqId) render(r); }
+  catch (e) { if (e.name !== 'AbortError') showError(e); }
+}, 150);`;
+  $('tSearch').innerHTML = `<tr><th></th><th>每次输入平均发出请求</th><th>平均更新显示</th><th>旧请求的结果覆盖了新结果（40 次中）</th><th>最后停在错误结果上</th></tr>` + ['A', 'B'].map(v => { const o = out[v]; return `<tr><th>${v}</th><td class="num">${o.requests.toFixed(1)}</td><td class="num">${o.renders.toFixed(1)}</td><td class="num ${o.staleSessions ? 'poor' : 'good'}">${o.staleSessions}</td><td class="num ${o.finalWrong ? 'poor' : 'good'}">${o.finalWrong} 次</td></tr>`; }).join('') + `<tr><td colspan="5">“最后停在错误结果上”指输入框里是 graph，列表却显示 gra 之类的结果。B 一共取消了 ${out.B.aborted} 个请求。等待 150 毫秒会让结果晚一点出现：用加载状态告诉用户“正在搜索”。</td></tr>`;
+  return out;
+}
+// ---------- 2 组件销毁 ----------
+const AFTER = { A: { raf: 0, interval: 0, listener: 0, lateSetState: 0 }, B: { raf: 0, interval: 0, listener: 0, lateSetState: 0 } };   // 分开统计：A 留下的回调在测 B 时仍在运行
+function mount(variant) {
+  const el = document.createElement('div'), after = AFTER[variant]; $('host').append(el); let destroyed = false, rafId = 0;
+  const ctrl = new AbortController(), setState = s => { if (destroyed) after.lateSetState++; else el.textContent = s; };
+  const loop = () => { if (destroyed) after.raf++; el.style.opacity = String(0.5 + 0.5 * Math.sin(performance.now() / 200)); rafId = requestAnimationFrame(loop); };
+  rafId = requestAnimationFrame(loop);
+  const iv = setInterval(() => { if (destroyed) after.interval++; }, 20);
+  window.addEventListener('resize', () => { if (destroyed) after.listener++; }, variant === 'B' ? { signal: ctrl.signal } : undefined);
+  fakeFetch('data', 150, variant === 'B' ? { signal: ctrl.signal } : {}).then(r => setState(r.q), e => { if (e.name !== 'AbortError') throw e; });
+  let track = null; try { const cv = document.createElement('canvas'); cv.width = cv.height = 8; cv.getContext('2d').fillRect(0, 0, 8, 8); track = cv.captureStream(10).getVideoTracks()[0]; } catch (e) { track = null; }
+  return {
+    track,
+    destroy() {
+      destroyed = true; el.remove();
+      if (variant === 'B') { ctrl.abort(); cancelAnimationFrame(rafId); clearInterval(iv); track?.stop(); }
+    } };
+}
+async function lifecycleTest() {
+  const out = {};
+  for (const v of ['A', 'B']) {
+    const tracks = [];
+    for (let i = 0; i < 20; i++) { const c = mount(v); tracks.push(c.track); await sleep(50); c.destroy(); }
+    await sleep(300); for (let i = 0; i < 3; i++) window.dispatchEvent(new Event('resize')); await sleep(50);
+    out[v] = { ...AFTER[v], liveTracks: tracks.filter(t => t && t.readyState === 'live').length, tracksSupported: tracks.every(Boolean) };
+  }
+  $('codeLife').textContent = `// B：一个信号撤销所有监听与请求
+const ctrl = new AbortController();
+window.addEventListener('resize', onResize, { signal: ctrl.signal });
+fetch(url, { signal: ctrl.signal });
+destroy() { ctrl.abort(); cancelAnimationFrame(rafId); clearInterval(iv); track.stop(); }`;
+  const cell = n => `<td class="num ${n ? 'poor' : 'good'}">${n}</td>`;
+  $('tLife').innerHTML = `<tr><th></th><th>销毁后仍执行的动画帧</th><th>销毁后仍执行的轮询</th><th>销毁后仍响应的监听</th><th>销毁后才回来的请求去更新界面</th><th>仍在运行的视频轨道</th></tr>` + ['A', 'B'].map(v => { const o = out[v]; return `<tr><th>${v}</th>${cell(o.raf)}${cell(o.interval)}${cell(o.listener)}${cell(o.lateSetState)}<td class="num ${o.liveTracks ? 'poor' : 'good'}">${o.tracksSupported ? o.liveTracks + ' / 20' : '本环境不支持'}</td></tr>`; }).join('') + `<tr><td colspan="6">这些回调还引用着已经移出页面的元素，元素无法被回收；摄像头和麦克风的轨道不停止，指示灯会一直亮着。每启动一样东西，就在同一处写好对应的清理。</td></tr>`;
+  return out;
+}
+// ---------- 3 软件结构 ----------
+function layoutGridA(items, { columns, gap, width }) {   // 实验版本
+  const colW = (width - gap * (columns - 1)) / columns;
+  return items.map((it, i) => ({ x: (i % columns) * (colW + gap), y: Math.floor(i / columns) * (it.height + gap), w: colW, h: it.height }));
+}
+/**
+ * 把卡片排成等宽多列网格，每行高度取这一行最高的卡片。
+ * @param {Array<{height: number}>} items 不是数组时按空数组处理；缺少或无效的 height 按 0 处理
+ * @param {{columns?: number, gap?: number, width?: number}} opts
+ *   columns 取整并限制在 1–24，默认 1；gap 限制在 0–200，默认 16；width 限制在 0–100000，默认 0
+ * @returns {{positions: Array<{x: number, y: number, w: number, h: number}>, warnings: string[]}}
+ */
+function layoutGridB(items, opts = {}) {
+  const warnings = [];
+  const num = (v, def, name, min, max) => {   // 输入约束：只接受有限的数字（或能完整转换成数字的字符串）
+    const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+    if (!Number.isFinite(n)) { if (v !== undefined) warnings.push(`${name} 无效（${String(v)}），使用默认值 ${def}`); return def; }
+    if (n < min || n > max) warnings.push(`${name} 超出 ${min}–${max}，已限制`);
+    return Math.min(max, Math.max(min, n));
+  };
+  const o = opts && typeof opts === 'object' ? opts : (warnings.push('opts 不是对象'), {});
+  const columns = Math.round(num(o.columns, 1, 'columns', 1, 24)), width = num(o.width, 0, 'width', 0, 100000);
+  let gap = num(o.gap, 16, 'gap', 0, 200);
+  if (columns > 1 && gap * (columns - 1) > width) { gap = width / (columns - 1); warnings.push('间距总和超过宽度，已缩小间距'); }
+  if (!Array.isArray(items)) { warnings.push('items 不是数组'); items = []; }
+  const colW = Math.max(0, (width - gap * (columns - 1)) / columns), positions = []; let y = 0, rowH = 0;
+  items.forEach((it, i) => {
+    let h = 0; try { h = num(it?.height, 0, `items[${i}].height`, 0, 1e5); } catch (e) { warnings.push(`items[${i}] 读取失败`); }   // 异常处理：单项出错不影响整体
+    if (i % columns === 0 && i > 0) { y += rowH + gap; rowH = 0; }
+    positions.push({ x: (i % columns) * (colW + gap), y, w: colW, h }); rowH = Math.max(rowH, h);
+  });
+  return { positions, warnings };
+}
+// 必要检查：结果必须是有限的、非负的、不超出容器
+function checkLayout(pos, width) { const W = Number.isFinite(width) && width >= 0 ? width : Infinity; return Array.isArray(pos) && pos.every(p => [p.x, p.y, p.w, p.h].every(Number.isFinite) && p.w >= 0 && p.h >= 0 && p.x >= 0 && p.y >= 0 && p.x + p.w <= W + 1e-6 && p.y < 1e7); }
+function fuzzTest() {
+  const R = rng(55), pick = a => a[Math.floor(R() * a.length)], out = { A: { throws: 0, wrong: 0, ok: 0 }, B: { throws: 0, wrong: 0, ok: 0, warned: 0 } }, examples = {};
+  const itemsPool = [() => Array.from({ length: Math.floor(R() * 30) }, () => ({ height: 40 + Math.floor(R() * 80) })), () => [], () => null, () => 'abc', () => [{ height: 50 }, null, { height: 60 }], () => [{ height: '70' }, { height: 80 }], () => [{}, { height: -20 }]];
+  const colPool = [3, 4, 0, -2, 2.5, NaN, '4', undefined, 1e6], gapPool = [16, 8, -8, '10', NaN, undefined, Infinity], widthPool = [960, 640, 0, -100, NaN, '800', undefined, 1e9];
+  for (let k = 0; k < 500; k++) {
+    const items = pick(itemsPool)(), opts = { columns: pick(colPool), gap: pick(gapPool), width: pick(widthPool) }, W = Number(opts.width);
+    try { const p = layoutGridA(items, opts); if (checkLayout(p, W)) out.A.ok++; else { out.A.wrong++; examples.wrong ??= { opts, sample: p[1] ?? p[0] }; } } catch (e) { out.A.throws++; examples.throw ??= { opts, items: JSON.stringify(items)?.slice(0, 40), msg: e.message }; }
+    try { const r = layoutGridB(items, opts), Wb = Number.isFinite(W) ? Math.min(100000, Math.max(0, W)) : 0; if (checkLayout(r.positions, Wb)) out.B.ok++; else out.B.wrong++; if (r.warnings.length) out.B.warned++; } catch (e) { out.B.throws++; }
+  }
+  const fmt = o => JSON.stringify(o, (k, v) => typeof v === 'number' && !Number.isFinite(v) ? String(v) : v);
+  $('tFuzz').innerHTML = `<tr><th></th><th>直接报错</th><th>悄悄出错</th><th>结果合理</th><th>给出了警告</th></tr><tr><th>A 实验版本</th><td class="num poor">${out.A.throws}</td><td class="num poor">${out.A.wrong}</td><td class="num">${out.A.ok}</td><td class="num">—</td></tr><tr><th>B 组件版本</th><td class="num good">${out.B.throws}</td><td class="num good">${out.B.wrong}</td><td class="num">${out.B.ok}</td><td class="num">${out.B.warned}</td></tr>`;
+  $('tFuzzEx').innerHTML = `<tr><th>A 报错的例子</th><td><code>${fmt(examples.throw?.opts)}</code>，items = <code>${examples.throw?.items}</code> → ${examples.throw?.msg}</td></tr><tr><th>A 悄悄出错的例子</th><td><code>${fmt(examples.wrong?.opts)}</code> → <code>${fmt(examples.wrong?.sample)}</code></td></tr>`;
+  $('codeB').textContent = `/**
+ * 把卡片排成等宽多列网格，每行高度取这一行最高的卡片。
+ * @param {Array<{height: number}>} items 不是数组时按空数组处理
+ * @param {{columns?, gap?, width?}} opts columns 取整并限制在 1–24 …
+ * @returns {{positions, warnings: string[]}}
+ */
+function layoutGrid(items, opts = {}) {
+  const columns = Math.round(num(opts.columns, 1, 'columns', 1, 24));
+  if (!Array.isArray(items)) { warnings.push('items 不是数组'); items = []; }
+  items.forEach((it, i) => {
+    let h = 0; try { h = num(it?.height, 0, …); } catch { warnings.push(…); }
+    …
+  });
+  return { positions, warnings };
+}
+// 测试里：500 组随机输入，每组都过 checkLayout()`;
+  $('tFour').innerHTML = `<tr><th>补齐的内容</th><th>在 B 里的做法</th></tr><tr><th>输入约束</th><td>数字必须有限；字符串只在能完整转换时接受；超出范围就限制并记下警告</td></tr><tr><th>异常处理</th><td>单张卡片读取失败只影响这一张；不抛出错误，用 warnings 返回问题</td></tr><tr><th>文档</th><td>写清每个参数的类型、范围、默认值，以及无效输入会怎样处理</td></tr><tr><th>必要检查</th><td>checkLayout() 检查结果有限、非负、不超出容器；模糊测试每次修改后都跑一遍</td></tr>`;
+  return { ...out, examples };
+}
+window.__al = { run: async () => ({ search: await searchTest(), life: await lifecycleTest(), fuzz: fuzzTest() }) };
+</script>
+</body>
+</html>
