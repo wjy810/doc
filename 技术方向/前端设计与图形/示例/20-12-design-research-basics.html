@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>设计基础与研究基础：观察、比较、解释、修改，设计记录与研究计划</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.1/700.css">
+<style>
+  :root { --ink: #1d2330; --muted: #5b6475; --line: #dde1e7; --ok: #1f7a4d; --bad: #b3261e; --warn: #a15c00; --accent: #2f6fdb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #f4f4f1; color: var(--ink); font: 13px/1.6 "Noto Sans SC", system-ui, sans-serif; }
+  section.panel { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-width: 1140px; display: grid; gap: 8px; margin-bottom: 12px; }
+  h2 { font-size: 14px; margin: 0; } .sub { color: var(--muted); margin: 0; font-size: 12px; } .m { font-size: 12px; margin: 0; }
+  table.t { border-collapse: collapse; width: 100%; font-size: 11.5px; } table.t th, table.t td { border-bottom: 1px solid var(--line); padding: 2px 5px; text-align: left; vertical-align: top; } table.t th { color: var(--muted); font-weight: 400; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; } .good { color: var(--ok); } .poor { color: var(--bad); } .mid { color: var(--warn); }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .tag { font-size: 11px; color: var(--muted); margin: 0 0 2px; }
+  /* 待比较的两张卡片：内容完全相同 */
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: #fff; }
+  .cardA h3 { font-size: 15px; margin: 0 0 7px; } .cardA p { color: #9aa2b1; font-size: 13px; margin: 0 0 13px; width: 520px; max-width: 100%; } .cardA .btn { margin-top: 22px; }
+  .cardB h3 { font-size: 18px; margin: 0 0 8px; } .cardB p { color: #4b5563; font-size: 14px; margin: 0 0 16px; max-width: 30em; } .cardB .btn { margin-top: 24px; }
+  .btn { display: inline-block; font: inherit; font-size: 13px; padding: 4px 12px; border-radius: 6px; border: 1px solid #2f6fdb; color: #2f6fdb; background: #fff; }
+</style>
+</head>
+<body>
+<section class="panel">
+  <h2>1 观察、比较、解释、修改：同一张卡片的两个版本</h2>
+  <p class="sub">比较时固定内容：两张卡片的文字完全相同，只改字号、颜色、行长与间距。下表的数字都由脚本从页面上测量得到。</p>
+  <div class="two">
+    <div><p class="tag">原稿</p><div class="card cardA" id="cA"></div></div>
+    <div><p class="tag">修改稿</p><div class="card cardB" id="cB"></div></div>
+  </div>
+  <div class="two">
+    <div><table class="t" id="tMeasure"></table></div>
+    <div><table class="t" id="tObs"></table></div>
+  </div>
+</section>
+<section class="panel">
+  <div class="two">
+    <div><h2>2 设计记录：只留最后一张图，还是留下过程</h2><p class="sub">六周后评审提出 5 个问题。A 只保存了最终稿；B 保存了参考分析、草图、失败方案和最终取舍。检查器在记录里查找能回答每个问题的内容。记录内容为演示而构造。</p><table class="t" id="tRec"></table></div>
+    <div><h2>3 研究计划：问题、相关方法、基线、控制变量、限制</h2><p class="sub">同一个想法“新的加载动画更好”的两份研究计划。检查器逐项核对：问题的范围是否明确、是否找过相关方法、有没有基线、控制了哪些变量、测量能不能量化、是否写出限制。计划内容为演示而构造，没有真实参与者。</p><table class="t" id="tPlan"></table></div>
+  </div>
+</section>
+<script>
+const $ = id => document.getElementById(id);
+const CONTENT = { title: '周末去哪儿：城市公园里的五条步行路线', body: '从湖边的樱花步道到山顶的观景台，这五条路线都可以在两小时内走完，沿途有补水点和休息长椅。每条路线都标注了坡度、遮阴和适合推婴儿车的路段，出发前可以先看地图上的实时人流。', btn: '查看路线' };
+for (const id of ['cA', 'cB']) $(id).innerHTML = `<h3>${CONTENT.title}</h3><p>${CONTENT.body}</p><span class="btn">${CONTENT.btn}</span>`;
+// ---------- 1 测量 ----------
+const lum = c => { const [r, g, b] = c.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number).map(v => v / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+const contrast = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+function measureCard(card) {
+  const h = card.querySelector('h3'), p = card.querySelector('p'), btn = card.querySelector('.btn'), cs = el => getComputedStyle(el);
+  const range = document.createRange(); range.selectNodeContents(p); const lines = new Set([...range.getClientRects()].map(r => Math.round(r.top))).size;
+  const perLine = p.getBoundingClientRect().width   // 中文每个字约 1em 宽：整行能放下的字数
+     / parseFloat(cs(p).fontSize), gaps = [parseFloat(cs(h).marginBottom), parseFloat(cs(p).marginBottom), parseFloat(cs(btn).marginTop)];
+  return { title: parseFloat(cs(h).fontSize), body: parseFloat(cs(p).fontSize), perLine, lines, contrast: contrast(cs(p).color, cs(card).backgroundColor), gaps, onScale: gaps.every(g => g % 4 === 0) };
+}
+function observe() {
+  const A = measureCard($('cA')), B = measureCard($('cB')), same = $('cA').textContent === $('cB').textContent;
+  const row = (name, f, ok) => `<tr><th>${name}</th><td class="num ${ok(A) ? 'good' : 'poor'}">${f(A)}</td><td class="num ${ok(B) ? 'good' : 'poor'}">${f(B)}</td></tr>`;
+  $('tMeasure').innerHTML = `<tr><th>客观特征</th><th>原稿</th><th>修改稿</th></tr>` +
+    row('内容是否相同', () => same ? '相同' : '不同', () => same) +
+    row('标题／正文字号', o => `${o.title}／${o.body} 像素`, o => o.title / o.body >= 1.25) +
+    row('正文每行能放的字数', o => `约 ${o.perLine.toFixed(0)} 字（共 ${o.lines} 行）`, o => o.perLine <= 35) +
+    row('正文对比度', o => `${o.contrast.toFixed(2)} : 1`, o => o.contrast >= 4.5) +
+    row('三处间距', o => `${o.gaps.join('、')} 像素`, o => o.onScale) +
+    `<tr><td colspan="3">解释（把形式和任务联系起来）：卡片的任务是让人快速判断“值不值得点开”。原稿正文对比度低于 4.5 : 1，弱视力用户和户外强光下难以阅读；每行字数过多，视线换行时容易串行；间距没有规律，标题、正文、按钮的分组不清楚。</td></tr>`;
+  const OBS = ['正文颜色在白底上的对比度只有 2.6 : 1', '看起来不够高级', '正文每行约 40 个字', '排版有点乱', '三处间距是 7、13、22 像素，不是 4 的倍数', '修改后更舒服'];
+  const objective = s => /\d/.test(s) && /(像素|字|对比度|倍|行|%|:)/.test(s), vague = s => /(高级|乱|舒服|好看|大气|不错|奇怪)/.test(s);
+  $('tObs').innerHTML = `<tr><th>观察记录</th><th>检查器的判断</th></tr>` + OBS.map(s => { const o = objective(s), v = vague(s); return `<tr><td>${s}</td><td class="${o ? 'good' : v ? 'mid' : ''}">${o ? '客观特征：可以测量、可以复查' : v ? '主观评价：先改写成具体特征，例如“哪里乱”' : '未能判断'}</td></tr>`; }).join('') + `<tr><td colspan="2">修改时写明假设：“把对比度提高到 4.5 : 1 以上、每行控制在 35 字以内、间距统一为 4 的倍数，用户判断‘值不值得点开’会更快。”这是待验证的假设，验证方法见第 3 部分。</td></tr>`;
+  return { A, B, same, obs: OBS.map(s => ({ s, objective: objective(s), vague: vague(s) })) };
+}
+// ---------- 2 设计记录 ----------
+const RECORDS = {
+  A: { final: '卡片第 5 版（最终稿截图）' },
+  B: { final: '卡片第 5 版（最终稿截图）',
+    references: [{ source: '三款资讯类应用的卡片截图', analysis: '标题 17–18 像素；摘要两行截断；图片比例 16:9；参考了它们的分组方式' }],
+    sketches: ['纸面草图 6 张：单列、两列、三列网格、左图右文', '灰度线框 2 版'],
+    failed: [{ name: '深色背景版本', reason: '缩略图与背景对比不足，图片边界消失' }, { name: '三列网格', reason: '摘要在 280 像素宽时每行只有 12 字，频繁断行' }],
+    decisions: [{ choice: '两列网格', tradeoff: '一屏少显示 2 张卡片，换来摘要每行约 28 字' }, { choice: '标题 18 像素', tradeoff: '与正文 14 像素形成约 1.3 倍的层级；参考了资讯类应用' }] } };
+const QUESTIONS = [['为什么不用深色背景？', /深色/], ['为什么不是三列？', /三列/], ['参考了哪些产品？', /参考了/], ['标题字号是怎么定的？', /标题 1\d 像素/], ['有没有试过把按钮放在右上角？', /按钮|右上/]];
+function records() {
+  const out = {};
+  for (const [v, rec] of Object.entries(RECORDS)) { const text = JSON.stringify(rec); out[v] = QUESTIONS.map(([q, re]) => re.test(text)); }
+  $('tRec').innerHTML = `<tr><th>六周后的问题</th><th>A 只有最终稿</th><th>B 保留过程</th></tr>` + QUESTIONS.map(([q], i) => `<tr><td>${q}</td>${['A', 'B'].map(v => `<td class="${out[v][i] ? 'good' : 'poor'}">${out[v][i] ? '能回答' : '答不上'}</td>`).join('')}</tr>`).join('') + `<tr><th>合计</th>${['A', 'B'].map(v => `<td class="num">${out[v].filter(Boolean).length} / ${QUESTIONS.length}</td>`).join('')}</tr><tr><td colspan="3">B 也有答不上的问题：没试过的方案不会出现在记录里。失败方案和取舍是最常被追问的部分，写下“试过什么、为什么放弃、换来了什么”，以后改版时不必重复走弯路。</td></tr>`;
+  return out;
+}
+// ---------- 3 研究计划 ----------
+const PLANS = {
+  A: { question: '新的加载动画是否更好？', related: [], baseline: '', controls: [], measures: ['用户是否喜欢'], limits: '' },
+  B: { question: '在限速为 3G 的首页信息流加载时，骨架屏相比转圈图标，是否让参与者估计的等待时间更短，并减少加载完成前离开的比例？',
+    related: ['感知性能研究中对进度指示方式的比较', '公开的骨架屏与转圈图标对比报告'], baseline: '当前线上的转圈图标版本',
+    controls: ['相同的内容与网络限速', '同一型号的测试设备', '两种版本平衡呈现顺序'], measures: ['估计的等待时间（秒）', '加载完成前离开的比例'],
+    limits: '只覆盖首页信息流与 3G 限速；参与者招募计划尚未执行（未填写）；结论不推广到其他页面' } };
+const CHECKS = [
+  ['问题的范围', p => p.question.length >= 20 && /(在|时|相比)/.test(p.question), '写明场景、对象和比较的两方'],
+  ['相关方法', p => p.related.length >= 1, '先找已有的研究和做法'],
+  ['基线', p => p.baseline.trim() !== '', '和谁比：通常是当前版本或公认做法'],
+  ['控制变量', p => p.controls.length >= 2, '除了要比较的因素，其余保持一致'],
+  ['可量化的测量', p => p.measures.length > 0 && p.measures.every(m => /(比例|时间|次数|秒|分|率)/.test(m)), '“喜欢”要改写成可以记录的指标'],
+  ['报告限制', p => p.limits.trim() !== '', '写出没有覆盖的人群、场景与条件']];
+function plans() {
+  const out = {};
+  for (const [v, p] of Object.entries(PLANS)) out[v] = CHECKS.map(([, f]) => f(p));
+  $('tPlan').innerHTML = `<tr><th>检查项</th><th>A：“新的加载动画是否更好？”</th><th>B：范围明确的计划</th><th>要求</th></tr>` + CHECKS.map(([n, , need], i) => `<tr><th>${n}</th>${['A', 'B'].map(v => `<td class="${out[v][i] ? 'good' : 'poor'}">${out[v][i] ? '通过' : '缺少'}</td>`).join('')}<td>${need}</td></tr>`).join('') + `<tr><td colspan="4">B 的问题：${PLANS.B.question}</td></tr><tr><td colspan="4">结论分开写：“我觉得骨架屏更好看”（个人判断）、“参与者估计的等待时间平均短 X 秒”（任务表现）、“差别的 95% 置信区间不含 0”（统计推断）。本册第 08 章的示例 20-08 演示了这三种说法。</td></tr>`;
+  return out;
+}
+window.__db = { run: () => ({ observe: observe(), records: records(), plans: plans() }) };
+</script>
+</body>
+</html>
